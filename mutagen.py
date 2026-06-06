@@ -88,26 +88,29 @@ def ai_analyze_code(source_code: str, api_key: str) -> list[dict]:
     prompt = f"""You are an expert defensive security researcher conducting a code audit.
 Your job is to analyze the following C source code for potential vulnerabilities
 such as buffer overflows, format string bugs, integer overflows, use-after-free,
-off-by-one errors, and command injection.
+off-by-one errors, double-free, heap overflows, and command injection.
 
-For each vulnerability you find, generate a specific test payload (input string)
-that would trigger the bug when passed as a command-line argument to the compiled program.
+For each vulnerability you find, generate a specific test payload that would
+trigger the bug when passed as command-line arguments to the compiled program.
 
 SOURCE CODE:
 ```c
 {source_code}
 ```
 
-IMPORTANT: Respond ONLY with a valid JSON array. Each element must have:
-- "payload": the exact input string to test (represent long strings using Python-style repetition like 'A'*100, or just write the literal string)
-- "vuln_type": the type of vulnerability (e.g., "buffer_overflow", "format_string")
-- "reason": a brief explanation of why this payload triggers the bug
-- "severity": "critical", "high", "medium", or "low"
+IMPORTANT RULES:
+1. Respond ONLY with a valid JSON array. No markdown, no explanation outside JSON.
+2. Each element must have these fields:
+   - "args": an array of strings, one per command-line argument (e.g. ["AAAA...", "delete"])
+   - "vuln_type": the vulnerability type (e.g. "buffer_overflow", "format_string", "integer_overflow", "use_after_free")
+   - "reason": brief explanation of why this triggers the bug
+   - "severity": "critical", "high", "medium", or "low"
+   - "cwe": the CWE ID if known (e.g. "CWE-120")
+3. For long repeated strings, write them out literally (e.g. "AAAAAAAAAA" not "A"*10).
+4. Generate 10-20 diverse payloads ranging from safe inputs to crash-inducing.
+5. Study the main() function to see how many arguments the program expects.
 
-Generate between 10 and 20 diverse test payloads, ranging from simple to complex.
-Focus on payloads that would cause crashes (segmentation faults, access violations).
-
-Respond with ONLY the JSON array, no markdown, no explanation outside the JSON."""
+Respond with ONLY the JSON array."""
 
     # --- CALLING THE AI --------------------------------------------------
     # We try multiple models in case one hits rate limits.
@@ -248,13 +251,13 @@ def compile_target(source_path: str, gcc_path: str) -> str:
     return output_path
 
 
-def execute_payload(exe_path: str, payload: str) -> dict:
+def execute_payload(exe_path: str, args: list[str]) -> dict:
     """
-    Run the target program with a single payload and check if it crashes.
+    Run the target program with the given arguments and check if it crashes.
 
     WHAT THIS DOES:
     - Launches the compiled program as a child process
-    - Passes the payload as a command-line argument
+    - Passes args as command-line arguments (supports multi-arg targets!)
     - Waits up to 5 seconds for it to finish (timeout = hung process)
     - Checks the return code:
         * Return code 0 = program ran fine (no crash)
@@ -263,7 +266,7 @@ def execute_payload(exe_path: str, payload: str) -> dict:
     """
     try:
         result = subprocess.run(
-            [exe_path, payload],
+            [exe_path] + args,
             capture_output=True,
             text=True,
             timeout=5  # Kill if it hangs for more than 5 seconds
@@ -278,9 +281,11 @@ def execute_payload(exe_path: str, payload: str) -> dict:
         if result.returncode != 0:
             crashed = True
             if result.returncode == -1073741819 or result.returncode == 3221225477:
-                crash_type = "ACCESS_VIOLATION (Buffer Overflow!)"
+                crash_type = "ACCESS_VIOLATION (Memory Corruption!)"
             elif result.returncode == -1073741676:
                 crash_type = "STACK_OVERFLOW"
+            elif result.returncode == -1073741571:
+                crash_type = "STACK_BUFFER_OVERRUN"
             elif result.returncode < 0:
                 crash_type = f"SIGNAL_{abs(result.returncode)}"
             else:
@@ -316,21 +321,106 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int):
     os.makedirs("crashes", exist_ok=True)
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"crashes/crash_report_{target_name}_{timestamp}.json"
+    json_file = f"crashes/crash_report_{target_name}_{timestamp}.json"
 
     report = {
-        "tool": "Mutagen v1.0",
+        "tool": "Mutagen v2.0",
         "target": target_name,
         "timestamp": timestamp,
         "total_payloads_tested": total_tested,
         "total_crashes_found": len(crashes),
+        "crash_rate": f"{(len(crashes)/total_tested*100):.1f}%" if total_tested else "0%",
+        "unique_vuln_types": list(set(c.get("vuln_type", "") for c in crashes)),
+        "unique_cwes": list(set(c.get("cwe", "") for c in crashes if c.get("cwe"))),
         "crashes": crashes,
     }
 
-    with open(filename, "w") as f:
+    with open(json_file, "w") as f:
         json.dump(report, f, indent=2)
 
-    return filename
+    # --- HTML REPORT ---------------------------------------------------
+    # Generate a beautiful HTML report that can be opened in a browser.
+    # This is WAY more impressive than raw JSON when showing people.
+    html_file = f"crashes/report_{target_name}_{timestamp}.html"
+    
+    crash_rows = ""
+    for i, c in enumerate(crashes):
+        args_display = ", ".join(c.get("args", [c.get("payload", "N/A")]))
+        if len(args_display) > 60:
+            args_display = args_display[:57] + "..."
+        severity = c.get("severity", "unknown")
+        sev_class = severity if severity in ("critical", "high", "medium", "low") else "low"
+        crash_rows += f"""
+        <tr>
+            <td>{i+1}</td>
+            <td><span class="badge {sev_class}">{severity.upper()}</span></td>
+            <td>{c.get("vuln_type", "unknown")}</td>
+            <td>{c.get("cwe", "N/A")}</td>
+            <td><code>{args_display}</code></td>
+            <td>{c.get("crash_type", "")}</td>
+            <td class="reason">{c.get("reason", "")}</td>
+        </tr>"""
+
+    crash_rate = (len(crashes)/total_tested*100) if total_tested else 0
+    vuln_types = list(set(c.get("vuln_type", "") for c in crashes))
+    
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mutagen Report: {target_name}</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: #0a0a0f; color: #e0e0e0; padding: 2rem; }}
+  .header {{ text-align: center; margin-bottom: 2rem; }}
+  .header h1 {{ font-size: 2.5rem; background: linear-gradient(135deg, #00ff88, #00ccff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
+  .header .subtitle {{ color: #888; margin-top: 0.5rem; }}
+  .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }}
+  .stat-card {{ background: #12121a; border: 1px solid #222; border-radius: 12px; padding: 1.5rem; text-align: center; }}
+  .stat-card .value {{ font-size: 2rem; font-weight: 700; }}
+  .stat-card .label {{ color: #888; font-size: 0.85rem; margin-top: 0.3rem; }}
+  .stat-card.danger .value {{ color: #ff4444; }}
+  .stat-card.success .value {{ color: #00ff88; }}
+  .stat-card.info .value {{ color: #00ccff; }}
+  .stat-card.warn .value {{ color: #ffaa00; }}
+  table {{ width: 100%; border-collapse: collapse; background: #12121a; border-radius: 12px; overflow: hidden; }}
+  th {{ background: #1a1a2e; padding: 1rem; text-align: left; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: #00ccff; }}
+  td {{ padding: 0.8rem 1rem; border-bottom: 1px solid #1a1a2e; font-size: 0.9rem; }}
+  tr:hover {{ background: #1a1a2e; }}
+  code {{ background: #1a1a2e; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem; color: #00ff88; word-break: break-all; }}
+  .badge {{ padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }}
+  .badge.critical {{ background: #ff444433; color: #ff4444; }}
+  .badge.high {{ background: #ff884433; color: #ff8844; }}
+  .badge.medium {{ background: #ffaa0033; color: #ffaa00; }}
+  .badge.low {{ background: #00ff8833; color: #00ff88; }}
+  .reason {{ max-width: 300px; font-size: 0.85rem; color: #aaa; }}
+  .footer {{ text-align: center; margin-top: 2rem; color: #444; font-size: 0.8rem; }}
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>MUTAGEN</h1>
+    <p class="subtitle">AI-Powered Zero-Day Fuzzer — Crash Report</p>
+    <p class="subtitle">Target: <strong>{target_name}.c</strong> | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+  </div>
+  <div class="stats">
+    <div class="stat-card info"><div class="value">{total_tested}</div><div class="label">Payloads Tested</div></div>
+    <div class="stat-card danger"><div class="value">{len(crashes)}</div><div class="label">Crashes Found</div></div>
+    <div class="stat-card warn"><div class="value">{crash_rate:.0f}%</div><div class="label">Crash Rate</div></div>
+    <div class="stat-card success"><div class="value">{len(vuln_types)}</div><div class="label">Vuln Types</div></div>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>Severity</th><th>Vuln Type</th><th>CWE</th><th>Payload</th><th>Crash Type</th><th>Reason</th></tr></thead>
+    <tbody>{crash_rows}</tbody>
+  </table>
+  <div class="footer">Generated by Mutagen v2.0 — Built by Aaron Alva</div>
+</body>
+</html>"""
+
+    with open(html_file, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    return json_file, html_file
 
 
 # ================================================================
@@ -348,7 +438,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str):
         " | |  | | |_| | | |/ ___ \\ |_| | |___| |\\  |",
         " |_|  |_|\\___/  |_/_/   \\_\\____|_____|_| \\_|",
         "",
-        " AI-Powered Zero-Day Fuzzer v1.0",
+        " AI-Powered Zero-Day Fuzzer v2.0",
         " by Aaron Alva",
     ]
     banner = Text()
@@ -396,9 +486,10 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str):
     vuln_table = Table(title="AI Vulnerability Analysis", box=box.ROUNDED, border_style="cyan")
     vuln_table.add_column("#", style="dim", width=4)
     vuln_table.add_column("Type", style="yellow")
+    vuln_table.add_column("CWE", style="magenta", width=10)
     vuln_table.add_column("Severity", style="red")
-    vuln_table.add_column("Payload Preview", style="green", max_width=40)
-    vuln_table.add_column("Reason", style="dim", max_width=35)
+    vuln_table.add_column("Args Preview", style="green", max_width=35)
+    vuln_table.add_column("Reason", style="dim", max_width=30)
 
     for i, p in enumerate(payloads):
         severity = p.get("severity", "unknown")
@@ -410,16 +501,21 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str):
         }
         sev_style = sev_colors.get(severity, "[dim]")
 
-        preview = p.get("payload", "")[:38]
-        if len(p.get("payload", "")) > 38:
-            preview += "..."
+        # Support both old "payload" format and new "args" format
+        args = p.get("args", [p.get("payload", "")])
+        if isinstance(args, str):
+            args = [args]
+        preview = " | ".join(str(a)[:15] for a in args)
+        if len(preview) > 33:
+            preview = preview[:30] + "..."
 
         vuln_table.add_row(
             str(i + 1),
             p.get("vuln_type", "unknown"),
+            p.get("cwe", "N/A"),
             f"{sev_style}{severity}",
             preview,
-            p.get("reason", "")[:33],
+            p.get("reason", "")[:28],
         )
 
     console.print(vuln_table)
@@ -447,25 +543,25 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str):
     results_table = Table(title="Fuzzing Results", box=box.ROUNDED, border_style="green")
     results_table.add_column("#", style="dim", width=4)
     results_table.add_column("Status", width=12)
-    results_table.add_column("Payload", style="cyan", max_width=35)
+    results_table.add_column("Arguments", style="cyan", max_width=35)
     results_table.add_column("Crash Type", style="red", max_width=30)
     results_table.add_column("Return Code", style="yellow", width=12)
 
     for i, p in enumerate(payloads):
-        payload_str = p.get("payload", "")
+        # Support both old "payload" and new "args" format
+        args = p.get("args", [p.get("payload", "")])
+        if isinstance(args, str):
+            args = [args]
+        
+        # Ensure all args are strings
+        args = [str(a) for a in args]
 
-        # Process hex escape sequences in the payload
-        try:
-            payload_str = payload_str.encode().decode('unicode_escape')
-        except Exception:
-            pass  # Keep the original string if decoding fails
-
-        result = execute_payload(exe_path, payload_str)
+        result = execute_payload(exe_path, args)
 
         status = "[bold red]CRASH!!" if result["crashed"] else "[green]OK"
-        preview = payload_str[:33]
-        if len(payload_str) > 33:
-            preview += "..."
+        preview = " | ".join(a[:15] for a in args)
+        if len(preview) > 33:
+            preview = preview[:30] + "..."
 
         results_table.add_row(
             str(i + 1),
@@ -477,8 +573,10 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str):
 
         if result["crashed"]:
             crashes.append({
-                "payload": p.get("payload", ""),
+                "args": args,
+                "payload": " ".join(args),  # for backward compat
                 "vuln_type": p.get("vuln_type", ""),
+                "cwe": p.get("cwe", ""),
                 "reason": p.get("reason", ""),
                 "severity": p.get("severity", ""),
                 "crash_type": result["crash_type"],
@@ -492,16 +590,20 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str):
 
     # --- STEP 5: REPORT --------------------------------------------------
     target_name = os.path.basename(source_path).replace(".c", "")
+    crash_rate = (len(crashes)/len(payloads)*100) if payloads else 0
 
     if crashes:
-        report_file = save_crash_report(crashes, target_name, len(payloads))
+        json_file, html_file = save_crash_report(crashes, target_name, len(payloads))
 
         summary = Panel(
             f"[bold green]FUZZING COMPLETE[/bold green]\n\n"
             f"  Payloads tested:  [cyan]{len(payloads)}[/cyan]\n"
             f"  Crashes found:    [bold red]{len(crashes)}[/bold red]\n"
-            f"  Report saved to:  [yellow]{report_file}[/yellow]\n\n"
-            f"  [dim]Each crash represents a potential zero-day vulnerability.[/dim]",
+            f"  Crash rate:       [yellow]{crash_rate:.0f}%[/yellow]\n"
+            f"  Vuln types:       [magenta]{', '.join(set(c['vuln_type'] for c in crashes))}[/magenta]\n"
+            f"  JSON report:      [dim]{json_file}[/dim]\n"
+            f"  HTML report:      [yellow]{html_file}[/yellow]\n\n"
+            f"  [dim]Open the HTML report in your browser for a visual breakdown![/dim]",
             title="[bold green]** RESULTS **[/bold green]",
             border_style="green",
             box=box.HEAVY,
