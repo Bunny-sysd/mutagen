@@ -103,6 +103,34 @@ def execute_payload(exe_path: str, args: list[str], input_data: str, delivery_mo
                 crashed = False
                 crash_type = "none"
 
+        # --- ORACLE DETECTION -----------------------------------------------
+        # Even if the program didn't physically crash, scan console outputs
+        # for signatures indicating a successful logical exploit/bypass.
+        if not crashed:
+            stdout_lower = (result.stdout or "").lower()
+            stderr_lower = (result.stderr or "").lower()
+            
+            logical_indicators = [
+                "access granted",
+                "privileges acquired",
+                "admin privileges",
+                "flag{",
+                "root:",
+                "uid=0",
+                "systeminfo",
+                "cmd.exe",
+                "/bin/sh",
+                "vuln_triggered",
+                "exploit_success",
+                "authenticated as admin"
+            ]
+            
+            for indicator in logical_indicators:
+                if indicator in stdout_lower or indicator in stderr_lower:
+                    crashed = True
+                    crash_type = f"LOGICAL_EXPLOIT (Matched signature: '{indicator}')"
+                    break
+
         return {
             "crashed": crashed,
             "crash_type": crash_type,

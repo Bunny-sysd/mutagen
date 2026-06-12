@@ -37,20 +37,23 @@ class OllamaEngine(BaseEngine):
             console.print(f"[red]Ollama connection failed: {e}[/red]")
             return ""
 
-    def analyze_code(self, source_code: str, max_payloads: int, debug: bool) -> list[dict]:
-        prompt = f"""Analyze this C source code for vulnerabilities and return a JSON list of fuzzing payloads.
+    def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool) -> list[dict]:
+        prompt = f"""Analyze this C source code for potential vulnerabilities (buffer overflows, format string bugs, integer overflows, use-after-free, etc.).
+The target program receives input via: {delivery_mode}.
+
 SOURCE CODE:
 {source_code}
 
 Format output as a JSON array of objects.
 Each object must have these fields:
-- "args": array of strings (arguments)
+- "args": array of strings (used if delivery mode is 'args')
+- "input_data": string containing raw input data (used if delivery mode is 'stdin' or 'tcp')
 - "vuln_type": string (vulnerability type)
 - "reason": string (explanation)
 - "severity": "critical", "high", "medium", or "low"
 - "cwe": string (CWE ID)
 
-Generate up to {max_payloads} payloads. Study main() for argument count."""
+Generate up to {max_payloads} payloads. Study main() for how input is read."""
         raw = self._generate(prompt, format_json=True)
         if debug:
             with open("mutagen_debug.log", "a", encoding="utf-8") as f:
@@ -71,16 +74,18 @@ Generate up to {max_payloads} payloads. Study main() for argument count."""
                 console.print(f"[red]Failed to parse Ollama JSON: {raw[:300]}[/red]")
                 return []
 
-    def refine_payload(self, source_code: str, failed_args: list[str], stdout: str, stderr: str, return_code: int) -> list[dict]:
-        prompt = f"""We are fuzzing this C code:
+    def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str) -> list[dict]:
+        prompt = f"""We are fuzzing this C code where input is delivered via {delivery_mode}:
 {source_code}
 
-The payload {failed_args} did not crash the program.
-Exit code was {return_code}.
-Stdout: {stdout}
-Stderr: {stderr}
+Previous attempt details:
+- Args: {failed_args}
+- Input data: {failed_input}
+- Exit code was: {return_code}
+- Stdout: {stdout}
+- Stderr: {stderr}
 
-Generate 2-3 refined payloads in a JSON list to bypass the validation or cause a crash."""
+Generate 2-3 refined payloads in a JSON list (containing both "args" and "input_data" fields) to bypass validation or cause a crash."""
         raw = self._generate(prompt, format_json=True)
         try:
             return json.loads(raw)
@@ -104,11 +109,15 @@ Return only the updated C source code file. Do not include markdown blocks, expl
             text = text[:-3]
         return text.strip()
 
-    def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, debug: bool = False) -> str:
-        prompt = f"""Write a Python 3 regression test script that calls '{exe_path}' with args {crash_data.get("args")} to reproduce the crash.
-C source code:
+    def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
+        prompt = f"""Write a standalone Python 3 script reproducing the crash in '{exe_path}' where input delivery is via '{delivery_mode}'.
+C Code:
 {source_code}
 
+Crash args: {crash_data.get("args")}
+Crash input data: {crash_data.get("input_data")}
+
+The Python script must accept an optional target executable path command-line argument (sys.argv[1]), defaulting to '{exe_path}', and execute it appropriately using subprocess or socket.
 Return only the Python script code. No markdown blocks, explanations, or backticks."""
         text = self._generate(prompt)
         if text.startswith("```python"):

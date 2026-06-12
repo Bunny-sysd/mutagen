@@ -10,7 +10,7 @@ from rich.text import Text
 from rich import box
 
 from mutagen.engines import get_engine
-from mutagen.compiler import compile_target
+from mutagen.compiler import compile_target, CompilationError
 from mutagen.executor import execute_payload
 from mutagen.reporter import save_crash_report
 
@@ -124,7 +124,12 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         border_style="cyan"
     ))
 
-    exe_path = compile_target(source_path, gcc_path)
+    try:
+        exe_path = compile_target(source_path, gcc_path)
+    except CompilationError as e:
+        console.print(f"[bold red]X Initial compilation failed![/bold red]\n{e}")
+        sys.exit(1)
+        
     console.print(f"[green]>> Compiled to: {exe_path}[/green]")
     console.print()
 
@@ -271,22 +276,25 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 border_style="cyan"
             ))
             
-            patched_exe = compile_target(patch_file, gcc_path)
-            console.print(f"[green]>> Compiled patched target: {patched_exe}[/green]")
-            
-            with Progress(
-                SpinnerColumn(style="cyan"),
-                TextColumn("[cyan]Firing exploit at patched target..."),
-                console=console,
-            ) as progress:
-                task = progress.add_task("", total=None)
-                verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout)
+            try:
+                patched_exe = compile_target(patch_file, gcc_path)
+                console.print(f"[green]>> Compiled patched target: {patched_exe}[/green]")
                 
-            if verify_result["crashed"]:
-                console.print(f"[bold red]X PATCH FAILED![/bold red] The patched program still crashed: {verify_result['crash_type']}\n")
-            else:
-                patch_verified = True
-                console.print("[bold green][+] PATCH VERIFIED SUCCESSFUL![/bold green] The exploit no longer crashes the target.\n")
+                with Progress(
+                    SpinnerColumn(style="cyan"),
+                    TextColumn("[cyan]Firing exploit at patched target..."),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task("", total=None)
+                    verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout)
+                    
+                if verify_result["crashed"]:
+                    console.print(f"[bold red]X PATCH FAILED![/bold red] The patched program still crashed: {verify_result['crash_type']}\n")
+                else:
+                    patch_verified = True
+                    console.print("[bold green][+] PATCH VERIFIED SUCCESSFUL![/bold green] The exploit no longer crashes the target.\n")
+            except CompilationError as e:
+                console.print(f"[bold red]X PATCH COMPILATION FAILED![/bold red] The patched C code contains compiler errors:\n{e}\n")
 
         verification_text = f"  Verification:     [bold green]VERIFIED SECURE[/bold green]\n" if patch_verified else (f"  Verification:     [bold red]FAILED[/bold red]\n" if patch_file else "")
 
