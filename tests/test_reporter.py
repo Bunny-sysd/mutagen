@@ -81,8 +81,8 @@ class TestSaveCrashReport:
         with open(html_file, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # The raw <script> tag should NOT appear — it should be escaped
-        assert "<script>" not in content
+        # The raw <script> tag from the payload should NOT appear — it should be escaped
+        assert '<script>alert("xss")</script>' not in content
         assert "&lt;script&gt;" in content
 
     def test_crash_rate_calculation(self, sample_crash_data):

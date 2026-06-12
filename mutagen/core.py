@@ -220,8 +220,6 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     crash_rate = (len(crashes)/len(payloads)*100) if payloads else 0
 
     if crashes:
-        json_file, html_file = save_crash_report(crashes, target_name, len(payloads))
-
         # --- AUTO-PATCH & AEG GENERATION -------------------------------------
         console.print(Panel(
             "[bold cyan]PHASE 4: AUTO-PATCH & EXPLOIT GENERATION[/bold cyan]\n"
@@ -231,6 +229,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         
         patch_file = ""
         exploit_file = ""
+        patch_code = ""
+        exploit_code = ""
         with Progress(
             SpinnerColumn(style="cyan"),
             TextColumn("[cyan]{task.description}"),
@@ -263,6 +263,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             console.print(f"[green]>> Python exploit saved to: {exploit_file}[/green]\n")
         else:
             console.print("[red]X Failed to generate exploit.[/red]\n")
+
+        json_file, html_file = save_crash_report(crashes, target_name, len(payloads), patch_code, exploit_code)
 
         patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""
         exploit_text = f"  Exploit generated:[magenta]{exploit_file}[/magenta]\n" if exploit_file else ""
