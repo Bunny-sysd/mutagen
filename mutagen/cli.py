@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Enable debug logging to mutagen_debug.log")
     parser.add_argument("--provider", default="gemini", choices=["gemini", "openai", "ollama"], help="LLM Provider (default: gemini)")
     parser.add_argument("--model", default="", help="Specific model to use")
+    parser.add_argument("--delivery", default="args", help="Delivery mode: args, stdin, tcp:<port> (default: args)")
     
     args = parser.parse_args()
 
@@ -90,7 +91,8 @@ def main():
         timeout=args.timeout, 
         debug=args.debug,
         provider=args.provider,
-        model=args.model
+        model=args.model,
+        delivery_mode=args.delivery
     )
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ from mutagen.reporter import save_crash_report
 
 console = Console(force_terminal=True, force_jupyter=False)
 
-def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = ""):
+def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args"):
     """Main fuzzer orchestration function."""
     engine = get_engine(provider, api_key, model, debug, console)
 
@@ -52,7 +52,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
     # --- STEP 2: AI ANALYSIS ---------------------------------------------
     console.print(Panel(
-        "[bold cyan]PHASE 1: AI CODE ANALYSIS[/bold cyan]\n"
+        f"[bold cyan]PHASE 1: AI CODE ANALYSIS ({delivery_mode.upper()} mode)[/bold cyan]\n"
         "[dim]Sending source code to for vulnerability analysis...[/dim]",
         border_style="cyan"
     ))
@@ -63,7 +63,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         console=console,
     ) as progress:
         task = progress.add_task("", total=None)
-        payloads = engine.analyze_code(source_code, max_payloads, debug)
+        payloads = engine.analyze_code(source_code, max_payloads, delivery_mode, debug)
 
     if not payloads:
         console.print("[red]X AI returned no payloads. Check your API key.[/red]")
@@ -78,7 +78,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     vuln_table.add_column("Type", style="yellow")
     vuln_table.add_column("CWE", style="magenta", width=10)
     vuln_table.add_column("Severity", style="red")
-    vuln_table.add_column("Args Preview", style="green", max_width=35)
+    vuln_table.add_column("Payload Preview", style="green", max_width=35)
     vuln_table.add_column("Reason", style="dim", max_width=30)
 
     for i, p in enumerate(payloads):
@@ -93,9 +93,15 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         # Support both old "payload" format and new "args" format
         args = p.get("args", [p.get("payload", "")])
+        input_data = p.get("input_data", "")
         if isinstance(args, str):
             args = [args]
-        preview = " | ".join(str(a)[:15] for a in args)
+        
+        if delivery_mode == "args":
+            preview = " | ".join(str(a)[:15] for a in args)
+        else:
+            preview = str(input_data)[:30].replace("\n", "\\n")
+
         if len(preview) > 33:
             preview = preview[:30] + "..."
 
@@ -133,7 +139,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     results_table = Table(title="Fuzzing Results", box=box.ROUNDED, border_style="green")
     results_table.add_column("#", style="dim", width=4)
     results_table.add_column("Status", width=12)
-    results_table.add_column("Arguments", style="cyan", max_width=35)
+    results_table.add_column("Payload Preview", style="cyan", max_width=35)
     results_table.add_column("Crash Type", style="red", max_width=30)
     results_table.add_column("Return Code", style="yellow", width=12)
 
@@ -147,18 +153,22 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 break
                 
             for p in current_payloads:
-                # Support both old "payload" and new "args" format
-                args = p.get("args", [p.get("payload", "")])
+                args = p.get("args", [])
+                input_data = p.get("input_data", "")
+                
                 if isinstance(args, str):
                     args = [args]
-                
-                # Ensure all args are strings
                 args = [str(a) for a in args]
 
-                result = execute_payload(exe_path, args, timeout)
+                result = execute_payload(exe_path, args, input_data, delivery_mode, timeout)
 
                 status = "[bold red]CRASH!!" if result["crashed"] else "[green]OK"
-                preview = " | ".join(a[:15] for a in args)
+                
+                if delivery_mode == "args":
+                    preview = " | ".join(a[:15] for a in args)
+                else:
+                    preview = str(input_data)[:30].replace("\n", "\\n")
+                    
                 if len(preview) > 33:
                     preview = preview[:30] + "..."
 
@@ -174,7 +184,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 if result["crashed"]:
                     crashes.append({
                         "args": args,
-                        "payload": " ".join(args),  # for backward compat
+                        "input_data": input_data,
+                        "payload": input_data if input_data else " ".join(args),
                         "vuln_type": p.get("vuln_type", ""),
                         "cwe": p.get("cwe", ""),
                         "reason": p.get("reason", ""),
@@ -191,7 +202,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             if not payload_crashed and retry_attempt < max_retries:
                 # Agentic Retry
                 console.print(f"[yellow]  ↳ Payload {i+1} failed. Agentic Retry {retry_attempt+1}/{max_retries} initializing...[/yellow]")
-                current_payloads = engine.refine_payload(source_code, args, result["stdout"], result["stderr"], result["return_code"])
+                current_payloads = engine.refine_payload(source_code, args, input_data, result["stdout"], result["stderr"], result["return_code"], delivery_mode)
                 if not current_payloads:
                     console.print("[dim]    (No refined payloads returned, skipping retry)[/dim]")
                     break
@@ -230,7 +241,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     f.write(patch_code)
                     
             progress.update(task, description="[magenta]AI writing Python exploit script...")
-            exploit_code = engine.generate_exploit(source_code, crashes[0], exe_path, debug)
+            exploit_code = engine.generate_exploit(source_code, crashes[0], exe_path, delivery_mode, debug)
             
             if exploit_code:
                 os.makedirs("exploits", exist_ok=True)
@@ -269,7 +280,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 console=console,
             ) as progress:
                 task = progress.add_task("", total=None)
-                verify_result = execute_payload(patched_exe, crashes[0]["args"], timeout)
+                verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout)
                 
             if verify_result["crashed"]:
                 console.print(f"[bold red]X PATCH FAILED![/bold red] The patched program still crashed: {verify_result['crash_type']}\n")

@@ -1,13 +1,13 @@
 import subprocess
 import os
 
-def execute_payload(exe_path: str, args: list[str], timeout: int) -> dict:
+def execute_payload(exe_path: str, args: list[str], input_data: str, delivery_mode: str, timeout: int) -> dict:
     """
     Run the target program with the given arguments and check if it crashes.
 
     WHAT THIS DOES:
     - Launches the compiled program as a child process
-    - Passes args as command-line arguments (supports multi-arg targets!)
+    - Passes args as command-line arguments (for args mode) or pipes input (for stdin/tcp mode)
     - Waits up to timeout seconds for it to finish (timeout = hung process)
     - Checks the return code:
         * Return code 0 = program ran fine (no crash)
@@ -16,12 +16,50 @@ def execute_payload(exe_path: str, args: list[str], timeout: int) -> dict:
     """
     try:
         try:
-            result = subprocess.run(
-                [exe_path] + args,
-                capture_output=True,
-                text=True,
-                timeout=timeout  # Kill if it hangs
-            )
+            if delivery_mode == "args":
+                result = subprocess.run(
+                    [exe_path] + args,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout  # Kill if it hangs
+                )
+            elif delivery_mode == "stdin":
+                result = subprocess.run(
+                    [exe_path],
+                    input=input_data,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout
+                )
+            elif delivery_mode.startswith("tcp:"):
+                port = int(delivery_mode.split(":")[1])
+                import socket
+                import time
+                process = subprocess.Popen(
+                    [exe_path],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                time.sleep(0.5) # Wait for server to start
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    # Use standard loopback address safely
+                    sock.connect(("127.0.0.1", port))
+                    sock.sendall(input_data.encode("utf-8"))
+                    sock.close()
+                except Exception:
+                    pass # Might fail if process died immediately
+                
+                try:
+                    stdout, stderr = process.communicate(timeout=timeout)
+                    result = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    stdout, stderr = process.communicate()
+                    raise subprocess.TimeoutExpired(process.args, timeout, output=stdout, stderr=stderr)
+            else:
+                raise ValueError(f"Unknown delivery mode: {delivery_mode}")
         except OSError as e:
             return {
                 "crashed": False,
