@@ -78,6 +78,15 @@ int main(int argc, char *argv[]) {
         // Free the session
         delete_session(session);
         
+        // --- Added for demonstration: The "Heap Spray" ---
+        // In a real UAF exploit, the attacker triggers an allocation of the 
+        // same size immediately after the free to overwrite the freed memory.
+        char *malicious_allocation = (char *)malloc(sizeof(Session));
+        if (malicious_allocation) {
+            memset(malicious_allocation, 'B', sizeof(Session)); // Overwrite function pointer with 0x42424242
+        }
+        // ---------------------------------------------------
+        
         // VULNERABLE: Use-After-Free!
         // The session pointer is still used after being freed.
         // On some systems this crashes, on others it reads garbage,

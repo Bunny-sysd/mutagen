@@ -51,11 +51,14 @@ void process_data(unsigned int count, unsigned int element_size) {
         return;
     }
     
-    // Now we try to write count * element_size bytes into a buffer
-    // that's only total_size bytes (which could be 0 due to overflow!)
-    // This causes a HEAP BUFFER OVERFLOW
+    // Now we try to write to all elements
+    // Because total_size wrapped around to 0, data points to a tiny/null buffer.
+    // The loop runs count times, attempting to write element_size bytes each iteration.
+    // This causes a HEAP BUFFER OVERFLOW.
     printf("Writing data...\n");
-    memset(data, 'A', count * element_size);  // CRASH: writing way past allocation
+    for (unsigned int i = 0; i < count; i++) {
+        memset(&data[i * element_size], 'A', element_size);
+    }
     
     printf("Success!\n");
     free(data);

@@ -1,163 +1,258 @@
-# 🧬 Mutagen — AI-Powered Zero-Day Fuzzer
+<div align="center">
+  <img src="docs/logo.png" alt="Mutagen Logo" width="200">
+  <h1>🧬 Mutagen</h1>
+  <p><strong>AI-Powered Zero-Day Fuzzer & Auto-Patcher</strong></p>
+  <p>
+    <em>The world's first agentic AI fuzzer that reads source code, finds vulnerabilities,<br>
+    generates exploits, patches the bugs, and proves the fix works — fully autonomously.</em>
+  </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/version-2.0-brightgreen?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/python-3.10+-green?style=for-the-badge&logo=python" />
-  <img src="https://img.shields.io/badge/AI-Gemini%20API-blue?style=for-the-badge&logo=google" />
-  <img src="https://img.shields.io/badge/focus-offensive%20security-red?style=for-the-badge&logo=hackthebox" />
-</p>
+  <br>
 
-> **Mutagen** is an AI-powered fuzzer that reads source code, identifies vulnerabilities using Google's Gemini AI, and generates targeted payloads to crash programs — unlike traditional "dumb" fuzzers that rely on random input mutation.
+  <a href="#-quick-start"><img src="https://img.shields.io/badge/Quick%20Start-30%20seconds-00ff88?style=for-the-badge&logoColor=white" alt="Quick Start"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+"></a>
 
----
+  <br><br>
 
-## 🔥 Why Mutagen is Different
-
-| Feature | Traditional Fuzzer (AFL, libFuzzer) | Mutagen |
-|---|---|---|
-| **Input Strategy** | Random mutations / coverage-guided | AI-analyzed, targeted payloads |
-| **Code Understanding** | None (black-box) | Reads & understands source code |
-| **Speed to First Crash** | Minutes to hours | Seconds |
-| **Vulnerability Explanation** | None | AI explains *why* each payload works |
-| **CWE Classification** | Manual | Automatic CWE IDs for each finding |
-| **Reports** | Text logs | JSON + interactive HTML dashboard |
-| **Multi-Arg Targets** | N/A | Handles programs with multiple arguments |
-| **Setup Complexity** | High (instrumentation required) | One command |
+  <a href="#-features">Features</a> •
+  <a href="#-how-it-works">How It Works</a> •
+  <a href="#-quick-start">Quick Start</a> •
+  <a href="#-supported-llms">LLM Providers</a> •
+  <a href="#-contributing">Contributing</a>
+</div>
 
 ---
 
-## ⚡ Quick Start
+## ⚠️ Disclaimer
+
+**For Educational and Defensive Purposes Only.**
+Mutagen is designed to help developers find and patch vulnerabilities in their own code. Do not use this tool against targets you do not have explicit permission to test.
+
+---
+
+## 🤔 Why Mutagen?
+
+Traditional fuzzers (AFL, libFuzzer, Honggfuzz) rely on **random mutation** and code coverage to find crashes. They're effective but require massive CPU time and often fail to bypass complex logic like authentication checks.
+
+**Mutagen is different.** It uses an **Agentic Large Language Model** to:
+
+1. **Read and understand** the target's source code
+2. **Mathematically calculate** the exact payloads needed to trigger memory corruption
+3. **Learn from failures** — if a payload doesn't crash, the AI analyzes the output and tries again
+4. **Automatically patch** the vulnerability and **generate a proof-of-concept exploit**
+
+> **The result?** Crashes found in seconds, not hours. Vulnerabilities patched automatically. Exploits generated for regression testing.
+
+### Mutagen vs Traditional Fuzzers
+
+| Feature | AFL/libFuzzer | Honggfuzz | **Mutagen** |
+|---------|:------------:|:---------:|:-----------:|
+| Mutation Strategy | Random bit-flip | Random + feedback | **AI-guided** |
+| Source Code Understanding | ❌ | ❌ | **✅ Full analysis** |
+| Bypasses Auth/Logic | ❌ | ❌ | **✅ Agentic retries** |
+| Auto-Patch Generation | ❌ | ❌ | **✅** |
+| Exploit (PoC) Generation | ❌ | ❌ | **✅** |
+| Patch Verification | ❌ | ❌ | **✅** |
+| Time to First Crash | Hours/Days | Hours | **Seconds** |
+| Setup Complexity | High | Medium | **`pip install`** |
+
+---
+
+## ⚙️ How It Works
+
+Mutagen executes a fully autonomous **5-phase zero-day hunting loop**:
+
+```mermaid
+graph LR
+    A["📖 Phase 1\nAI Code Analysis"] --> B["🔨 Phase 2\nCompilation"]
+    B --> C["💥 Phase 3\nAgentic Fuzzing"]
+    C -->|"Crash Found"| D["🩹 Phase 4\nAuto-Patch + Exploit"]
+    C -->|"No Crash"| C2["🔄 Agentic Retry\n(learns from output)"]
+    C2 --> C
+    D --> E["✅ Phase 5\nPatch Verification"]
+
+    style A fill:#1a1a2e,stroke:#00ccff,color:#00ccff
+    style B fill:#1a1a2e,stroke:#00ccff,color:#00ccff
+    style C fill:#1a1a2e,stroke:#ff4d4d,color:#ff4d4d
+    style C2 fill:#1a1a2e,stroke:#ffb84d,color:#ffb84d
+    style D fill:#1a1a2e,stroke:#00ff88,color:#00ff88
+    style E fill:#1a1a2e,stroke:#00ff88,color:#00ff88
+```
+
+| Phase | What Happens |
+|-------|-------------|
+| **1. AI Code Analysis** | The AI reads the target `.c` file, performs Chain-of-Thought reasoning, identifies vulnerabilities (buffer overflows, format strings, UAFs, etc.), and generates targeted payloads. |
+| **2. Compilation** | The target is compiled with Mutagen's crash handler injected, which captures register state (EIP/RIP) at the point of crash. |
+| **3. Agentic Fuzzing** | Payloads are injected concurrently. If a payload fails, the AI analyzes `stdout`, `stderr`, and exit codes, then generates refined payloads. This is the **agentic retry loop**. |
+| **4. Auto-Patch & Exploit** | The AI writes a secure C patch AND a standalone Python PoC exploit script for regression testing. |
+| **5. Patch Verification** | Mutagen compiles the patched code, fires the exploit at it, and mathematically proves the vulnerability is eliminated. |
+
+---
+
+## ✨ Features
+
+- 🧠 **AI-Powered Analysis** — Understands code semantics, not just random fuzzing
+- 🔄 **Agentic Retries** — Learns from `stdout/stderr` to bypass auth checks and complex logic
+- 🩹 **Auto-Patching** — Generates secure C patches for every vulnerability found
+- 💀 **Exploit Generation** — Writes standalone Python PoC scripts for regression testing
+- ✅ **Patch Verification** — Proves the patch works by attacking the fixed binary
+- 📊 **Beautiful HTML Reports** — Glassmorphism-styled interactive crash reports
+- 🔌 **Multi-LLM Support** — Works with Gemini, OpenAI GPT-4, and local Ollama models
+- ⚡ **Concurrent Execution** — Parallel payload injection with ThreadPoolExecutor
+- 🌐 **Multiple Delivery Modes** — Args, stdin, and TCP socket fuzzing
+
+### Supported Vulnerability Classes
+
+| CWE | Vulnerability | Severity |
+|-----|--------------|----------|
+| [CWE-120](https://cwe.mitre.org/data/definitions/120.html) | Buffer Overflow | 🔴 Critical |
+| [CWE-134](https://cwe.mitre.org/data/definitions/134.html) | Format String Bug | 🔴 Critical |
+| [CWE-190](https://cwe.mitre.org/data/definitions/190.html) | Integer Overflow | 🟡 High |
+| [CWE-416](https://cwe.mitre.org/data/definitions/416.html) | Use-After-Free | 🔴 Critical |
+| [CWE-193](https://cwe.mitre.org/data/definitions/193.html) | Off-by-One Error | 🟡 High |
+| [CWE-415](https://cwe.mitre.org/data/definitions/415.html) | Double Free | 🔴 Critical |
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- **Python 3.10+**
+- **A C Compiler** — GCC, MinGW, or TCC (bundled)
+- **An API Key** — [Get a free Gemini key](https://aistudio.google.com/apikey) (or use OpenAI/Ollama)
+
+### Install
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/Bunny-sysd/mutagen.git
+# Clone
+git clone https://github.com/yourusername/mutagen.git
 cd mutagen
 
-# 2. Set up virtual environment
-python -m venv .venv
-.venv\Scripts\activate     # Windows
-# source .venv/bin/activate  # Linux/Mac
+# Install
+pip install -e .
 
-# 3. Install dependencies
-pip install google-genai rich
+# Set your API key
+export GEMINI_API_KEY="your_key_here"          # Linux/macOS
+$env:GEMINI_API_KEY="your_key_here"            # Windows PowerShell
+```
 
-# 4. Set your free Gemini API key (get one at https://aistudio.google.com/apikey)
-$env:GEMINI_API_KEY="your-key-here"  # PowerShell
-# export GEMINI_API_KEY="your-key-here"  # Bash
+### Run
 
-# 5. Run against any target!
-python mutagen.py targets/01_buffer_overflow.c
-python mutagen.py targets/02_format_string.c
-python mutagen.py targets/03_integer_overflow.c
-python mutagen.py targets/04_use_after_free.c
+```bash
+# Fuzz a single target
+mutagen --target targets/01_buffer_overflow.c
+
+# Or use python -m
+python -m mutagen --target targets/01_buffer_overflow.c --max-payloads 5
+
+# Fuzz ALL targets automatically
+python run_all.py --max-payloads 3
+```
+
+### Output
+
+Mutagen produces:
+- 📄 **JSON crash report** in `crashes/`
+- 🌐 **Interactive HTML report** in `crashes/`
+- 🩹 **Patched C source** in `patches/`
+- 💀 **Python exploit script** in `exploits/`
+
+---
+
+## 🔌 Supported LLMs
+
+| Provider | Model | Setup | Cost |
+|----------|-------|-------|------|
+| **Google Gemini** (default) | `gemini-2.5-flash` | `export GEMINI_API_KEY=...` | Free tier available |
+| **OpenAI** | `gpt-4o` | `pip install openai` + `export OPENAI_API_KEY=...` | Pay-per-use |
+| **Ollama** (local) | `llama3.2`, `codellama`, etc. | [Install Ollama](https://ollama.ai) | Free (runs locally) |
+
+```bash
+# Use OpenAI GPT-4o
+mutagen --target targets/01_buffer_overflow.c --provider openai --model gpt-4o
+
+# Use local Ollama (no API key needed!)
+mutagen --target targets/01_buffer_overflow.c --provider ollama --model llama3.2
 ```
 
 ---
 
-## 🎯 How It Works
-
-```
-┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Read .c    │────▶│  AI Analysis │────▶│  Compile &   │────▶│  Crash       │
-│  Source Code│     │  (Gemini API)│     │  Fuzz Target │     │  Report      │
-└─────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
-                           │                     │                    │
-                    Generate targeted      Monitor for         JSON + HTML
-                    crash payloads        segfaults &         dashboard with
-                    with CWE IDs        access violations    crash analytics
-```
-
-1. **Analyze**: Mutagen reads the target C source code.
-2. **AI Brain**: Sends the code to Gemini AI, which identifies vulnerabilities (buffer overflows, format strings, integer overflows, use-after-free, etc.) and generates targeted payloads with CWE classifications.
-3. **Execute**: Compiles the target with protections disabled (`-fno-stack-protector`), then injects each payload.
-4. **Monitor**: Watches for crashes (access violations, stack overflows, buffer overruns, timeouts).
-5. **Report**: Saves crash artifacts to `crashes/` as both JSON and an interactive HTML report.
-
----
-
-## 🛡️ Vulnerability Targets
-
-Mutagen ships with 4 intentionally vulnerable programs covering the most exploited vulnerability classes in history:
-
-| File | Vulnerability | CWE | Real-World CVEs | Difficulty |
-|------|--------------|-----|-----------------|------------|
-| `targets/01_buffer_overflow.c` | Stack buffer overflow via `strcpy()` | CWE-120 | CVE-2021-3156 (sudo) | 🟢 Easy |
-| `targets/02_format_string.c` | Format string injection via `printf()` | CWE-134 | CVE-2012-0809 (sudo) | 🟡 Medium |
-| `targets/03_integer_overflow.c` | Integer overflow → heap overflow | CWE-190 | CVE-2021-21224 (Chrome V8) | 🟠 Hard |
-| `targets/04_use_after_free.c` | Use-after-free via dangling pointer | CWE-416 | CVE-2022-22620 (WebKit) | 🔴 Expert |
-
-Each target file contains detailed comments explaining:
-- What the vulnerability is and how it works
-- Why the specific function/pattern is dangerous
-- Real-world CVE examples where this vulnerability was exploited
-- The security impact (code execution, privilege escalation, etc.)
-
----
-
-## 📊 Reports
-
-Mutagen generates two report formats:
-
-### JSON Report (`crashes/crash_report_*.json`)
-Machine-readable crash data including payloads, CWE IDs, crash types, and severity ratings.
-
-### HTML Dashboard (`crashes/report_*.html`)
-A visual dashboard you can open in any browser featuring:
-- **Stats cards** — Payloads tested, crashes found, crash rate %, unique vuln types
-- **Crash table** — Severity badges, CWE IDs, payload details, crash types
-- **Dark theme** — Professional cybersecurity aesthetic
-
----
-
-## 📂 Project Structure
+## 📁 Project Structure
 
 ```
 mutagen/
-├── mutagen.py                        # Main fuzzer engine (v2.0)
-├── vuln.c                            # Legacy test target
-├── targets/                          # Vulnerability test suite
-│   ├── 01_buffer_overflow.c          # CWE-120: Stack buffer overflow
-│   ├── 02_format_string.c           # CWE-134: Format string injection
-│   ├── 03_integer_overflow.c        # CWE-190: Integer overflow
-│   └── 04_use_after_free.c          # CWE-416: Use-after-free
-├── crashes/                          # Auto-generated crash reports
-│   ├── crash_report_*.json          # Machine-readable reports
-│   └── report_*.html               # Visual HTML dashboards
-├── .gitignore
-└── README.md
+├── mutagen/               # Core Python package
+│   ├── cli.py             # Command-line interface
+│   ├── core.py            # 5-phase fuzzing orchestration
+│   ├── compiler.py        # C compilation + crash handler injection
+│   ├── executor.py        # Payload execution + crash detection
+│   ├── reporter.py        # JSON/HTML report generation
+│   └── engines/           # LLM provider integrations
+│       ├── base.py        # Abstract engine interface
+│       ├── gemini.py      # Google Gemini
+│       ├── openai_engine.py # OpenAI GPT
+│       └── ollama.py      # Local Ollama
+├── targets/               # Intentionally vulnerable C programs
+├── tests/                 # Unit test suite
+├── docs/                  # Documentation
+├── pyproject.toml         # Python packaging config
+└── run_all.py             # Batch fuzzer for all targets
 ```
 
 ---
 
-## 🧠 Architecture
+## 🧪 Testing
 
-Mutagen is built with a modular, resilient architecture:
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
 
-- **AI Engine**: Multi-model fallback system (gemini-2.5-flash → 2.0-flash → 2.0-flash-lite) with exponential backoff and rate-limit handling
-- **Parser**: 3-pass resilient JSON parser that handles malformed AI responses (JSON → eval → object-by-object fallback)
-- **Executor**: Multi-argument payload injection with Windows crash code detection (ACCESS_VIOLATION, STACK_OVERFLOW, STACK_BUFFER_OVERRUN)
-- **Reporter**: Dual-format output (JSON + HTML) with crash analytics
+# Run all tests
+pytest tests/ -v
 
----
+# Run with coverage
+pytest tests/ -v --cov=mutagen
 
-## ⚠️ Legal Disclaimer
-
-This tool is built for **educational and authorized security testing only**. Only use Mutagen on code you own or have explicit permission to test. Unauthorized use of fuzzing tools against systems you don't own is illegal.
-
----
-
-## 🧠 Built With
-
-- **Python 3.10+** — Core fuzzer logic
-- **Google Gemini API** — AI-powered vulnerability analysis
-- **Rich** — Beautiful terminal output with progress tracking
-- **GCC (MSYS2)** — C compilation for test targets
+# Lint
+ruff check mutagen/
+```
 
 ---
 
-<p align="center">
-  <b>Built by Aaron Alva</b><br>
-  <a href="https://bunny-sysd.github.io/portfolio/">Portfolio</a> · 
-  <a href="https://github.com/Bunny-sysd">GitHub</a> · 
-  <a href="https://tryhackme.com/p/354221973">TryHackMe</a>
-</p>
+## 🤝 Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+**Easy ways to contribute:**
+- 🎯 Add new vulnerable C targets to `targets/`
+- 🔌 Add new LLM engine integrations
+- 📝 Improve documentation
+- 🐛 Report bugs or request features
+
+---
+
+## 📜 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+## 🙏 Acknowledgments
+
+- [Google Gemini](https://ai.google.dev/) for the AI backbone
+- [Rich](https://github.com/Textualize/rich) for beautiful terminal output
+- [SANS Institute](https://www.sans.org/) for cybersecurity education
+- The open-source security community
+
+---
+
+<div align="center">
+  <br>
+  <em>"Evolution through mutation."</em>
+  <br><br>
+  <strong>Built by Aaron Alva</strong>
+  <br>
+  <sub>If Mutagen helped you, consider giving it a ⭐</sub>
+</div>

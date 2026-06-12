@@ -1,17 +1,46 @@
 # Virtual environment
 .venv/
-
-# Compiled targets
-*.exe
-*.o
-*.out
-
-# Crash reports (sensitive data)
-crashes/
+venv/
+env/
 
 # Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Compiled targets and temp files
+*.exe
+*.o
+*.out
+mutagen_temp_*
+
+# Crash reports (may contain sensitive payloads)
+crashes/
+
+# Generated patches and exploits (generated per-run)
+patches/
+exploits/
+
+# Debug logs
+mutagen_debug.log
 
 # Environment variables / secrets
 .env
+secret.txt
+
+# Bundled compiler archive
+tcc.zip
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
