@@ -138,6 +138,23 @@ export GEMINI_API_KEY="your_key_here"          # Linux/macOS
 $env:GEMINI_API_KEY="your_key_here"            # Windows PowerShell
 ```
 
+### Environment Configuration (`.env`)
+
+To avoid setting environment variables or flags on every invocation, you can create a local `.env` file in the root directory of the project:
+
+```env
+# Default provider (gemini, openai, or ollama)
+MUTAGEN_PROVIDER=gemini
+MUTAGEN_MODEL=gemini-2.5-flash-lite
+
+# API Keys
+MUTAGEN_API_KEY=your_key_here
+
+# Alternatively, provider-specific keys:
+# GEMINI_API_KEY=your_gemini_key
+# OPENAI_API_KEY=your_openai_key
+```
+
 ### Run
 
 ```bash
