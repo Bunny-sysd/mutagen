@@ -2,6 +2,8 @@ import os
 import sys
 import time
 import datetime
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -16,6 +18,12 @@ from mutagen.reporter import save_crash_report
 from mutagen.mutators import generate_fallback_payloads
 
 console = Console(force_terminal=True, force_jupyter=False)
+
+
+def _crash_signature(crash: dict) -> str:
+    """Generate a deduplication key from a crash result."""
+    return f"{crash['crash_type']}::{crash['return_code']}::{crash.get('vuln_type', '')}"
+
 
 def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args"):
     """Main fuzzer orchestration function."""
@@ -139,91 +147,186 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     console.print(f"[green]>> Compiled to: {exe_path}[/green]")
     console.print()
 
-    # --- STEP 4: FUZZ! ---------------------------------------------------
+    # --- STEP 4: FUZZ! (PARALLEL EXECUTION) ------------------------------
     console.print(Panel(
         "[bold red]PHASE 3: FUZZING[/bold red]\n"
-        "[dim]Injecting AI payloads into the target and monitoring for crashes...[/dim]",
+        "[dim]Injecting AI payloads into the target in parallel...[/dim]",
         border_style="red"
     ))
 
-    crashes = []
+    all_crashes = []          # Every crash hit (may contain dupes)
+    seen_signatures = set()   # For deduplication
+    unique_crashes = []       # Deduplicated crash list
+    results_lock = threading.Lock()
+
     results_table = Table(title="Fuzzing Results", box=box.ROUNDED, border_style="green")
     results_table.add_column("#", style="dim", width=4)
     results_table.add_column("Status", width=12)
     results_table.add_column("Payload Preview", style="cyan", max_width=35)
     results_table.add_column("Crash Type", style="red", max_width=30)
     results_table.add_column("Return Code", style="yellow", width=12)
+    results_table.add_column("Unique?", style="magenta", width=8)
 
-    for i, original_p in enumerate(payloads):
-        current_payloads = [original_p]
-        max_retries = 2
-        payload_crashed = False
-        
-        for retry_attempt in range(max_retries + 1):
-            if payload_crashed:
-                break
-                
-            for p in current_payloads:
-                args = p.get("args", [])
-                input_data = p.get("input_data", "")
-                
-                if isinstance(args, str):
-                    args = [args]
-                args = [str(a) for a in args]
+    def _fuzz_single_payload(i: int, p: dict) -> dict:
+        """Execute a single payload and return structured result."""
+        args = p.get("args", [])
+        input_data = p.get("input_data", "")
+        if isinstance(args, str):
+            args = [args]
+        args = [str(a) for a in args]
 
-                result = execute_payload(exe_path, args, input_data, delivery_mode, timeout)
+        result = execute_payload(exe_path, args, input_data, delivery_mode, timeout)
+        return {
+            "index": i,
+            "payload": p,
+            "args": args,
+            "input_data": input_data,
+            "result": result,
+        }
 
-                status = "[bold red]CRASH!!" if result["crashed"] else "[green]OK"
-                
-                if delivery_mode == "args":
-                    preview = " | ".join(a[:15] for a in args)
-                else:
-                    preview = str(input_data)[:30].replace("\n", "\\n")
-                    
-                if len(preview) > 33:
-                    preview = preview[:30] + "..."
+    # --- Parallel Phase: fire all payloads concurrently ---
+    worker_count = min(4, len(payloads))
+    futures_map = {}
+    needs_retry = []  # Payloads that didn't crash → eligible for agentic retry
 
-                row_idx = f"{i + 1}" if retry_attempt == 0 else f"{i + 1}.{retry_attempt}"
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        for i, p in enumerate(payloads):
+            future = pool.submit(_fuzz_single_payload, i, p)
+            futures_map[future] = (i, p)
+
+        for future in as_completed(futures_map):
+            i, original_p = futures_map[future]
+            fuzz_result = future.result()
+            result = fuzz_result["result"]
+            args = fuzz_result["args"]
+            input_data = fuzz_result["input_data"]
+
+            status = "[bold red]CRASH!!" if result["crashed"] else "[green]OK"
+            if delivery_mode == "args":
+                preview = " | ".join(a[:15] for a in args)
+            else:
+                preview = str(input_data)[:30].replace("\n", "\\n")
+            if len(preview) > 33:
+                preview = preview[:30] + "..."
+
+            crash_entry = None
+            is_unique = ""
+
+            if result["crashed"]:
+                crash_entry = {
+                    "args": args,
+                    "input_data": input_data,
+                    "payload": input_data if input_data else " ".join(args),
+                    "vuln_type": original_p.get("vuln_type", ""),
+                    "cwe": original_p.get("cwe", ""),
+                    "reason": original_p.get("reason", ""),
+                    "severity": original_p.get("severity", ""),
+                    "crash_type": result["crash_type"],
+                    "return_code": result["return_code"],
+                    "retries": 0,
+                }
+                sig = _crash_signature(crash_entry)
+                with results_lock:
+                    all_crashes.append(crash_entry)
+                    if sig not in seen_signatures:
+                        seen_signatures.add(sig)
+                        unique_crashes.append(crash_entry)
+                        is_unique = "[green]✓ NEW"
+                    else:
+                        is_unique = "[dim]dupe"
+            else:
+                needs_retry.append((i, original_p, result, args, input_data))
+
+            with results_lock:
                 results_table.add_row(
-                    row_idx,
+                    str(i + 1),
                     status,
                     preview,
                     result["crash_type"] if result["crashed"] else "-",
                     str(result["return_code"]),
+                    is_unique if result["crashed"] else "",
                 )
 
+    # --- Sequential Phase: agentic retries for non-crashing payloads ---
+    max_retries = 2
+    for i, original_p, last_result, last_args, last_input in needs_retry:
+        for retry_attempt in range(1, max_retries + 1):
+            console.print(f"[yellow]  ↳ Payload {i+1} failed. Agentic Retry {retry_attempt}/{max_retries} initializing...[/yellow]")
+            refined = engine.refine_payload(source_code, last_args, last_input, last_result["stdout"], last_result["stderr"], last_result["return_code"], delivery_mode)
+            if not refined:
+                console.print("[dim]    (No refined payloads returned, skipping retry)[/dim]")
+                break
+
+            retry_crashed = False
+            for rp in refined:
+                r_args = rp.get("args", [])
+                r_input = rp.get("input_data", "")
+                if isinstance(r_args, str):
+                    r_args = [r_args]
+                r_args = [str(a) for a in r_args]
+
+                result = execute_payload(exe_path, r_args, r_input, delivery_mode, timeout)
+
+                status = "[bold red]CRASH!!" if result["crashed"] else "[green]OK"
+                if delivery_mode == "args":
+                    preview = " | ".join(a[:15] for a in r_args)
+                else:
+                    preview = str(r_input)[:30].replace("\n", "\\n")
+                if len(preview) > 33:
+                    preview = preview[:30] + "..."
+
+                is_unique = ""
                 if result["crashed"]:
-                    crashes.append({
-                        "args": args,
-                        "input_data": input_data,
-                        "payload": input_data if input_data else " ".join(args),
-                        "vuln_type": p.get("vuln_type", ""),
-                        "cwe": p.get("cwe", ""),
-                        "reason": p.get("reason", ""),
-                        "severity": p.get("severity", ""),
+                    crash_entry = {
+                        "args": r_args,
+                        "input_data": r_input,
+                        "payload": r_input if r_input else " ".join(r_args),
+                        "vuln_type": rp.get("vuln_type", ""),
+                        "cwe": rp.get("cwe", ""),
+                        "reason": rp.get("reason", ""),
+                        "severity": rp.get("severity", ""),
                         "crash_type": result["crash_type"],
                         "return_code": result["return_code"],
                         "retries": retry_attempt,
-                    })
-                    payload_crashed = True
+                    }
+                    sig = _crash_signature(crash_entry)
+                    all_crashes.append(crash_entry)
+                    if sig not in seen_signatures:
+                        seen_signatures.add(sig)
+                        unique_crashes.append(crash_entry)
+                        is_unique = "[green]✓ NEW"
+                    else:
+                        is_unique = "[dim]dupe"
+                    retry_crashed = True
+
+                results_table.add_row(
+                    f"{i + 1}.{retry_attempt}",
+                    status,
+                    preview,
+                    result["crash_type"] if result["crashed"] else "-",
+                    str(result["return_code"]),
+                    is_unique if result["crashed"] else "",
+                )
+
+                if retry_crashed:
                     break
 
-                time.sleep(0.15)  # Brief pause for dramatic effect
+                last_result = result
+                last_args = r_args
+                last_input = r_input
 
-            if not payload_crashed and retry_attempt < max_retries:
-                # Agentic Retry
-                console.print(f"[yellow]  ↳ Payload {i+1} failed. Agentic Retry {retry_attempt+1}/{max_retries} initializing...[/yellow]")
-                current_payloads = engine.refine_payload(source_code, args, input_data, result["stdout"], result["stderr"], result["return_code"], delivery_mode)
-                if not current_payloads:
-                    console.print("[dim]    (No refined payloads returned, skipping retry)[/dim]")
-                    break
+            if retry_crashed:
+                break
 
     console.print(results_table)
     console.print()
 
     # --- STEP 5: REPORT --------------------------------------------------
     target_name = os.path.basename(source_path).replace(".c", "")
-    crash_rate = (len(crashes)/len(payloads)*100) if payloads else 0
+    crash_rate = (len(all_crashes)/len(payloads)*100) if payloads else 0
+
+    # Use unique_crashes for patching/exploit (most interesting distinct bugs)
+    crashes = unique_crashes
 
     if crashes:
         # --- AUTO-PATCH & AEG GENERATION -------------------------------------
@@ -306,10 +409,15 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         verification_text = f"  Verification:     [bold green]VERIFIED SECURE[/bold green]\n" if patch_verified else (f"  Verification:     [bold red]FAILED[/bold red]\n" if patch_file else "")
 
+        dedup_text = ""
+        if len(all_crashes) != len(unique_crashes):
+            dedup_text = f"  Total crash hits:  [dim]{len(all_crashes)} ({len(all_crashes) - len(unique_crashes)} duplicates removed)[/dim]\n"
+
         summary = Panel(
             f"[bold green]FUZZING COMPLETE[/bold green]\n\n"
             f"  Payloads tested:  [cyan]{len(payloads)}[/cyan]\n"
-            f"  Crashes found:    [bold red]{len(crashes)}[/bold red]\n"
+            f"  Unique crashes:   [bold red]{len(unique_crashes)}[/bold red]\n"
+            f"{dedup_text}"
             f"  Crash rate:       [yellow]{crash_rate:.0f}%[/yellow]\n"
             f"  Vuln types:       [magenta]{', '.join(set(c['vuln_type'] for c in crashes))}[/magenta]\n"
             f"  JSON report:      [dim]{json_file}[/dim]\n"
@@ -334,3 +442,4 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         )
 
     console.print(summary)
+

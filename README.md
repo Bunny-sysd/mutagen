@@ -99,8 +99,11 @@ graph LR
 - ✅ **Patch Verification** — Proves the patch works by attacking the fixed binary
 - 📊 **Beautiful HTML Reports** — Glassmorphism-styled interactive crash reports
 - 🔌 **Multi-LLM Support** — Works with Gemini, OpenAI GPT-4, and local Ollama models
-- ⚡ **Concurrent Execution** — Parallel payload injection with ThreadPoolExecutor
+- ⚡ **Concurrent Execution** — Parallel payload injection with `ThreadPoolExecutor`
 - 🌐 **Multiple Delivery Modes** — Args, stdin, and TCP socket fuzzing
+- 🧬 **Traditional Fallback Mutations** — Classic fuzzing strategies (buffer overflow, format string, integer boundary, etc.) kick in automatically when AI models refuse
+- 🔍 **Crash Deduplication** — Intelligent signature-based deduplication removes duplicate crash reports
+- ⚙️ **Local `.env` Config** — Store provider, model, and API keys in a local config file
 
 ### Supported Vulnerability Classes
 
