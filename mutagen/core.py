@@ -13,6 +13,7 @@ from mutagen.engines import get_engine
 from mutagen.compiler import compile_target, CompilationError
 from mutagen.executor import execute_payload
 from mutagen.reporter import save_crash_report
+from mutagen.mutators import generate_fallback_payloads
 
 console = Console(force_terminal=True, force_jupyter=False)
 
@@ -66,8 +67,13 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         payloads = engine.analyze_code(source_code, max_payloads, delivery_mode, debug)
 
     if not payloads:
-        console.print("[red]X AI returned no payloads. Check your API key.[/red]")
-        sys.exit(1)
+        console.print("[yellow]⚠ AI returned no payloads (possible refusal, rate-limit, or network error).[/yellow]")
+        console.print("[cyan]↳ Activating traditional mutation fallback engine...[/cyan]")
+        payloads = generate_fallback_payloads(max_payloads=max_payloads, delivery_mode=delivery_mode)
+        if not payloads:
+            console.print("[red]X Both AI and fallback engines returned no payloads. Cannot continue.[/red]")
+            sys.exit(1)
+        console.print(f"[green]>> Fallback engine generated {len(payloads)} classic mutation payloads[/green]")
 
     console.print(f"[green]>> AI generated {len(payloads)} targeted payloads[/green]")
     console.print()
