@@ -14,5 +14,9 @@ class BaseEngine(ABC):
         pass
 
     @abstractmethod
+    def refine_patch(self, source_code: str, bad_patch: str, error_message: str, crash_data: dict, debug: bool = False) -> str:
+        pass
+
+    @abstractmethod
     def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
         pass

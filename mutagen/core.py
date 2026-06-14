@@ -25,7 +25,7 @@ def _crash_signature(crash: dict) -> str:
     return f"{crash['crash_type']}::{crash['return_code']}::{crash.get('vuln_type', '')}"
 
 
-def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args"):
+def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3):
     """Main fuzzer orchestration function."""
     engine = get_engine(provider, api_key, model, debug, console)
 
@@ -373,41 +373,74 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         else:
             console.print("[red]X Failed to generate exploit.[/red]\n")
 
+        # --- PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING -----------------
+        patch_verified = False
+        retries_used = 0
+        error_details = ""
+        
+        if patch_file:
+            console.print(Panel(
+                "[bold cyan]PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING[/bold cyan]\n"
+                f"[dim]Mathematically proving the patch works (Max self-healing retries: {max_patch_retries})...[/dim]",
+                border_style="cyan"
+            ))
+            
+            for attempt in range(max_patch_retries + 1):
+                if attempt > 0:
+                    console.print(f"[yellow]  ↳ Self-Healing Attempt {attempt}/{max_patch_retries} initializing...[/yellow]")
+                    with Progress(
+                        SpinnerColumn(style="cyan"),
+                        TextColumn("[cyan]Asking AI to fix the C patch..."),
+                        console=console,
+                    ) as progress:
+                        task = progress.add_task("", total=None)
+                        patch_code = engine.refine_patch(source_code, patch_code, error_details, crashes[0], debug)
+                    
+                    if not patch_code:
+                        console.print("[red]    X AI failed to return refined C patch. Aborting self-healing loop.[/red]\n")
+                        break
+                    
+                    # Update patch file
+                    with open(patch_file, "w", encoding="utf-8") as f:
+                        f.write(patch_code)
+                
+                try:
+                    patched_exe = compile_target(patch_file, gcc_path)
+                    console.print(f"[green]    [+] Patched target compiled successfully[/green]")
+                    
+                    with Progress(
+                        SpinnerColumn(style="cyan"),
+                        TextColumn("[cyan]    Firing exploit at patched target..."),
+                        console=console,
+                    ) as progress:
+                        task = progress.add_task("", total=None)
+                        verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout)
+                        
+                    if verify_result["crashed"]:
+                        error_details = f"The patched binary compiled successfully but still crashed when executed with the exploit payload.\nCrash Type: {verify_result['crash_type']}\nReturn Code: {verify_result['return_code']}"
+                        console.print(f"[bold red]    X Verification Failed:[/bold red] The patched program still crashed: {verify_result['crash_type']}\n")
+                    else:
+                        patch_verified = True
+                        retries_used = attempt
+                        console.print("[bold green]    [+] PATCH VERIFIED SUCCESSFUL![/bold green] The exploit no longer crashes the target.\n")
+                        break
+                except CompilationError as e:
+                    error_details = f"The patched C code failed to compile with the following compiler errors:\n{str(e)}"
+                    console.print(f"[bold red]    X Compilation Failed:[/bold red]\n{e}\n")
+
+        # Now save report with the final patch code (which may be refined by self-healing)
         json_file, html_file = save_crash_report(crashes, target_name, len(payloads), patch_code, exploit_code)
 
         patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""
         exploit_text = f"  Exploit generated:[magenta]{exploit_file}[/magenta]\n" if exploit_file else ""
-
-        # --- PHASE 5: AUTO-PATCH VERIFICATION --------------------------------
-        patch_verified = False
-        if patch_file:
-            console.print(Panel(
-                "[bold cyan]PHASE 5: AUTO-PATCH VERIFICATION[/bold cyan]\n"
-                "[dim]Mathematically proving the patch works...[/dim]",
-                border_style="cyan"
-            ))
-            
-            try:
-                patched_exe = compile_target(patch_file, gcc_path)
-                console.print(f"[green]>> Compiled patched target: {patched_exe}[/green]")
-                
-                with Progress(
-                    SpinnerColumn(style="cyan"),
-                    TextColumn("[cyan]Firing exploit at patched target..."),
-                    console=console,
-                ) as progress:
-                    task = progress.add_task("", total=None)
-                    verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout)
-                    
-                if verify_result["crashed"]:
-                    console.print(f"[bold red]X PATCH FAILED![/bold red] The patched program still crashed: {verify_result['crash_type']}\n")
-                else:
-                    patch_verified = True
-                    console.print("[bold green][+] PATCH VERIFIED SUCCESSFUL![/bold green] The exploit no longer crashes the target.\n")
-            except CompilationError as e:
-                console.print(f"[bold red]X PATCH COMPILATION FAILED![/bold red] The patched C code contains compiler errors:\n{e}\n")
-
         verification_text = f"  Verification:     [bold green]VERIFIED SECURE[/bold green]\n" if patch_verified else (f"  Verification:     [bold red]FAILED[/bold red]\n" if patch_file else "")
+        
+        healing_text = ""
+        if patch_file:
+            if patch_verified:
+                healing_text = f"  Self-healing:     [green]Success (used {retries_used} retries)[/green]\n"
+            else:
+                healing_text = f"  Self-healing:     [red]Failed (used {retries_used} retries)[/red]\n"
 
         dedup_text = ""
         if len(all_crashes) != len(unique_crashes):
@@ -425,6 +458,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             f"{patch_text}"
             f"{exploit_text}"
             f"{verification_text}"
+            f"{healing_text}"
             f"  [dim]Open the HTML report in your browser for a visual breakdown![/dim]",
             title="[bold green]** RESULTS **[/bold green]",
             border_style="green",

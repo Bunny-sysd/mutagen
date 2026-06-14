@@ -109,6 +109,35 @@ Return only the updated C source code file. Do not include markdown blocks, expl
             text = text[:-3]
         return text.strip()
 
+    def refine_patch(self, source_code: str, bad_patch: str, error_message: str, crash_data: dict, debug: bool = False) -> str:
+        prompt = f"""We tried to patch a vulnerability in the following C code, but the patch failed.
+
+ORIGINAL SOURCE CODE:
+{source_code}
+
+VULNERABILITY DETAILS:
+- Vulnerability: {crash_data.get("vuln_type")}
+- Args: {crash_data.get("args")}
+
+THE ATTEMPTED PATCH CODE THAT FAILED:
+{bad_patch}
+
+FAILURE DETAILS:
+{error_message}
+
+Please analyze the failure details and correct the patch code.
+Provide the ENTIRE corrected C source code file.
+DO NOT use markdown formatting outside of the code block.
+Return ONLY the raw C code. DO NOT wrap it in ```c and ```."""
+        text = self._generate(prompt)
+        if text.startswith("```c"):
+            text = text[4:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        return text.strip()
+
     def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
         prompt = f"""Write a standalone Python 3 script reproducing the crash in '{exe_path}' where input delivery is via '{delivery_mode}'.
 C Code:

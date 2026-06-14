@@ -236,6 +236,72 @@ If you must use markdown, the parser will try to strip it, but please try to ret
 
         return text.strip()
 
+    def refine_patch(self, source_code: str, bad_patch: str, error_message: str, crash_data: dict, debug: bool = False) -> str:
+        prompt = f"""You are a Senior C Security Engineer.
+We tried to patch a vulnerability in the following C code, but the patch failed.
+
+ORIGINAL SOURCE CODE:
+```c
+{source_code}
+```
+
+VULNERABILITY DETAILS:
+- Vulnerability: {crash_data.get("vuln_type")}
+- CWE: {crash_data.get("cwe")}
+- Severity: {crash_data.get("severity")}
+- Exploit Payload Args: {crash_data.get("args")}
+- Exploit Payload Input Data: {crash_data.get("input_data")}
+
+THE ATTEMPTED PATCH CODE THAT FAILED:
+```c
+{bad_patch}
+```
+
+FAILURE DETAILS:
+{error_message}
+
+Please analyze the failure details and correct the patch code.
+Provide the ENTIRE corrected C source code file.
+DO NOT use markdown formatting outside of the code block.
+Return ONLY the raw C code. DO NOT wrap it in ```c and ```.
+If you must use markdown, the parser will try to strip it, but please try to return just the C code."""
+
+        models_to_try = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
+        response = None
+        for model_name in models_to_try:
+            for attempt in range(2):
+                try:
+                    response = self.client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config={
+                            "temperature": 0.2,
+                            "safety_settings": [
+                                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                            ],
+                        },
+                    )
+                    break
+                except Exception as e:
+                    if debug:
+                        console.print(f"[red]Error in refine_patch ({model_name}): {e}[/red]")
+                    time.sleep((attempt + 1) * 5)
+            if response is not None:
+                break
+
+        if response is None:
+            return ""
+
+        text = response.text.strip()
+        if text.startswith("```c"):
+            text = text[4:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+
+        return text.strip()
+
     def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
         prompt = f"""You are a Senior Security QA Engineer writing a regression test.
 An automated fuzzer just found a memory corruption vulnerability in the following C code compiled as '{exe_path}'.

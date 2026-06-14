@@ -58,6 +58,7 @@ def main():
     parser.add_argument("--provider", default=os.environ.get("MUTAGEN_PROVIDER", "gemini"), choices=["gemini", "openai", "ollama"], help="LLM Provider (default: gemini)")
     parser.add_argument("--model", default=os.environ.get("MUTAGEN_MODEL", ""), help="Specific model to use")
     parser.add_argument("--delivery", default="args", help="Delivery mode: args, stdin, tcp:<port> (default: args)")
+    parser.add_argument("--max-patch-retries", type=int, default=3, help="Maximum number of correction iterations for patch generation (default: 3)")
     
     args = parser.parse_args()
 
@@ -120,7 +121,8 @@ def main():
         debug=args.debug,
         provider=args.provider,
         model=args.model,
-        delivery_mode=args.delivery
+        delivery_mode=args.delivery,
+        max_patch_retries=args.max_patch_retries
     )
 
 if __name__ == "__main__":

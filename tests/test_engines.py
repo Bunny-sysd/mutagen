@@ -86,6 +86,10 @@ def test_gemini_engine_generate_patch_and_exploit(mock_client_class):
     patch_code = engine.generate_patch("source", {"vuln_type": "test"})
     assert patch_code == "patched_c_code"
 
+    mock_response.text = "```c\nrefined_c_code\n```"
+    refined_patch = engine.refine_patch("source", "bad_patch", "compiler error", {"vuln_type": "test"})
+    assert refined_patch == "refined_c_code"
+
     mock_response.text = "```python\nexploit_python_code\n```"
     exploit_code = engine.generate_exploit("source", {"args": ["x"]}, "exe_path", "args")
     assert exploit_code == "exploit_python_code"
@@ -174,6 +178,10 @@ def test_openai_engine_generate_patch_and_exploit(mock_openai_class):
     patch_code = engine.generate_patch("source", {"vuln_type": "test"})
     assert patch_code == "patched_c_by_openai"
 
+    mock_completion.choices[0].message.content = "```c\nrefined_c_by_openai\n```"
+    refined_patch = engine.refine_patch("source", "bad_patch", "compiler error", {"vuln_type": "test"})
+    assert refined_patch == "refined_c_by_openai"
+
     mock_completion.choices[0].message.content = "```python\nexploit_py_by_openai\n```"
     exploit_code = engine.generate_exploit("source", {"args": ["x"]}, "exe_path", "args")
     assert exploit_code == "exploit_py_by_openai"
@@ -252,6 +260,10 @@ def test_ollama_engine_generate_patch_and_exploit(mock_post):
     engine = OllamaEngine()
     patch_code = engine.generate_patch("source", {"vuln_type": "test"})
     assert patch_code == "patched_c_by_ollama"
+
+    mock_response.json.return_value = {"response": "```c\nrefined_c_by_ollama\n```"}
+    refined_patch = engine.refine_patch("source", "bad_patch", "compiler error", {"vuln_type": "test"})
+    assert refined_patch == "refined_c_by_ollama"
 
     mock_response.json.return_value = {"response": "```python\nexploit_py_by_ollama\n```"}
     exploit_code = engine.generate_exploit("source", {"args": ["x"]}, "exe_path", "args")
