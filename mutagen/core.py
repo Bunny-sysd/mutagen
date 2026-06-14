@@ -336,7 +336,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             border_style="cyan"
         ))
         
-        patch_file = ""
+        patch_file = f"patches/{target_name}_FIXED.c"
         exploit_file = ""
         patch_code = ""
         exploit_code = ""
@@ -345,16 +345,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             TextColumn("[cyan]{task.description}"),
             console=console,
         ) as progress:
-            task = progress.add_task("AI writing secure C patch...", total=None)
-            patch_code = engine.generate_patch(source_code, crashes[0], debug)
-            
-            if patch_code:
-                os.makedirs("patches", exist_ok=True)
-                patch_file = f"patches/{target_name}_FIXED.c"
-                with open(patch_file, "w", encoding="utf-8") as f:
-                    f.write(patch_code)
-                    
-            progress.update(task, description="[magenta]AI writing Python exploit script...")
+            progress.update(progress.add_task("[magenta]AI writing Python exploit script..."), total=None)
             exploit_code = engine.generate_exploit(source_code, crashes[0], exe_path, delivery_mode, debug)
             
             if exploit_code:
@@ -363,11 +354,6 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 with open(exploit_file, "w", encoding="utf-8") as f:
                     f.write(exploit_code)
                     
-        if patch_file:
-            console.print(f"[green]>> Secure patch saved to: {patch_file}[/green]")
-        else:
-            console.print("[red]X Failed to generate patch.[/red]")
-            
         if exploit_file:
             console.print(f"[green]>> Python exploit saved to: {exploit_file}[/green]\n")
         else:
@@ -378,55 +364,83 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         retries_used = 0
         error_details = ""
         
-        if patch_file:
-            console.print(Panel(
-                "[bold cyan]PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING[/bold cyan]\n"
-                f"[dim]Mathematically proving the patch works (Max self-healing retries: {max_patch_retries})...[/dim]",
-                border_style="cyan"
-            ))
-            
-            for attempt in range(max_patch_retries + 1):
-                if attempt > 0:
-                    console.print(f"[yellow]  ↳ Self-Healing Attempt {attempt}/{max_patch_retries} initializing...[/yellow]")
-                    with Progress(
-                        SpinnerColumn(style="cyan"),
-                        TextColumn("[cyan]Asking AI to fix the C patch..."),
-                        console=console,
-                    ) as progress:
-                        task = progress.add_task("", total=None)
-                        patch_code = engine.refine_patch(source_code, patch_code, error_details, crashes[0], debug)
-                    
-                    if not patch_code:
-                        console.print("[red]    X AI failed to return refined C patch. Aborting self-healing loop.[/red]\n")
-                        break
-                    
-                    # Update patch file
-                    with open(patch_file, "w", encoding="utf-8") as f:
-                        f.write(patch_code)
-                
-                try:
-                    patched_exe = compile_target(patch_file, gcc_path)
-                    console.print(f"[green]    [+] Patched target compiled successfully[/green]")
-                    
-                    with Progress(
-                        SpinnerColumn(style="cyan"),
-                        TextColumn("[cyan]    Firing exploit at patched target..."),
-                        console=console,
-                    ) as progress:
-                        task = progress.add_task("", total=None)
-                        verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout)
-                        
-                    if verify_result["crashed"]:
-                        error_details = f"The patched binary compiled successfully but still crashed when executed with the exploit payload.\nCrash Type: {verify_result['crash_type']}\nReturn Code: {verify_result['return_code']}"
-                        console.print(f"[bold red]    X Verification Failed:[/bold red] The patched program still crashed: {verify_result['crash_type']}\n")
+        console.print(Panel(
+            "[bold cyan]PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING[/bold cyan]\n"
+            f"[dim]Mathematically proving the patch works (Max self-healing retries: {max_patch_retries})...[/dim]",
+            border_style="cyan"
+        ))
+        
+        for attempt in range(max_patch_retries + 1):
+            if not patch_code:
+                label = "AI writing secure C patch..." if attempt == 0 else f"Self-Healing Attempt {attempt}/{max_patch_retries} initializing..."
+                console.print(f"[yellow]  ↳ {label}[/yellow]")
+                with Progress(
+                    SpinnerColumn(style="cyan"),
+                    TextColumn("[cyan]Asking AI to write the C patch..."),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task("", total=None)
+                    if attempt == 0:
+                        patch_code = engine.generate_patch(source_code, crashes[0], debug)
                     else:
-                        patch_verified = True
-                        retries_used = attempt
-                        console.print("[bold green]    [+] PATCH VERIFIED SUCCESSFUL![/bold green] The exploit no longer crashes the target.\n")
-                        break
-                except CompilationError as e:
-                    error_details = f"The patched C code failed to compile with the following compiler errors:\n{str(e)}"
-                    console.print(f"[bold red]    X Compilation Failed:[/bold red]\n{e}\n")
+                        patch_code = engine.refine_patch(source_code, "", error_details or "Initial patch was empty", crashes[0], debug)
+                
+                if not patch_code:
+                    error_details = "AI returned an empty C patch response."
+                    console.print("[red]    X AI returned empty C patch.[/red]\n")
+                    continue
+            
+            elif attempt > 0:
+                console.print(f"[yellow]  ↳ Self-Healing Attempt {attempt}/{max_patch_retries} initializing...[/yellow]")
+                with Progress(
+                    SpinnerColumn(style="cyan"),
+                    TextColumn("[cyan]Asking AI to fix the C patch..."),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task("", total=None)
+                    patch_code = engine.refine_patch(source_code, patch_code, error_details, crashes[0], debug)
+                
+                if not patch_code:
+                    error_details = "AI returned an empty C patch response during refinement."
+                    console.print("[red]    X AI failed to return refined C patch.[/red]\n")
+                    continue
+            
+            # Write patch file
+            os.makedirs("patches", exist_ok=True)
+            with open(patch_file, "w", encoding="utf-8") as f:
+                f.write(patch_code)
+            
+            try:
+                patched_exe = compile_target(patch_file, gcc_path)
+                console.print(f"[green]    [+] Patched target compiled successfully[/green]")
+                
+                with Progress(
+                    SpinnerColumn(style="cyan"),
+                    TextColumn("[cyan]    Firing exploit at patched target..."),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task("", total=None)
+                    verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout)
+                    
+                if verify_result["crashed"]:
+                    error_details = f"The patched binary compiled successfully but still crashed when executed with the exploit payload.\nCrash Type: {verify_result['crash_type']}\nReturn Code: {verify_result['return_code']}"
+                    console.print(f"[bold red]    X Verification Failed:[/bold red] The patched program still crashed: {verify_result['crash_type']}\n")
+                else:
+                    patch_verified = True
+                    retries_used = attempt
+                    console.print("[bold green]    [+] PATCH VERIFIED SUCCESSFUL![/bold green] The exploit no longer crashes the target.\n")
+                    break
+            except CompilationError as e:
+                error_details = f"The patched C code failed to compile with the following compiler errors:\n{str(e)}"
+                console.print(f"[bold red]    X Compilation Failed:[/bold red]\n{e}\n")
+
+        # Clean up empty patch file if self-healing failed completely without generating any patch
+        if not patch_code and os.path.exists(patch_file):
+            try:
+                os.remove(patch_file)
+            except Exception:
+                pass
+            patch_file = ""
 
         # Now save report with the final patch code (which may be refined by self-healing)
         json_file, html_file = save_crash_report(crashes, target_name, len(payloads), patch_code, exploit_code)

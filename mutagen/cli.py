@@ -55,7 +55,7 @@ def main():
     parser.add_argument("--max-payloads", type=int, default=5, help="Maximum number of payloads the AI should generate (default: 5)")
     parser.add_argument("--timeout", type=int, default=5, help="Execution timeout in seconds (default: 5)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging to mutagen_debug.log")
-    parser.add_argument("--provider", default=os.environ.get("MUTAGEN_PROVIDER", "gemini"), choices=["gemini", "openai", "ollama"], help="LLM Provider (default: gemini)")
+    parser.add_argument("--provider", default=os.environ.get("MUTAGEN_PROVIDER", "gemini"), choices=["gemini", "openai", "ollama", "claude"], help="LLM Provider (default: gemini)")
     parser.add_argument("--model", default=os.environ.get("MUTAGEN_MODEL", ""), help="Specific model to use")
     parser.add_argument("--delivery", default="args", help="Delivery mode: args, stdin, tcp:<port> (default: args)")
     parser.add_argument("--max-patch-retries", type=int, default=3, help="Maximum number of correction iterations for patch generation (default: 3)")
@@ -82,6 +82,8 @@ def main():
             api_key = os.environ.get("GEMINI_API_KEY", "") or os.environ.get("MUTAGEN_API_KEY", "")
         elif args.provider == "openai":
             api_key = os.environ.get("OPENAI_API_KEY", "") or os.environ.get("MUTAGEN_API_KEY", "")
+        elif args.provider == "claude":
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "") or os.environ.get("MUTAGEN_API_KEY", "")
 
     if not api_key and args.provider != "ollama":
         console.print(f"[red]X API key for {args.provider} not provided.[/red]")

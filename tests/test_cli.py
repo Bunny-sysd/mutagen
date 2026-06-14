@@ -66,6 +66,18 @@ def test_cli_openai_fallback_key(mock_run_fuzzer):
         assert called_kwargs["api_key"] == "fallback_openai_key"
 
 @patch("mutagen.cli.run_fuzzer")
+def test_cli_claude_fallback_key(mock_run_fuzzer):
+    test_args = ["mutagen", "--target", "targets/01_buffer_overflow.c", "--provider", "claude"]
+    with patch.dict(os.environ, {
+        "MUTAGEN_API_KEY": "fallback_claude_key"
+    }, clear=True), patch("sys.argv", test_args):
+        main()
+        mock_run_fuzzer.assert_called_once()
+        _, called_kwargs = mock_run_fuzzer.call_args
+        assert called_kwargs["provider"] == "claude"
+        assert called_kwargs["api_key"] == "fallback_claude_key"
+
+@patch("mutagen.cli.run_fuzzer")
 def test_cli_specific_key_overrides_fallback(mock_run_fuzzer):
     test_args = ["mutagen", "--target", "targets/01_buffer_overflow.c", "--provider", "gemini"]
     with patch.dict(os.environ, {
