@@ -250,8 +250,10 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     # --- Sequential Phase: agentic retries for non-crashing payloads ---
     max_retries = 2
     for i, original_p, last_result, last_args, last_input in needs_retry:
-        for retry_attempt in range(1, max_retries + 1):
-            console.print(f"[yellow]  ↳ Payload {i+1} failed. Agentic Retry {retry_attempt}/{max_retries} initializing...[/yellow]")
+        retry_attempt = 1
+        current_max_retries = 2
+        while retry_attempt <= current_max_retries:
+            console.print(f"[yellow]  ↳ Payload {i+1} failed. Agentic Retry {retry_attempt}/{current_max_retries} initializing...[/yellow]")
             refined = engine.refine_payload(source_code, last_args, last_input, last_result["stdout"], last_result["stderr"], last_result["return_code"], delivery_mode)
             if not refined:
                 console.print("[dim]    (No refined payloads returned, skipping retry)[/dim]")
@@ -318,6 +320,16 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             if retry_crashed:
                 break
 
+            if not retry_crashed and retry_attempt == current_max_retries:
+                if sys.stdin.isatty():
+                    try:
+                        ans = input(f"\n[?] Payload {i+1} refinement failed to crash the target. Try 2 more attempts? [y/N]: ").strip().lower()
+                        if ans in ('y', 'yes'):
+                            current_max_retries += 2
+                    except (KeyboardInterrupt, EOFError):
+                        pass
+            retry_attempt += 1
+
     console.print(results_table)
     console.print()
 
@@ -370,9 +382,11 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             border_style="cyan"
         ))
         
-        for attempt in range(max_patch_retries + 1):
+        attempt = 0
+        current_max_retries = max_patch_retries
+        while attempt <= current_max_retries:
             if not patch_code:
-                label = "AI writing secure C patch..." if attempt == 0 else f"Self-Healing Attempt {attempt}/{max_patch_retries} initializing..."
+                label = "AI writing secure C patch..." if attempt == 0 else f"Self-Healing Attempt {attempt}/{current_max_retries} initializing..."
                 console.print(f"[yellow]  ↳ {label}[/yellow]")
                 with Progress(
                     SpinnerColumn(style="cyan"),
@@ -388,10 +402,19 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 if not patch_code:
                     error_details = "AI returned an empty C patch response."
                     console.print("[red]    X AI returned empty C patch.[/red]\n")
+                    if not patch_verified and attempt == current_max_retries:
+                        if sys.stdin.isatty():
+                            try:
+                                ans = input(f"\n[?] Self-healing failed after {current_max_retries} attempts. Try {max_patch_retries or 3} more attempts? [y/N]: ").strip().lower()
+                                if ans in ('y', 'yes'):
+                                    current_max_retries += (max_patch_retries or 3)
+                            except (KeyboardInterrupt, EOFError):
+                                pass
+                    attempt += 1
                     continue
             
             elif attempt > 0:
-                console.print(f"[yellow]  ↳ Self-Healing Attempt {attempt}/{max_patch_retries} initializing...[/yellow]")
+                console.print(f"[yellow]  ↳ Self-Healing Attempt {attempt}/{current_max_retries} initializing...[/yellow]")
                 with Progress(
                     SpinnerColumn(style="cyan"),
                     TextColumn("[cyan]Asking AI to fix the C patch..."),
@@ -403,6 +426,15 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 if not patch_code:
                     error_details = "AI returned an empty C patch response during refinement."
                     console.print("[red]    X AI failed to return refined C patch.[/red]\n")
+                    if not patch_verified and attempt == current_max_retries:
+                        if sys.stdin.isatty():
+                            try:
+                                ans = input(f"\n[?] Self-healing failed after {current_max_retries} attempts. Try {max_patch_retries or 3} more attempts? [y/N]: ").strip().lower()
+                                if ans in ('y', 'yes'):
+                                    current_max_retries += (max_patch_retries or 3)
+                            except (KeyboardInterrupt, EOFError):
+                                pass
+                    attempt += 1
                     continue
             
             # Write patch file
@@ -433,6 +465,16 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             except CompilationError as e:
                 error_details = f"The patched C code failed to compile with the following compiler errors:\n{str(e)}"
                 console.print(f"[bold red]    X Compilation Failed:[/bold red]\n{e}\n")
+
+            if not patch_verified and attempt == current_max_retries:
+                if sys.stdin.isatty():
+                    try:
+                        ans = input(f"\n[?] Self-healing failed after {current_max_retries} attempts. Try {max_patch_retries or 3} more attempts? [y/N]: ").strip().lower()
+                        if ans in ('y', 'yes'):
+                            current_max_retries += (max_patch_retries or 3)
+                    except (KeyboardInterrupt, EOFError):
+                        pass
+            attempt += 1
 
         # Clean up empty patch file if self-healing failed completely without generating any patch
         if not patch_code and os.path.exists(patch_file):
