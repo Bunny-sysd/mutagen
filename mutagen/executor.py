@@ -1,7 +1,30 @@
 import subprocess
 import os
 
-def execute_payload(exe_path: str, args: list[str], input_data: str, delivery_mode: str, timeout: int) -> dict:
+def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: str, timeout: int) -> dict:
+    # Coerce input_data to string
+    if isinstance(input_data, dict):
+        lowered_keys = {k.lower(): v for k, v in input_data.items()}
+        if "key" in lowered_keys and "value" in lowered_keys:
+            input_data = f"{lowered_keys['key']}={lowered_keys['value']}"
+        else:
+            parts = []
+            for k, v in input_data.items():
+                parts.append(f"{k}={v}")
+            input_data = "\n".join(parts)
+    elif isinstance(input_data, list):
+        input_data = "\n".join(str(x) for x in input_data)
+    elif input_data is None:
+        input_data = ""
+    else:
+        input_data = str(input_data)
+
+    # Coerce args elements to strings
+    if isinstance(args, list):
+        args = [str(a) for a in args]
+    else:
+        args = [str(args)] if args is not None else []
+
     """
     Run the target program with the given arguments and check if it crashes.
 

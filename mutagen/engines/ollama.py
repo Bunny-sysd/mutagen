@@ -27,7 +27,7 @@ class OllamaEngine(BaseEngine):
             payload["format"] = "json"
 
         try:
-            response = self.requests.post(self.url, json=payload, timeout=60)
+            response = self.requests.post(self.url, json=payload, timeout=180)
             if response.status_code == 200:
                 return response.json().get("response", "").strip()
             else:
@@ -36,6 +36,21 @@ class OllamaEngine(BaseEngine):
         except Exception as e:
             console.print(f"[red]Ollama connection failed: {e}[/red]")
             return ""
+
+    def _parse_payload_list(self, raw: str) -> list[dict]:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if isinstance(v, list):
+                        if all(isinstance(x, dict) for x in v):
+                            return v
+                return [data] if all(isinstance(v, str) for v in data.keys()) else []
+            if isinstance(data, list):
+                return [x for x in data if isinstance(x, dict)]
+            return []
+        except Exception:
+            return []
 
     def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool) -> list[dict]:
         prompt = f"""Analyze this C source code for potential vulnerabilities (buffer overflows, format string bugs, integer overflows, use-after-free, etc.).
@@ -58,21 +73,10 @@ Generate up to {max_payloads} payloads. Study main() for how input is read."""
         if debug:
             with open("mutagen_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"--- Ollama ANALYZE CODE RAW RESPONSE ---\n{raw}\n\n")
-        try:
-            return json.loads(raw)
-        except Exception:
-            try:
-                # Sometimes Ollama wraps list in an object
-                data = json.loads(raw)
-                if isinstance(data, dict):
-                    for k, v in data.items():
-                        if isinstance(v, list):
-                            return v
-                    return [data]
-                return data
-            except Exception:
-                console.print(f"[red]Failed to parse Ollama JSON: {raw[:300]}[/red]")
-                return []
+        parsed = self._parse_payload_list(raw)
+        if not parsed and raw:
+            console.print(f"[red]Failed to parse Ollama JSON: {raw[:300]}[/red]")
+        return parsed
 
     def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str) -> list[dict]:
         prompt = f"""We are fuzzing this C code where input is delivered via {delivery_mode}:
@@ -87,10 +91,7 @@ Previous attempt details:
 
 Generate 2-3 refined payloads in a JSON list (containing both "args" and "input_data" fields) to bypass validation or cause a crash."""
         raw = self._generate(prompt, format_json=True)
-        try:
-            return json.loads(raw)
-        except Exception:
-            return []
+        return self._parse_payload_list(raw)
 
     def generate_patch(self, source_code: str, crash_data: dict, debug: bool = False) -> str:
         prompt = f"""Securely patch the vulnerability in this C code:

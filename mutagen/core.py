@@ -261,6 +261,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
             retry_crashed = False
             for rp in refined:
+                if not isinstance(rp, dict):
+                    continue
                 r_args = rp.get("args", [])
                 r_input = rp.get("input_data", "")
                 if isinstance(r_args, str):
