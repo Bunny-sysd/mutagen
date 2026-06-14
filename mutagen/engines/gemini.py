@@ -158,7 +158,7 @@ Respond with ONLY the JSON array."""
             if response is not None:
                 break
 
-        if response is None:
+        if response is None or response.text is None:
             return []
 
         raw = response.text.strip()
