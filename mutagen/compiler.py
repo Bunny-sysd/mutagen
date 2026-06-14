@@ -20,11 +20,17 @@ def check_sanitizer_support(gcc_path: str) -> bool:
             f.write("int main() { return 0; }\n")
             
         try:
+            env = os.environ.copy()
+            gcc_dir = os.path.dirname(gcc_path)
+            if gcc_dir:
+                env["PATH"] = gcc_dir + os.pathsep + env.get("PATH", "")
+                
             res = subprocess.run(
                 [gcc_path, "-fsanitize=address,undefined", "-o", dummy_out, dummy_c],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                env=env
             )
             return res.returncode == 0
         except Exception:
@@ -52,7 +58,24 @@ def compile_target(source_path: str, gcc_path: str) -> str:
         console.print("[dim]  Sanitizers not supported (or using TCC). Compiling standard binary...[/dim]")
         
     compile_args.extend(["-o", output_path, source_path])
-    result = subprocess.run(compile_args, capture_output=True, text=True)
+    
+    # MinGW/MSYS2 needs explicit linking for Winsock
+    if os.name == 'nt' and "tcc" not in os.path.basename(gcc_path).lower():
+        try:
+            with open(source_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            if "winsock2.h" in content:
+                compile_args.append("-lws2_32")
+        except Exception:
+            pass
+            
+    # Add compiler directory to PATH so gcc can resolve sub-tools (as.exe, ld.exe, etc.)
+    env = os.environ.copy()
+    gcc_dir = os.path.dirname(gcc_path)
+    if gcc_dir:
+        env["PATH"] = gcc_dir + os.pathsep + env.get("PATH", "")
+        
+    result = subprocess.run(compile_args, capture_output=True, text=True, env=env)
 
     if result.returncode != 0:
         raise CompilationError(result.stderr)

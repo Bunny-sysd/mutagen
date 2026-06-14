@@ -92,13 +92,13 @@ def main():
 
     # --- FIND GCC --------------------------------------------------------
     gcc_candidates = [
-        r"c:\mutagen\tcc\tcc\tcc.exe",
         r"C:\msys64\ucrt64\bin\gcc.exe",
         r"C:\msys64\mingw64\bin\gcc.exe",
         r"C:\msys64\mingw32\bin\gcc.exe",
         r"C:\MinGW\bin\gcc.exe",
         r"C:\TDM-GCC-64\bin\gcc.exe",
         "gcc",  # Fall back to PATH
+        r"c:\mutagen\tcc\tcc\tcc.exe",  # TCC as final fallback
     ]
 
     gcc_path = None

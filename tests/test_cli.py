@@ -22,8 +22,9 @@ def test_load_env_parsing(tmp_path):
         assert os.environ.get("MUTAGEN_MODEL") == "gpt-4o"
         assert os.environ.get("GEMINI_API_KEY") == "dummy_gemini_key"
 
+@patch("mutagen.cli.load_env")
 @patch("mutagen.cli.run_fuzzer")
-def test_cli_defaults_with_env(mock_run_fuzzer):
+def test_cli_defaults_with_env(mock_run_fuzzer, mock_load_env):
     # Mock sys.argv to simulate a call: mutagen --target targets/01_buffer_overflow.c
     test_args = ["mutagen", "--target", "targets/01_buffer_overflow.c"]
     
@@ -41,8 +42,9 @@ def test_cli_defaults_with_env(mock_run_fuzzer):
         assert called_kwargs["model"] == "gpt-4-test"
         assert called_kwargs["api_key"] == "test_global_key"
 
+@patch("mutagen.cli.load_env")
 @patch("mutagen.cli.run_fuzzer")
-def test_cli_gemini_fallback_key(mock_run_fuzzer):
+def test_cli_gemini_fallback_key(mock_run_fuzzer, mock_load_env):
     test_args = ["mutagen", "--target", "targets/01_buffer_overflow.c", "--provider", "gemini"]
     with patch.dict(os.environ, {
         "MUTAGEN_API_KEY": "fallback_gemini_key"
@@ -53,8 +55,9 @@ def test_cli_gemini_fallback_key(mock_run_fuzzer):
         assert called_kwargs["provider"] == "gemini"
         assert called_kwargs["api_key"] == "fallback_gemini_key"
 
+@patch("mutagen.cli.load_env")
 @patch("mutagen.cli.run_fuzzer")
-def test_cli_openai_fallback_key(mock_run_fuzzer):
+def test_cli_openai_fallback_key(mock_run_fuzzer, mock_load_env):
     test_args = ["mutagen", "--target", "targets/01_buffer_overflow.c", "--provider", "openai"]
     with patch.dict(os.environ, {
         "MUTAGEN_API_KEY": "fallback_openai_key"
@@ -65,8 +68,9 @@ def test_cli_openai_fallback_key(mock_run_fuzzer):
         assert called_kwargs["provider"] == "openai"
         assert called_kwargs["api_key"] == "fallback_openai_key"
 
+@patch("mutagen.cli.load_env")
 @patch("mutagen.cli.run_fuzzer")
-def test_cli_claude_fallback_key(mock_run_fuzzer):
+def test_cli_claude_fallback_key(mock_run_fuzzer, mock_load_env):
     test_args = ["mutagen", "--target", "targets/01_buffer_overflow.c", "--provider", "claude"]
     with patch.dict(os.environ, {
         "MUTAGEN_API_KEY": "fallback_claude_key"
@@ -77,8 +81,9 @@ def test_cli_claude_fallback_key(mock_run_fuzzer):
         assert called_kwargs["provider"] == "claude"
         assert called_kwargs["api_key"] == "fallback_claude_key"
 
+@patch("mutagen.cli.load_env")
 @patch("mutagen.cli.run_fuzzer")
-def test_cli_specific_key_overrides_fallback(mock_run_fuzzer):
+def test_cli_specific_key_overrides_fallback(mock_run_fuzzer, mock_load_env):
     test_args = ["mutagen", "--target", "targets/01_buffer_overflow.c", "--provider", "gemini"]
     with patch.dict(os.environ, {
         "GEMINI_API_KEY": "specific_gemini_key",
