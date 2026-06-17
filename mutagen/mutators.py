@@ -17,10 +17,6 @@ import random
 import string
 
 
-def _rand_ascii(length: int) -> str:
-    """Generate a random ASCII string of the given length."""
-    return "".join(random.choices(string.ascii_letters + string.digits, k=length))
-
 
 # ---------------------------------------------------------------------------
 # Individual strategy generators

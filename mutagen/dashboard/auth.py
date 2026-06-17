@@ -1,16 +1,17 @@
+import os
 import base64
 import hmac
 import hashlib
 import json
 import time
 
-SECRET_KEY = "mutagen_dashboard_super_secret_key_12345"
+SECRET_KEY = os.environ.get("MUTAGEN_JWT_SECRET", "mutagen_dashboard_super_secret_key_12345")
 
 def base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode('utf-8')
 
 def base64url_decode(s: str) -> bytes:
-    padding = '=' * (4 - len(s) % 4)
+    padding = '=' * ((4 - len(s) % 4) % 4)
     return base64.urlsafe_b64decode(s + padding)
 
 def generate_jwt(username: str, role: str, expires_in: int = 3600) -> str:
