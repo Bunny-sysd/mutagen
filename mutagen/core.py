@@ -16,6 +16,10 @@ from mutagen.compiler import compile_target, CompilationError
 from mutagen.executor import execute_payload
 from mutagen.reporter import save_crash_report
 from mutagen.mutators import generate_fallback_payloads
+from mutagen.decompiler import (
+    is_binary_target, find_ghidra, decompile_binary,
+    DecompilationError, DecompilationResult,
+)
 
 console = Console(force_terminal=True, force_jupyter=False)
 
@@ -25,9 +29,18 @@ def _crash_signature(crash: dict) -> str:
     return f"{crash['crash_type']}::{crash['return_code']}::{crash.get('vuln_type', '')}"
 
 
-def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3):
+def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = ""):
     """Main fuzzer orchestration function."""
     engine = get_engine(provider, api_key, model, debug, console)
+
+    # Detect language dynamically
+    ext = os.path.splitext(source_path)[1].lower()
+    if binary_mode:
+        language = "c"  # Decompiled output is always pseudo-C
+    else:
+        language = "rust" if ext == ".rs" else "c"
+    engine.language = language
+    engine.is_decompiled = binary_mode
 
     # --- BANNER ----------------------------------------------------------
     banner_lines = [
@@ -50,18 +63,100 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     console.print(Panel(banner, border_style="green", box=box.HEAVY))
     console.print()
 
-    # --- STEP 1: READ THE TARGET SOURCE CODE -----------------------------
-    console.print(f"[cyan]> TARGET:[/cyan] {source_path}")
+    # --- PHASE 0: BINARY DECOMPILATION (if binary target) ----------------
+    decompilation_info = None  # Will hold DecompilationResult if binary mode
+    raw_decompiled_code = ""
+    if binary_mode:
+        console.print(Panel(
+            "[bold cyan]PHASE 0: BINARY DECOMPILATION[/bold cyan]\n"
+            "[dim]Decompiling binary with Ghidra headless analyzer...[/dim]",
+            border_style="cyan"
+        ))
+        console.print(f"[cyan]> BINARY TARGET:[/cyan] {source_path}")
 
-    with open(source_path, "r", encoding="utf-8") as f:
-        source_code = f.read()
+        try:
+            ghidra_headless = find_ghidra(ghidra_path)
+            console.print(f"[green]>> Ghidra found: {ghidra_headless}[/green]")
+        except DecompilationError as e:
+            console.print(f"[bold red]X {e}[/bold red]")
+            sys.exit(1)
 
-    console.print(f"[dim]  Read {len(source_code)} bytes of source code[/dim]")
-    console.print()
+        with Progress(
+            SpinnerColumn(style="green"),
+            TextColumn("[green]Ghidra decompiling binary..."),
+            console=console,
+        ) as progress:
+            task = progress.add_task("", total=None)
+            try:
+                decompilation_info = decompile_binary(
+                    binary_path=source_path,
+                    ghidra_headless=ghidra_headless,
+                    all_functions=decompile_all,
+                    timeout=300,  # 5 minute timeout for large binaries
+                )
+            except DecompilationError as e:
+                console.print(f"[bold red]X Decompilation failed![/bold red]\n{e}")
+                sys.exit(1)
+
+        # Show decompilation stats
+        decompile_table = Table(title="Decompilation Results", box=box.ROUNDED, border_style="cyan")
+        decompile_table.add_column("Property", style="cyan")
+        decompile_table.add_column("Value", style="green")
+        decompile_table.add_row("Binary", os.path.basename(source_path))
+        decompile_table.add_row("Architecture", decompilation_info.architecture)
+        decompile_table.add_row("Format", decompilation_info.binary_format)
+        decompile_table.add_row("Functions Decompiled", str(decompilation_info.functions_found))
+        decompile_table.add_row("Pseudo-C Size", f"{len(decompilation_info.pseudo_source):,} bytes")
+        decompile_table.add_row("Decompiler", decompilation_info.decompiler_used.upper())
+        console.print(decompile_table)
+        console.print()
+
+        raw_decompiled_code = decompilation_info.pseudo_source
+        
+        # --- CONTEXT WINDOW CHUNKING ---
+        from mutagen.chunker import split_functions, filter_functions, reconstruct_pseudo_code
+        meta_header, functions = split_functions(raw_decompiled_code)
+        filtered_funcs = filter_functions(functions)
+        
+        # Log chunking action details
+        console.print(f"[dim]  Context Window Chunker: split {len(functions)} functions down to {len(filtered_funcs)} high-priority functions containing risk keywords[/dim]")
+        
+        source_code = reconstruct_pseudo_code(meta_header, filtered_funcs)
+        console.print(f"[dim]  Extracted {len(source_code)} bytes of filtered C pseudo-code[/dim]")
+        console.print()
+
+        # --- PHASE 0.5: AI SYMBOL RECOVERY & DEOBFUSCATION -------------------
+        console.print(Panel(
+            "[bold cyan]PHASE 0.5: AI SYMBOL RECOVERY & DEOBFUSCATION[/bold cyan]\n"
+            "[dim]Refactoring generic variables/functions and inserting annotations...[/dim]",
+            border_style="cyan"
+        ))
+        with Progress(
+            SpinnerColumn(style="cyan"),
+            TextColumn("[cyan]AI deobfuscating and annotating code..."),
+            console=console,
+        ) as progress:
+            task = progress.add_task("", total=None)
+            deobfuscated_code = engine.deobfuscate_code(source_code, debug)
+            if deobfuscated_code and deobfuscated_code.strip():
+                source_code = deobfuscated_code
+                console.print("[green]>> Symbol recovery successful! Replaced generic variable/function stubs.[/green]")
+            else:
+                console.print("[yellow]⚠ AI deobfuscation returned empty code, falling back to raw pseudo-C.[/yellow]")
+        console.print()
+    else:
+        # --- STEP 1: READ THE TARGET SOURCE CODE -----------------------------
+        console.print(f"[cyan]> TARGET:[/cyan] {source_path}")
+
+        with open(source_path, "r", encoding="utf-8") as f:
+            source_code = f.read()
+
+        console.print(f"[dim]  Read {len(source_code)} bytes of source code[/dim]")
+        console.print()
 
     # --- STEP 2: AI ANALYSIS ---------------------------------------------
     console.print(Panel(
-        f"[bold cyan]PHASE 1: AI CODE ANALYSIS ({delivery_mode.upper()} mode)[/bold cyan]\n"
+        f"[bold cyan]PHASE 1: AI CODE ANALYSIS ({delivery_mode.upper()} mode - {profile} profile)[/bold cyan]\n"
         "[dim]Sending source code to for vulnerability analysis...[/dim]",
         border_style="cyan"
     ))
@@ -72,7 +167,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         console=console,
     ) as progress:
         task = progress.add_task("", total=None)
-        payloads = engine.analyze_code(source_code, max_payloads, delivery_mode, debug)
+        payloads = engine.analyze_code(source_code, max_payloads, delivery_mode, debug, profile=profile)
 
     if not payloads:
         console.print("[yellow]⚠ AI returned no payloads (possible refusal, rate-limit, or network error).[/yellow]")
@@ -131,21 +226,86 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     console.print(vuln_table)
     console.print()
 
-    # --- STEP 3: COMPILE THE TARGET --------------------------------------
-    console.print(Panel(
-        "[bold cyan]PHASE 2: COMPILE TARGET[/bold cyan]\n"
-        "[dim]Building the target with security protections disabled...[/dim]",
-        border_style="cyan"
-    ))
-
-    try:
-        exe_path = compile_target(source_path, gcc_path)
-    except CompilationError as e:
-        console.print(f"[bold red]X Initial compilation failed![/bold red]\n{e}")
-        sys.exit(1)
+    # --- STATIC-ONLY MODE GATING (Safety/Analysis boundary) --------------
+    if static_only:
+        console.print(Panel(
+            "[bold yellow]STATIC-ONLY MODE ACTIVATED[/bold yellow]\n"
+            f"[dim]Profile: {profile.upper()} | Skipping compilation, execution, and patch verification phases.[/dim]",
+            border_style="yellow"
+        ))
         
-    console.print(f"[green]>> Compiled to: {exe_path}[/green]")
-    console.print()
+        target_name = os.path.basename(source_path)
+        for ext_to_strip in (".rs", ".cpp", ".c"):
+            if target_name.endswith(ext_to_strip):
+                target_name = target_name[:-len(ext_to_strip)]
+                break
+        
+        # Format payloads into static findings
+        static_findings = []
+        for i, p in enumerate(payloads):
+            static_findings.append({
+                "args": p.get("args", []),
+                "input_data": p.get("input_data", ""),
+                "payload": p.get("input_data") if p.get("input_data") else " ".join(p.get("args", [])),
+                "vuln_type": p.get("vuln_type", ""),
+                "cwe": p.get("cwe", ""),
+                "reason": p.get("reason", ""),
+                "severity": p.get("severity", ""),
+                "crash_type": "Static Analysis Scan (No dynamic execution)",
+                "return_code": 0,
+                "retries": 0,
+            })
+
+        json_file, html_file = save_crash_report(
+            static_findings, target_name, 0, "", "",
+            language="c" if binary_mode else language, binary_mode=binary_mode,
+            decompilation_info=decompilation_info,
+            profile=profile, static_only=True,
+            raw_decompiled_code=raw_decompiled_code,
+            clean_source_code=source_code,
+            webhook_url=webhook_url
+        )
+
+        summary = Panel(
+            f"[bold green]STATIC ANALYSIS COMPLETE[/bold green]\n\n"
+            f"  Analysis mode:    [bold yellow]STATIC ONLY ({profile})[/bold yellow]\n"
+            f"  Findings mapped:  [cyan]{len(static_findings)}[/cyan]\n"
+            f"  JSON report:      [dim]{json_file}[/dim]\n"
+            f"  HTML report:      [yellow]{html_file}[/yellow]\n"
+            f"  [dim]Open the HTML report in your browser for a visual breakdown![/dim]",
+            title="[bold green]** RESULTS **[/bold green]",
+            border_style="green",
+            box=box.HEAVY,
+        )
+        console.print(summary)
+        return len(static_findings)
+
+    # --- STEP 3: COMPILE THE TARGET (or use original binary) ---------------
+    if binary_mode:
+        # In binary mode, fuzz the original binary directly — no compilation needed
+        exe_path = source_path
+        console.print(Panel(
+            "[bold cyan]PHASE 2: COMPILE TARGET[/bold cyan]\n"
+            "[bold green]SKIPPED[/bold green] — Using original binary directly for fuzzing.",
+            border_style="dim"
+        ))
+        console.print(f"[green]>> Using binary: {exe_path}[/green]")
+        console.print()
+    else:
+        console.print(Panel(
+            "[bold cyan]PHASE 2: COMPILE TARGET[/bold cyan]\n"
+            "[dim]Building the target with security protections disabled...[/dim]",
+            border_style="cyan"
+        ))
+
+        try:
+            exe_path = compile_target(source_path, gcc_path)
+        except CompilationError as e:
+            console.print(f"[bold red]X Initial compilation failed![/bold red]\n{e}")
+            sys.exit(1)
+            
+        console.print(f"[green]>> Compiled to: {exe_path}[/green]")
+        console.print()
 
     # --- STEP 4: FUZZ! (PARALLEL EXECUTION) ------------------------------
     console.print(Panel(
@@ -336,158 +496,216 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     console.print()
 
     # --- STEP 5: REPORT --------------------------------------------------
-    target_name = os.path.basename(source_path).replace(".c", "")
+    target_name = os.path.basename(source_path)
+    for ext_to_strip in (".rs", ".cpp", ".c"):
+        if target_name.endswith(ext_to_strip):
+            target_name = target_name[:-len(ext_to_strip)]
+            break
     crash_rate = (len(all_crashes)/len(payloads)*100) if payloads else 0
 
     # Use unique_crashes for patching/exploit (most interesting distinct bugs)
     crashes = unique_crashes
 
     if crashes:
-        # --- AUTO-PATCH & AEG GENERATION -------------------------------------
-        console.print(Panel(
-            "[bold cyan]PHASE 4: AUTO-PATCH & EXPLOIT GENERATION[/bold cyan]\n"
-            "[dim]Asking AI to generate a secure fix and Python exploit...[/dim]",
-            border_style="cyan"
-        ))
-        
-        patch_file = f"patches/{target_name}_FIXED.c"
+        patch_ext = "rs" if language == "rust" else "c"
+        patch_file = ""
         exploit_file = ""
         patch_code = ""
         exploit_code = ""
-        with Progress(
-            SpinnerColumn(style="cyan"),
-            TextColumn("[cyan]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.update(progress.add_task("[magenta]AI writing Python exploit script..."), total=None)
-            exploit_code = engine.generate_exploit(source_code, crashes[0], exe_path, delivery_mode, debug)
-            
-            if exploit_code:
-                os.makedirs("exploits", exist_ok=True)
-                exploit_file = f"exploits/{target_name}_exploit.py"
-                with open(exploit_file, "w", encoding="utf-8") as f:
-                    f.write(exploit_code)
-                    
-        if exploit_file:
-            console.print(f"[green]>> Python exploit saved to: {exploit_file}[/green]\n")
-        else:
-            console.print("[red]X Failed to generate exploit.[/red]\n")
-
-        # --- PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING -----------------
         patch_verified = False
         retries_used = 0
-        error_details = ""
-        
-        console.print(Panel(
-            "[bold cyan]PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING[/bold cyan]\n"
-            f"[dim]Mathematically proving the patch works (Max self-healing retries: {max_patch_retries})...[/dim]",
-            border_style="cyan"
-        ))
-        
-        attempt = 0
-        current_max_retries = max_patch_retries
-        while attempt <= current_max_retries:
-            if not patch_code:
-                label = "AI writing secure C patch..." if attempt == 0 else f"Self-Healing Attempt {attempt}/{current_max_retries} initializing..."
-                console.print(f"[yellow]  ↳ {label}[/yellow]")
-                with Progress(
-                    SpinnerColumn(style="cyan"),
-                    TextColumn("[cyan]Asking AI to write the C patch..."),
-                    console=console,
-                ) as progress:
-                    task = progress.add_task("", total=None)
-                    if attempt == 0:
-                        patch_code = engine.generate_patch(source_code, crashes[0], debug)
-                    else:
-                        patch_code = engine.refine_patch(source_code, "", error_details or "Initial patch was empty", crashes[0], debug)
+
+        if binary_mode:
+            # --- BINARY MODE: Exploit generation only, no patching -----------
+            console.print(Panel(
+                "[bold cyan]PHASE 4: EXPLOIT GENERATION (Binary Mode)[/bold cyan]\n"
+                "[dim]Generating exploit script... (Auto-patch unavailable — no source code)[/dim]",
+                border_style="cyan"
+            ))
+
+            with Progress(
+                SpinnerColumn(style="cyan"),
+                TextColumn("[cyan]{task.description}"),
+                console=console,
+            ) as progress:
+                progress.update(progress.add_task("[magenta]AI writing Python exploit script..."), total=None)
+                exploit_code = engine.generate_exploit(source_code, crashes[0], exe_path, delivery_mode, debug)
+
+                if exploit_code:
+                    os.makedirs("exploits", exist_ok=True)
+                    exploit_file = f"exploits/{target_name}_exploit.py"
+                    with open(exploit_file, "w", encoding="utf-8") as f:
+                        f.write(exploit_code)
+
+            if exploit_file:
+                console.print(f"[green]>> Python exploit saved to: {exploit_file}[/green]\n")
+            else:
+                console.print("[red]X Failed to generate exploit.[/red]\n")
+
+            console.print(Panel(
+                "[bold cyan]PHASE 5: AUTO-PATCH & VERIFICATION[/bold cyan]\n"
+                "[bold yellow]SKIPPED[/bold yellow] — Source code unavailable for binary targets.\n"
+                "[dim]Manual remediation required based on the vulnerability report.[/dim]",
+                border_style="dim"
+            ))
+            console.print()
+
+            # Save report in binary mode
+            json_file, html_file = save_crash_report(
+                crashes, target_name, len(payloads), patch_code, exploit_code,
+                language=patch_ext, binary_mode=True,
+                decompilation_info=decompilation_info,
+                profile=profile, static_only=False,
+                raw_decompiled_code=raw_decompiled_code,
+                clean_source_code=source_code,
+                webhook_url=webhook_url,
+            )
+        else:
+            # --- SOURCE MODE: Full patch + exploit + verification -----------
+            console.print(Panel(
+                "[bold cyan]PHASE 4: AUTO-PATCH & EXPLOIT GENERATION[/bold cyan]\n"
+                "[dim]Asking AI to generate a secure fix and Python exploit...[/dim]",
+                border_style="cyan"
+            ))
+            
+            patch_file = f"patches/{target_name}_FIXED.{patch_ext}"
+            with Progress(
+                SpinnerColumn(style="cyan"),
+                TextColumn("[cyan]{task.description}"),
+                console=console,
+            ) as progress:
+                progress.update(progress.add_task("[magenta]AI writing Python exploit script..."), total=None)
+                exploit_code = engine.generate_exploit(source_code, crashes[0], exe_path, delivery_mode, debug)
                 
+                if exploit_code:
+                    os.makedirs("exploits", exist_ok=True)
+                    exploit_file = f"exploits/{target_name}_exploit.py"
+                    with open(exploit_file, "w", encoding="utf-8") as f:
+                        f.write(exploit_code)
+                        
+            if exploit_file:
+                console.print(f"[green]>> Python exploit saved to: {exploit_file}[/green]\n")
+            else:
+                console.print("[red]X Failed to generate exploit.[/red]\n")
+
+            # --- PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING -----------------
+            error_details = ""
+            
+            console.print(Panel(
+                "[bold cyan]PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING[/bold cyan]\n"
+                f"[dim]Mathematically proving the patch works (Max self-healing retries: {max_patch_retries})...[/dim]",
+                border_style="cyan"
+            ))
+            
+            attempt = 0
+            current_max_retries = max_patch_retries
+            while attempt <= current_max_retries:
                 if not patch_code:
-                    error_details = "AI returned an empty C patch response."
-                    console.print("[red]    X AI returned empty C patch.[/red]\n")
-                    if not patch_verified and attempt == current_max_retries:
-                        if sys.stdin.isatty():
-                            try:
-                                ans = input(f"\n[?] Self-healing failed after {current_max_retries} attempts. Try {max_patch_retries or 3} more attempts? [y/N]: ").strip().lower()
-                                if ans in ('y', 'yes'):
-                                    current_max_retries += (max_patch_retries or 3)
-                            except (KeyboardInterrupt, EOFError):
-                                pass
-                    attempt += 1
-                    continue
-            
-            elif attempt > 0:
-                console.print(f"[yellow]  ↳ Self-Healing Attempt {attempt}/{current_max_retries} initializing...[/yellow]")
-                with Progress(
-                    SpinnerColumn(style="cyan"),
-                    TextColumn("[cyan]Asking AI to fix the C patch..."),
-                    console=console,
-                ) as progress:
-                    task = progress.add_task("", total=None)
-                    patch_code = engine.refine_patch(source_code, patch_code, error_details, crashes[0], debug)
-                
-                if not patch_code:
-                    error_details = "AI returned an empty C patch response during refinement."
-                    console.print("[red]    X AI failed to return refined C patch.[/red]\n")
-                    if not patch_verified and attempt == current_max_retries:
-                        if sys.stdin.isatty():
-                            try:
-                                ans = input(f"\n[?] Self-healing failed after {current_max_retries} attempts. Try {max_patch_retries or 3} more attempts? [y/N]: ").strip().lower()
-                                if ans in ('y', 'yes'):
-                                    current_max_retries += (max_patch_retries or 3)
-                            except (KeyboardInterrupt, EOFError):
-                                pass
-                    attempt += 1
-                    continue
-            
-            # Write patch file
-            os.makedirs("patches", exist_ok=True)
-            with open(patch_file, "w", encoding="utf-8") as f:
-                f.write(patch_code)
-            
-            try:
-                patched_exe = compile_target(patch_file, gcc_path)
-                console.print(f"[green]    [+] Patched target compiled successfully[/green]")
-                
-                with Progress(
-                    SpinnerColumn(style="cyan"),
-                    TextColumn("[cyan]    Firing exploit at patched target..."),
-                    console=console,
-                ) as progress:
-                    task = progress.add_task("", total=None)
-                    verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout)
+                    label = "AI writing secure C patch..." if attempt == 0 else f"Self-Healing Attempt {attempt}/{current_max_retries} initializing..."
+                    console.print(f"[yellow]  ↳ {label}[/yellow]")
+                    with Progress(
+                        SpinnerColumn(style="cyan"),
+                        TextColumn("[cyan]Asking AI to write the C patch..."),
+                        console=console,
+                    ) as progress:
+                        task = progress.add_task("", total=None)
+                        if attempt == 0:
+                            patch_code = engine.generate_patch(source_code, crashes[0], debug)
+                        else:
+                            patch_code = engine.refine_patch(source_code, "", error_details or "Initial patch was empty", crashes[0], debug)
                     
-                if verify_result["crashed"]:
-                    error_details = f"The patched binary compiled successfully but still crashed when executed with the exploit payload.\nCrash Type: {verify_result['crash_type']}\nReturn Code: {verify_result['return_code']}"
-                    console.print(f"[bold red]    X Verification Failed:[/bold red] The patched program still crashed: {verify_result['crash_type']}\n")
-                else:
-                    patch_verified = True
-                    retries_used = attempt
-                    console.print("[bold green]    [+] PATCH VERIFIED SUCCESSFUL![/bold green] The exploit no longer crashes the target.\n")
-                    break
-            except CompilationError as e:
-                error_details = f"The patched C code failed to compile with the following compiler errors:\n{str(e)}"
-                console.print(f"[bold red]    X Compilation Failed:[/bold red]\n{e}\n")
+                    if not patch_code:
+                        error_details = "AI returned an empty C patch response."
+                        console.print("[red]    X AI returned empty C patch.[/red]\n")
+                        if not patch_verified and attempt == current_max_retries:
+                            if sys.stdin.isatty():
+                                try:
+                                    ans = input(f"\n[?] Self-healing failed after {current_max_retries} attempts. Try {max_patch_retries or 3} more attempts? [y/N]: ").strip().lower()
+                                    if ans in ('y', 'yes'):
+                                        current_max_retries += (max_patch_retries or 3)
+                                except (KeyboardInterrupt, EOFError):
+                                    pass
+                        attempt += 1
+                        continue
+                
+                elif attempt > 0:
+                    console.print(f"[yellow]  ↳ Self-Healing Attempt {attempt}/{current_max_retries} initializing...[/yellow]")
+                    with Progress(
+                        SpinnerColumn(style="cyan"),
+                        TextColumn("[cyan]Asking AI to fix the C patch..."),
+                        console=console,
+                    ) as progress:
+                        task = progress.add_task("", total=None)
+                        patch_code = engine.refine_patch(source_code, patch_code, error_details, crashes[0], debug)
+                    
+                    if not patch_code:
+                        error_details = "AI returned an empty C patch response during refinement."
+                        console.print("[red]    X AI failed to return refined C patch.[/red]\n")
+                        if not patch_verified and attempt == current_max_retries:
+                            if sys.stdin.isatty():
+                                try:
+                                    ans = input(f"\n[?] Self-healing failed after {current_max_retries} attempts. Try {max_patch_retries or 3} more attempts? [y/N]: ").strip().lower()
+                                    if ans in ('y', 'yes'):
+                                        current_max_retries += (max_patch_retries or 3)
+                                except (KeyboardInterrupt, EOFError):
+                                    pass
+                        attempt += 1
+                        continue
+                
+                # Write patch file
+                os.makedirs("patches", exist_ok=True)
+                with open(patch_file, "w", encoding="utf-8") as f:
+                    f.write(patch_code)
+                
+                try:
+                    patched_exe = compile_target(patch_file, gcc_path)
+                    console.print(f"[green]    [+] Patched target compiled successfully[/green]")
+                    
+                    with Progress(
+                        SpinnerColumn(style="cyan"),
+                        TextColumn("[cyan]    Firing exploit at patched target..."),
+                        console=console,
+                    ) as progress:
+                        task = progress.add_task("", total=None)
+                        verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout)
+                        
+                    if verify_result["crashed"]:
+                        error_details = f"The patched binary compiled successfully but still crashed when executed with the exploit payload.\nCrash Type: {verify_result['crash_type']}\nReturn Code: {verify_result['return_code']}"
+                        console.print(f"[bold red]    X Verification Failed:[/bold red] The patched program still crashed: {verify_result['crash_type']}\n")
+                    else:
+                        patch_verified = True
+                        retries_used = attempt
+                        console.print("[bold green]    [+] PATCH VERIFIED SUCCESSFUL![/bold green] The exploit no longer crashes the target.\n")
+                        break
+                except CompilationError as e:
+                    error_details = f"The patched C code failed to compile with the following compiler errors:\n{str(e)}"
+                    console.print(f"[bold red]    X Compilation Failed:[/bold red]\n{e}\n")
 
-            if not patch_verified and attempt == current_max_retries:
-                if sys.stdin.isatty():
-                    try:
-                        ans = input(f"\n[?] Self-healing failed after {current_max_retries} attempts. Try {max_patch_retries or 3} more attempts? [y/N]: ").strip().lower()
-                        if ans in ('y', 'yes'):
-                            current_max_retries += (max_patch_retries or 3)
-                    except (KeyboardInterrupt, EOFError):
-                        pass
-            attempt += 1
+                if not patch_verified and attempt == current_max_retries:
+                    if sys.stdin.isatty():
+                        try:
+                            ans = input(f"\n[?] Self-healing failed after {current_max_retries} attempts. Try {max_patch_retries or 3} more attempts? [y/N]: ").strip().lower()
+                            if ans in ('y', 'yes'):
+                                current_max_retries += (max_patch_retries or 3)
+                        except (KeyboardInterrupt, EOFError):
+                            pass
+                attempt += 1
 
-        # Clean up empty patch file if self-healing failed completely without generating any patch
-        if not patch_code and os.path.exists(patch_file):
-            try:
-                os.remove(patch_file)
-            except Exception:
-                pass
-            patch_file = ""
+            # Clean up empty patch file if self-healing failed completely without generating any patch
+            if not patch_code and os.path.exists(patch_file):
+                try:
+                    os.remove(patch_file)
+                except Exception:
+                    pass
+                patch_file = ""
 
-        # Now save report with the final patch code (which may be refined by self-healing)
-        json_file, html_file = save_crash_report(crashes, target_name, len(payloads), patch_code, exploit_code)
+            # Now save report with the final patch code (which may be refined by self-healing)
+            json_file, html_file = save_crash_report(
+                crashes, target_name, len(payloads), patch_code, exploit_code,
+                language=patch_ext, profile=profile, static_only=False,
+                raw_decompiled_code="", clean_source_code=source_code,
+                webhook_url=webhook_url,
+            )
 
         patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""
         exploit_text = f"  Exploit generated:[magenta]{exploit_file}[/magenta]\n" if exploit_file else ""
@@ -500,12 +718,23 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             else:
                 healing_text = f"  Self-healing:     [red]Failed (used {retries_used} retries)[/red]\n"
 
+        binary_text = ""
+        if binary_mode:
+            binary_text = f"  Analysis mode:    [bold cyan]BINARY DECOMPILATION[/bold cyan]\n"
+            if decompilation_info:
+                binary_text += f"  Architecture:     [cyan]{decompilation_info.architecture}[/cyan]\n"
+                binary_text += f"  Functions found:  [cyan]{decompilation_info.functions_found}[/cyan]\n"
+            patch_text = "  Auto-patch:       [yellow]N/A (source unavailable)[/yellow]\n"
+            verification_text = ""
+            healing_text = ""
+
         dedup_text = ""
         if len(all_crashes) != len(unique_crashes):
             dedup_text = f"  Total crash hits:  [dim]{len(all_crashes)} ({len(all_crashes) - len(unique_crashes)} duplicates removed)[/dim]\n"
 
         summary = Panel(
             f"[bold green]FUZZING COMPLETE[/bold green]\n\n"
+            f"{binary_text}"
             f"  Payloads tested:  [cyan]{len(payloads)}[/cyan]\n"
             f"  Unique crashes:   [bold red]{len(unique_crashes)}[/bold red]\n"
             f"{dedup_text}"
@@ -534,4 +763,6 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         )
 
     console.print(summary)
+    return len(unique_crashes)
+
 

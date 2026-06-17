@@ -59,7 +59,7 @@ VULN_CAPABILITIES = {
     }
 }
 
-def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = ""):
+def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = "", webhook_url: str = ""):
     """Save all crash-causing payloads to a JSON report file and generate a premium HTML dashboard."""
     os.makedirs("crashes", exist_ok=True)
 
@@ -582,5 +582,13 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
 
     with open(html_file, "w", encoding="utf-8") as f:
         f.write(html_content)
+
+    # Fire webhook if configured
+    if webhook_url:
+        import requests
+        try:
+            requests.post(webhook_url, json=report, headers={"Content-Type": "application/json"}, timeout=10)
+        except Exception:
+            pass
 
     return json_file, html_file
