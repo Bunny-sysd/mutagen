@@ -2,8 +2,64 @@ import os
 import json
 import datetime
 import html
+from mutagen.compliance import map_cwe_to_compliance
 
-def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = ""):
+VULN_CAPABILITIES = {
+    "buffer_overflow": {
+        "name": "Memory Corruption / Buffer Overflow",
+        "description": "The program writes data past the end of an allocated buffer, enabling stack or heap memory corruption, control flow hijacking, or remote code execution."
+    },
+    "format_string": {
+        "name": "Format String Injection",
+        "description": "Insecure evaluation of user-supplied input as a format string in printf-family functions, allowing unauthorized memory disclosure or memory writes."
+    },
+    "integer_overflow": {
+        "name": "Arithmetic Wrap / Integer Overflow",
+        "description": "Numeric values exceed minimum/maximum boundary limits, wrapping around to unexpected values and bypassing subsequent safety checks or array bounds checks."
+    },
+    "command_injection": {
+        "name": "Arbitrary Command Execution",
+        "description": "Inadequate sanitization of shell metacharacters in system calls, enabling command chaining and execution of unauthorized operating system commands."
+    },
+    "input_validation": {
+        "name": "Improper Input Validation",
+        "description": "Failure to validate data structures, null characters, or control character sequences, causing unexpected application states or parser crashes."
+    },
+    "use_after_free": {
+        "name": "Use After Free (UAF)",
+        "description": "Referencing memory after it has been deallocated, which can lead to memory corruption, arbitrary code execution, or information disclosure."
+    },
+    "off_by_one": {
+        "name": "Off-by-One Boundary Overwrite",
+        "description": "A loop or copy boundary is miscalculated by exactly one byte, causing adjacent variables or control structure contamination."
+    },
+    "backdoor": {
+        "name": "Hidden Backdoor Access",
+        "description": "Undocumented command structures or hidden execution paths designed to bypass standard authentication controls."
+    },
+    "credential_leak": {
+        "name": "Hardcoded Credential Exposure",
+        "description": "Embedded passwords, private keys, API secrets, or certificates located directly within the binary or source code structure."
+    },
+    "malware_persistence": {
+        "name": "Malware Persistence Mechanism",
+        "description": "Actions that attempt to register automatic execution hooks via registry keys, startup folders, or system tasks to maintain access."
+    },
+    "ransomware_encryption": {
+        "name": "Unauthorized Cryptographic Activity",
+        "description": "Suspicious execution of high-entropy cryptographic algorithms designed to lock or encrypt files without explicit user consent."
+    },
+    "keylogger_module": {
+        "name": "Keyboard Input Monitoring",
+        "description": "Registration of global key hooks or polling interfaces aimed at intercepting and recording keystrokes."
+    },
+    "basic_input": {
+        "name": "Standard Input Parsing Capability",
+        "description": "The binary accepts and processes standard data input parameters to verify normal operational functionality."
+    }
+}
+
+def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = ""):
     """Save all crash-causing payloads to a JSON report file and generate a premium HTML dashboard."""
     os.makedirs("crashes", exist_ok=True)
 
@@ -13,6 +69,9 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     report = {
         "tool": "Mutagen v2.0",
         "target": target_name,
+        "analysis_mode": "binary_decompilation" if binary_mode else "source_code",
+        "profile": profile,
+        "static_only": static_only,
         "timestamp": timestamp,
         "total_payloads_tested": total_tested,
         "total_crashes_found": len(crashes),
@@ -22,6 +81,18 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         "crashes": crashes,
     }
 
+    if binary_mode:
+        report["decompiled_source_raw"] = raw_decompiled_code
+        report["decompiled_source_deobfuscated"] = clean_source_code
+        if decompilation_info:
+            report["decompilation"] = {
+                "decompiler": decompilation_info.decompiler_used,
+                "architecture": decompilation_info.architecture,
+                "binary_format": decompilation_info.binary_format,
+                "functions_decompiled": decompilation_info.functions_found,
+                "binary_path": decompilation_info.binary_path,
+            }
+
     with open(json_file, "w") as f:
         json.dump(report, f, indent=2)
 
@@ -29,7 +100,8 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     html_file = f"crashes/report_{target_name}_{timestamp}.html"
     
     crash_rows = ""
-    for i, c in enumerate(crashes):
+    crashes_sorted = sorted(crashes, key=lambda x: x.get("confidence_score", 5), reverse=True)
+    for i, c in enumerate(crashes_sorted):
         args_display = ", ".join(c.get("args", [c.get("payload", "N/A")]))
         if len(args_display) > 60:
             args_display = args_display[:57] + "..."
@@ -45,31 +117,224 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         safe_sev = html.escape(severity.upper())
         safe_class = html.escape(sev_class)
 
+        # Get confidence score
+        conf_val = c.get("confidence_score", 5)
+        if conf_val >= 8:
+            conf_color = "#ff4d4d"
+        elif conf_val >= 5:
+            conf_color = "#ffb84d"
+        else:
+            conf_color = "#00ff88"
+            
+        # Format mitigations
+        mitigations = c.get("mitigations_detected", [])
+        safe_mitigations = ", ".join(html.escape(m) for m in mitigations) if mitigations else "None"
+
+        # Format Data Flow as a visual chain
+        data_flow = c.get("data_flow", [])
+        if data_flow:
+            safe_flow = " &rarr; ".join(f"<code style='color: #00ccff; border: none; background: rgba(0, 204, 255, 0.05); padding: 0.1rem 0.3rem;'>{html.escape(f)}</code>" for f in data_flow)
+        else:
+            safe_flow = "<span style='color: #64748b;'>None</span>"
+
+        # Get compliance mappings
+        comp = map_cwe_to_compliance(safe_cwe)
+        safe_pci = html.escape(comp.get("PCI-DSS", ""))
+        safe_soc2 = html.escape(comp.get("SOC2", ""))
+
         crash_rows += f"""
         <tr>
             <td>{i+1}</td>
             <td><span class="badge {safe_class}">{safe_sev}</span></td>
             <td>{safe_vuln}</td>
             <td>{safe_cwe}</td>
+            <td><strong style="color: {conf_color}; font-family: 'JetBrains Mono', monospace;">{conf_val}/10</strong></td>
             <td><code>{safe_args}</code></td>
+            <td>{safe_flow}</td>
             <td>{safe_crash}</td>
-            <td class="reason">{safe_reason}</td>
+            <td class="reason">
+                <div>{safe_reason}</div>
+                <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #94a3b8;"><strong>Mitigations:</strong> {safe_mitigations}</div>
+                <div style="margin-top: 0.3rem; font-size: 0.8rem; color: #f59e0b;"><strong>Compliance:</strong> PCI-DSS: <em>{safe_pci}</em> &bull; SOC2: <em>{safe_soc2}</em></div>
+            </td>
         </tr>"""
 
     crash_rate = (len(crashes)/total_tested*100) if total_tested else 0
     vuln_types = list(set(c.get("vuln_type", "") for c in crashes))
     
+    # --- PARSE SECURITY TELEMETRY (IoCs & Capabilities) ---------------------
+    ioc_rows = ""
+    capability_rows = ""
+    ioc_panel_html = ""
+    capability_panel_html = ""
+
+    if profile == "malware-triage" or static_only:
+        # Extract capabilities
+        caps_found = {}
+        severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "unknown": 0}
+        for c in crashes:
+            vt = c.get("vuln_type", "unknown")
+            sev = c.get("severity", "unknown").lower()
+            if vt not in caps_found:
+                caps_found[vt] = {
+                    "count": 0,
+                    "severity": sev,
+                }
+            caps_found[vt]["count"] += 1
+            if severity_rank.get(sev, 0) > severity_rank.get(caps_found[vt]["severity"], 0):
+                caps_found[vt]["severity"] = sev
+        
+        # Build capability matrix rows
+        for i, (vt, details) in enumerate(caps_found.items()):
+            vt_norm = vt.lower().strip().replace(" ", "_").replace("-", "_")
+            
+            # Lookup capability details
+            cap_info = VULN_CAPABILITIES.get(vt_norm)
+            if cap_info:
+                cap_name = cap_info["name"]
+                cap_desc = cap_info["description"]
+            else:
+                # Fallback for custom or dynamically generated types
+                cap_name = vt.replace("_", " ").title()
+                cap_desc = f"Custom security vulnerability signature identified during static triage."
+            
+            count = details["count"]
+            occurrences_str = f"Detected {count} crash-causing payload context{'s' if count > 1 else ''}."
+            details_text = f"{cap_desc} ({occurrences_str})"
+            
+            sev = details["severity"].upper()
+            sev_class = details["severity"].lower() if details["severity"].lower() in ("critical", "high", "medium", "low") else "low"
+            capability_rows += f"""
+            <tr>
+                <td>{i+1}</td>
+                <td><span class="badge {sev_class}">{sev}</span></td>
+                <td><strong>{html.escape(cap_name)}</strong></td>
+                <td>{html.escape(details_text)}</td>
+            </tr>"""
+            
+        # Extract IoCs using simple regexes/rules
+        import re
+        ip_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b')
+        domain_pattern = re.compile(r'\b[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b')
+        registry_pattern = re.compile(r'\b(?:HKLM|HKCU|SOFTWARE|Registry|System)\\[a-zA-Z0-9._\-\\]+\b', re.IGNORECASE)
+        file_pattern = re.compile(r'\b[a-zA-Z0-9._-]+\.(?:exe|dll|sys|bat|sh|bin|conf|ini|key)\b', re.IGNORECASE)
+
+        extracted_ips = set()
+        extracted_domains = set()
+        extracted_files = set()
+        extracted_registry = set()
+
+        for c in crashes:
+            text_to_scan = f"{c.get('vuln_type', '')} {c.get('reason', '')} {' '.join(c.get('args', []))} {c.get('input_data', '')}"
+            for ip in ip_pattern.findall(text_to_scan):
+                if ip not in ("127.0.0.1", "0.0.0.0"):
+                    extracted_ips.add(ip)
+            for d in domain_pattern.findall(text_to_scan):
+                if not d[0].isdigit() and "." in d and len(d) > 4:
+                    if d.lower() not in ("example.com", "mutagen.exe", "localhost"):
+                        extracted_domains.add(d.lower())
+            for reg in registry_pattern.findall(text_to_scan):
+                extracted_registry.add(reg)
+            for f in file_pattern.findall(text_to_scan):
+                if f.lower() not in ("mutagen.exe", "gcc.exe", "rustc.exe"):
+                    extracted_files.add(f)
+
+        # Build IoC rows
+        ioc_count = 1
+        for ip in sorted(extracted_ips):
+            ioc_rows += f"<tr><td>{ioc_count}</td><td><span class='badge critical'>IP ADDRESS</span></td><td><code>{html.escape(ip)}</code></td><td>External Command & Control (C2) endpoint candidate</td></tr>"
+            ioc_count += 1
+        for d in sorted(extracted_domains):
+            ioc_rows += f"<tr><td>{ioc_count}</td><td><span class='badge high'>DOMAIN</span></td><td><code>{html.escape(d)}</code></td><td>External domain referenced in binary stubs</td></tr>"
+            ioc_count += 1
+        for r in sorted(extracted_registry):
+            ioc_rows += f"<tr><td>{ioc_count}</td><td><span class='badge medium'>REGISTRY KEY</span></td><td><code>{html.escape(r)}</code></td><td>Persistence or system config registry access pointer</td></tr>"
+            ioc_count += 1
+        for f in sorted(extracted_files):
+            ioc_rows += f"<tr><td>{ioc_count}</td><td><span class='badge low'>FILE SYSTEM</span></td><td><code>{html.escape(f)}</code></td><td>Indicator of file creation, dropped payload, or DLL sideloading</td></tr>"
+            ioc_count += 1
+
+        if not ioc_rows:
+            ioc_rows = "<tr><td colspan='4' style='text-align: center; color: #64748b;'>No network or filesystem indicators of compromise (IoCs) extracted from signatures.</td></tr>"
+        if not capability_rows:
+            capability_rows = "<tr><td colspan='4' style='text-align: center; color: #64748b;'>No capabilities identified.</td></tr>"
+
+        capability_panel_html = f"""
+        <div class="table-container" style="margin-top: 2rem;">
+          <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; margin: 1.5rem 0 1rem 0; color: #fbbf24;">⚡ Threat Capability Matrix</h2>
+          <table>
+            <thead><tr><th style="width: 50px;">#</th><th style="width: 120px;">Threat Level</th><th style="width: 220px;">Identified Capability</th><th>Behavioral Details</th></tr></thead>
+            <tbody>{capability_rows}</tbody>
+          </table>
+        </div>"""
+
+        ioc_panel_html = f"""
+        <div class="table-container" style="margin-top: 2rem;">
+          <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; margin: 1.5rem 0 1rem 0; color: #ff6b6b;">🔬 Extracted Indicators of Compromise (IoCs)</h2>
+          <table>
+            <thead><tr><th style="width: 50px;">#</th><th style="width: 150px;">Indicator Type</th><th style="width: 250px;">IOC Value</th><th>Description / Context</th></tr></thead>
+            <tbody>{ioc_rows}</tbody>
+          </table>
+        </div>"""
+
     # Escape patch and exploit code for injection into HTML code blocks
-    safe_patch_code = html.escape(patch_code or "// No patch code was generated.")
+    if binary_mode:
+        safe_patch_code = html.escape("// Auto-patch unavailable for binary targets.\n// Source code is required for patch generation.\n// Manual remediation is required based on the vulnerability findings above.")
+    else:
+        safe_patch_code = html.escape(patch_code or "// No patch code was generated.")
     safe_exploit_code = html.escape(exploit_code or "# No regression exploit script was generated.")
     
     # Dynamic Tab buttons
     patch_tab_btn = ""
     exploit_tab_btn = ""
-    if patch_code:
-        patch_tab_btn = '<button class="tab-btn" onclick="showTab(\'patch-tab\')">🩹 Patched Code</button>'
-    if exploit_code:
-        exploit_tab_btn = '<button class="tab-btn" onclick="showTab(\'exploit-tab\')">💀 Exploit Script</button>'
+    deobfuscated_tab_btn = ""
+    raw_decompiled_tab_btn = ""
+
+    if clean_source_code and binary_mode:
+        deobfuscated_tab_btn = '<button class="tab-btn" onclick="showTab(\'deobfuscated-tab\')">✨ Deobfuscated Code</button>'
+    if raw_decompiled_code and binary_mode:
+        raw_decompiled_tab_btn = '<button class="tab-btn" onclick="showTab(\'raw-decompiled-tab\')">🔍 Raw Decompiled</button>'
+
+    if patch_code or binary_mode:
+        patch_label = "Remediation Notes" if binary_mode else "Patched Code"
+        patch_tab_btn = f'<button class="tab-btn" onclick="showTab(\'patch-tab\')">{patch_label}</button>'
+    if exploit_code and not static_only:
+        exploit_tab_btn = '<button class="tab-btn" onclick="showTab(\'exploit-tab\')">Exploit Script</button>'
+
+    # Build the code viewer panels if code is present
+    deobfuscated_tab_html = ""
+    raw_decompiled_tab_html = ""
+
+    if clean_source_code and binary_mode:
+        deobfuscated_tab_html = f"""
+    <!-- DEOBFUSCATED CODE VIEW -->
+    <div id="deobfuscated-tab" class="tab-content">
+      <div class="code-viewer">
+        <pre><code class="language-c">{html.escape(clean_source_code)}</code></pre>
+      </div>
+    </div>"""
+
+    if raw_decompiled_code and binary_mode:
+        raw_decompiled_tab_html = f"""
+    <!-- RAW DECOMPILED VIEW -->
+    <div id="raw-decompiled-tab" class="tab-content">
+      <div class="code-viewer">
+        <pre><code class="language-c">{html.escape(raw_decompiled_code)}</code></pre>
+      </div>
+    </div>"""
+
+    # Build subtitle based on analysis mode (computed BEFORE the f-string)
+    if binary_mode:
+        arch_info = ""
+        if decompilation_info:
+            arch_info = f" | Arch: {html.escape(decompilation_info.architecture)} | Functions: {html.escape(str(decompilation_info.functions_found))}"
+        analysis_label = "STATIC TRIAGE" if static_only else "BINARY DECOMPILATION"
+        subtitle_line = f'Target: <strong style="color: #ffffff;">{target_name}</strong> | Mode: <code style="color: #ff6b6b; font-size: 0.85rem; padding: 0.2rem 0.4rem;">{analysis_label}</code>{arch_info} | {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+        report_subtitle = f"Binary Analysis Report — {profile.upper()} Profile"
+    else:
+        analysis_label = "STATIC SCAN" if static_only else "AI-Powered Zero-Day Fuzzer &amp; Auto-Patcher"
+        subtitle_line = f'Target: <strong style="color: #ffffff;">{target_name}.{language}</strong> &nbsp;&bull;&nbsp; Mode: <code style="color: #00ccff; font-size: 0.85rem; padding: 0.2rem 0.4rem;">{analysis_label}</code> &nbsp;&bull;&nbsp; {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+        report_subtitle = f"Source Code Audit — {profile.upper()} Profile"
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -247,13 +512,15 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
 <body>
   <div class="container">
     <div class="header">
-      <h1>🧬 MUTAGEN</h1>
-      <p class="subtitle">AI-Powered Zero-Day Fuzzer & Auto-Patcher</p>
-      <p class="subtitle" style="margin-top: 1rem; font-size: 0.95rem;">Target: <strong style="color: #ffffff;">{target_name}.c</strong> &nbsp;&bull;&nbsp; Compiled: <code style="color: #00ccff; font-size: 0.85rem; padding: 0.2rem 0.4rem;">{target_name}.exe</code> &nbsp;&bull;&nbsp; {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+      <h1>MUTAGEN</h1>
+      <p class="subtitle">{report_subtitle}</p>
+      <p class="subtitle" style="margin-top: 1rem; font-size: 0.95rem;">{subtitle_line}</p>
     </div>
 
     <div class="tabs">
       <button class="tab-btn active" onclick="showTab('dashboard-tab')">📊 Overview</button>
+      {deobfuscated_tab_btn}
+      {raw_decompiled_tab_btn}
       {patch_tab_btn}
       {exploit_tab_btn}
     </div>
@@ -268,16 +535,21 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
       </div>
       <div class="table-container">
         <table>
-          <thead><tr><th>#</th><th>Severity</th><th>Vuln Type</th><th>CWE</th><th>Payload</th><th>Crash Type</th><th>Reason</th></tr></thead>
+          <thead><tr><th>#</th><th>Severity</th><th>Vuln Type</th><th>CWE</th><th>Confidence</th><th>Payload</th><th>Data Flow (Source &rarr; Sink)</th><th>Crash Type</th><th>Reason &amp; Mitigations</th></tr></thead>
           <tbody>{crash_rows}</tbody>
         </table>
       </div>
+      {capability_panel_html}
+      {ioc_panel_html}
     </div>
+
+    {deobfuscated_tab_html}
+    {raw_decompiled_tab_html}
 
     <!-- CODE PATCH VIEW -->
     <div id="patch-tab" class="tab-content">
       <div class="code-viewer">
-        <pre><code class="language-c">{safe_patch_code}</code></pre>
+        <pre><code class="language-{language}">{safe_patch_code}</code></pre>
       </div>
     </div>
 
