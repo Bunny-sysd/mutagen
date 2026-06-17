@@ -38,7 +38,16 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     if binary_mode:
         language = "c"  # Decompiled output is always pseudo-C
     else:
-        language = "rust" if ext == ".rs" else "c"
+        if ext == ".rs":
+            language = "rust"
+        elif ext == ".go":
+            language = "go"
+        elif ext == ".java":
+            language = "java"
+        elif ext == ".cs":
+            language = "csharp"
+        else:
+            language = "c"
     engine.language = language
     engine.is_decompiled = binary_mode
 
@@ -497,7 +506,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
     # --- STEP 5: REPORT --------------------------------------------------
     target_name = os.path.basename(source_path)
-    for ext_to_strip in (".rs", ".cpp", ".c"):
+    for ext_to_strip in (".rs", ".cpp", ".c", ".go", ".java", ".cs"):
         if target_name.endswith(ext_to_strip):
             target_name = target_name[:-len(ext_to_strip)]
             break
@@ -507,7 +516,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     crashes = unique_crashes
 
     if crashes:
-        patch_ext = "rs" if language == "rust" else "c"
+        patch_ext = "rs" if language == "rust" else "go" if language == "go" else "java" if language == "java" else "cs" if language == "csharp" else "c"
         patch_file = ""
         exploit_file = ""
         patch_code = ""

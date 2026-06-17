@@ -41,12 +41,88 @@ class CompilationError(Exception):
     pass
 
 def compile_target(source_path: str, gcc_path: str) -> str:
-    """Compile C target file using the provided gcc path, enabling ASan if supported."""
+    """Compile C/C++ or Rust target file using the provided compiler path."""
+    ext = os.path.splitext(source_path)[1].lower()
+    
+    if ext == ".go":
+        output_path = source_path.replace(".go", ".exe" if os.name == 'nt' else ".out")
+        compile_args = [gcc_path, "build", "-o", output_path, source_path]
+        result = subprocess.run(compile_args, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise CompilationError(result.stderr or result.stdout)
+        return output_path
+
+    elif ext == ".java":
+        class_name = os.path.splitext(os.path.basename(source_path))[0]
+        if os.name == 'nt':
+            output_path = source_path.replace(".java", ".bat")
+        else:
+            output_path = source_path.replace(".java", ".sh")
+            
+        compile_args = [gcc_path, source_path]
+        
+        env = os.environ.copy()
+        javac_dir = os.path.dirname(gcc_path)
+        if javac_dir:
+            env["PATH"] = javac_dir + os.pathsep + env.get("PATH", "")
+            
+        result = subprocess.run(compile_args, capture_output=True, text=True, env=env)
+        if result.returncode != 0:
+            raise CompilationError(result.stderr or result.stdout)
+            
+        if os.name == 'nt':
+            wrapper_content = f'@echo off\njava -cp "%~dp0" {class_name} %*\n'
+        else:
+            wrapper_content = f'#!/bin/sh\njava -cp "$(dirname "$0")" {class_name} "$@"\n'
+            
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(wrapper_content)
+            
+        if os.name != 'nt':
+            os.chmod(output_path, 0o755)
+            
+        return output_path
+
+    elif ext == ".cs":
+        output_path = source_path.replace(".cs", ".exe" if os.name == 'nt' else ".out")
+        compile_args = [gcc_path, f"/out:{output_path}" if os.name == 'nt' else f"-out:{output_path}", source_path]
+        
+        env = os.environ.copy()
+        csc_dir = os.path.dirname(gcc_path)
+        if csc_dir:
+            env["PATH"] = csc_dir + os.pathsep + env.get("PATH", "")
+            
+        result = subprocess.run(compile_args, capture_output=True, text=True, env=env)
+        if result.returncode != 0:
+            raise CompilationError(result.stderr or result.stdout)
+        return output_path
+
+    elif source_path.endswith(".rs"):
+        # Dynamically determine output extension based on OS
+        if os.name == 'nt':
+            output_path = source_path.replace(".rs", ".exe")
+        else:
+            output_path = source_path.replace(".rs", ".out")
+            
+        compile_args = [gcc_path, "-o", output_path, source_path]
+        
+        # Add cargo/rustc bin directory to PATH if available
+        env = os.environ.copy()
+        rustc_dir = os.path.dirname(gcc_path)
+        if rustc_dir:
+            env["PATH"] = rustc_dir + os.pathsep + env.get("PATH", "")
+            
+        result = subprocess.run(compile_args, capture_output=True, text=True, env=env)
+        if result.returncode != 0:
+            raise CompilationError(result.stderr)
+        return output_path
+        
+    # C/C++ path
     # Dynamically determine output extension based on OS
     if os.name == 'nt':
-        output_path = source_path.replace(".c", ".exe")
+        output_path = source_path.replace(".c", ".exe").replace(".cpp", ".exe")
     else:
-        output_path = source_path.replace(".c", ".out")
+        output_path = source_path.replace(".c", ".out").replace(".cpp", ".out")
         
     # Check if sanitizers are supported
     use_sanitizers = check_sanitizer_support(gcc_path)

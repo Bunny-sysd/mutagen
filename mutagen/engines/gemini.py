@@ -9,26 +9,82 @@ from mutagen.engines.base import BaseEngine
 console = Console(force_terminal=True, force_jupyter=False)
 
 class GeminiEngine(BaseEngine):
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = ""):
         self.api_key = api_key
+        self.model = model
         self.client = genai.Client(api_key=self.api_key)
 
-    def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool) -> list[dict]:
+    def _get_models(self, default_models: list[str]) -> list[str]:
+        if not self.model:
+            return default_models
+        models = list(default_models)
+        if self.model in models:
+            models.remove(self.model)
+        models.insert(0, self.model)
+        return models
+
+    @property
+    def lang(self) -> str:
+        return getattr(self, "language", "c").lower()
+
+    @property
+    def lang_name(self) -> str:
+        if self.lang == "rust":
+            return "Rust"
+        elif self.lang == "go":
+            return "Go"
+        elif self.lang == "java":
+            return "Java"
+        elif self.lang == "csharp":
+            return "C#"
+        return "C"
+
+    @property
+    def lang_ext(self) -> str:
+        if self.lang == "rust":
+            return "rs"
+        elif self.lang == "go":
+            return "go"
+        elif self.lang == "java":
+            return "java"
+        elif self.lang == "csharp":
+            return "cs"
+        return "c"
+
+    def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool, profile: str = "legacy-audit") -> list[dict]:
+        decompile_context = ""
+        if getattr(self, "is_decompiled", False):
+            decompile_context = """
+CRITICAL CONTEXT: This is DECOMPILED pseudo-C code extracted from a compiled binary via Ghidra.
+- Variable names are auto-generated (e.g., param_1, iVar2, local_28) — infer their purpose from usage.
+- Some constructs may be approximated by the decompiler and may not match the original source exactly.
+- Focus on security patterns, buffer operations, pointer arithmetic, unsafe casts, and control flow.
+- The original binary may have been compiled from C, C++, or another language.
+
+"""
+        if profile == "supply-chain":
+            focus_description = "unauthorized network calls, hardcoded backdoors, hidden command execution, environment variable exfiltration, and secrets/credential leaks."
+            vuln_types_example = '"backdoor", "credential_leak", "command_injection", "unauthorized_socket"'
+        elif profile == "malware-triage":
+            focus_description = "malware signatures, encryption algorithms (e.g., ransomware encryption loops), persistence mechanisms, keyloggers, evasion techniques, and command & control (C2) footprint."
+            vuln_types_example = '"malware_persistence", "ransomware_encryption", "keylogger_module", "c2_socket"'
+        else:
+            focus_description = "buffer overflows, format string bugs, integer overflows, use-after-free, off-by-one errors, double-free, heap overflows, command injection, and panics/safety violations."
+            vuln_types_example = '"buffer_overflow", "format_string", "integer_overflow", "use_after_free"'
+
         prompt = f"""You are an expert defensive security researcher conducting a code audit.
-Your job is to analyze the following C source code for potential vulnerabilities
-such as buffer overflows, format string bugs, integer overflows, use-after-free,
-off-by-one errors, double-free, heap overflows, and command injection.
+{decompile_context}Your job is to analyze the following {self.lang_name} source code for potential vulnerabilities and security risks, focusing on: {focus_description}
 
 The target program receives input via: {delivery_mode}.
 
 First, analyze the source code step by step using a Chain of Thought process to understand
 the control flow, data flow, and memory management. Identify where untrusted inputs 
-are used in dangerous operations without proper validation or bounds checking.
+are used in dangerous operations or suspicious/unauthorized behaviors.
 
-For each vulnerability you find, generate a specific test payload.
+For each security risk or vulnerability you find, generate a specific test payload or indicator scenario.
 
 SOURCE CODE:
-```c
+```{self.lang_ext}
 {source_code}
 ```
 
@@ -37,15 +93,18 @@ IMPORTANT RULES:
 2. Each element must have these fields:
    - "args": an array of strings, one per command-line argument (used if delivery mode is 'args')
    - "input_data": a string containing the raw input to feed via stdin or network (used if delivery mode is 'stdin' or 'tcp')
-   - "vuln_type": the vulnerability type (e.g. "buffer_overflow", "format_string", "integer_overflow", "use_after_free")
-   - "reason": brief explanation of why this triggers the bug, containing your chain of thought logic
+   - "vuln_type": the vulnerability or capability type (e.g. {vuln_types_example})
+   - "reason": brief explanation of why this triggers the bug or capability, containing your chain of thought logic
    - "severity": "critical", "high", "medium", or "low"
    - "cwe": the CWE ID if known (e.g. "CWE-120")
+   - "data_flow": an array of strings tracing execution flow from entry-point input (Source) to the vulnerability function/sink
+   - "confidence_score": an integer from 1 to 10 assessing vulnerability trigger confidence
+   - "mitigations_detected": array of strings listing security checks/canaries/filters detected in the code path
 3. For long repeated strings, write them out literally (e.g. "AAAAAAAAAA" not "A"*10). Limit any repeated strings to a maximum of 1000 characters to prevent parsing truncation.
-4. Generate up to {max_payloads} diverse payloads ranging from safe inputs to crash-inducing.
-5. Study the main() function to see exactly how the program reads its input (e.g., argv, fgets, scanf, recv)."""
+4. Generate up to {max_payloads} diverse payloads ranging from safe inputs to risk-inducing.
+5. Study the program entry point (like main() or fn main()) to see exactly how the program reads its input."""
 
-        models_to_try = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
+        models_to_try = self._get_models(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"])
         response = None
         for model_name in models_to_try:
             for attempt in range(3):
@@ -76,8 +135,8 @@ IMPORTANT RULES:
             if response is not None:
                 break
 
-        if response is None:
-            console.print("[red]!! All models failed. Check your API key or try again later.[/red]")
+        if response is None or response.text is None:
+            console.print("[red]!! All models failed or response was empty/blocked. Check your API key or try again later.[/red]")
             return []
 
         raw = response.text.strip()
@@ -93,13 +152,13 @@ IMPORTANT RULES:
             return []
 
     def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str) -> list[dict]:
-        prompt = f"""You are an expert defensive security researcher. You previously analyzed this C source code to find vulnerabilities.
+        prompt = f"""You are an expert defensive security researcher. You previously analyzed this {self.lang_name} source code to find vulnerabilities.
 Your previous payload DID NOT CRASH the target program. We need to refine the attack.
 
 The target program receives input via: {delivery_mode}.
 
 SOURCE CODE:
-```c
+```{self.lang_ext}
 {source_code}
 ```
 
@@ -112,7 +171,7 @@ EXECUTION RESULTS:
 - Stdout: {stdout.strip() if stdout else "None"}
 - Stderr: {stderr.strip() if stderr else "None"}
 
-Please analyze why the previous payload failed to cause a memory corruption/crash.
+Please analyze why the previous payload failed to cause a crash/safety violation.
 Generate 2-3 new, refined payloads to try to bypass the mitigation or hit the vulnerability correctly.
 
 IMPORTANT RULES:
@@ -128,7 +187,7 @@ IMPORTANT RULES:
 
 Respond with ONLY the JSON array."""
 
-        models_to_try = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
+        models_to_try = self._get_models(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"])
         response = None
         for model_name in models_to_try:
             for attempt in range(2):
@@ -171,11 +230,11 @@ Respond with ONLY the JSON array."""
             return []
 
     def generate_patch(self, source_code: str, crash_data: dict, debug: bool = False) -> str:
-        prompt = f"""You are a Senior C Security Engineer.
-An automated fuzzer just found a critical vulnerability in the following C code.
+        prompt = f"""You are a Senior {self.lang_name} Security Engineer.
+An automated fuzzer just found a critical vulnerability in the following {self.lang_name} code.
 
 SOURCE CODE:
-```c
+```{self.lang_ext}
 {source_code}
 ```
 
@@ -195,12 +254,12 @@ CRASH TYPE:
 {crash_data.get("crash_type")}
 
 Your task is to securely patch the vulnerability.
-Provide the ENTIRE updated C source code file that fixes the issue.
+Provide the ENTIRE updated {self.lang_name} source code file that fixes the issue.
 DO NOT use markdown formatting outside of the code block.
-Return ONLY the raw C code. DO NOT wrap it in ```c and ```.
-If you must use markdown, the parser will try to strip it, but please try to return just the C code."""
+Return ONLY the raw {self.lang_name} code. DO NOT wrap it in ```{self.lang_ext} and ```.
+If you must use markdown, the parser will try to strip it, but please try to return just the code."""
 
-        models_to_try = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
+        models_to_try = self._get_models(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"])
         response = None
         for model_name in models_to_try:
             for attempt in range(2):
@@ -223,25 +282,25 @@ If you must use markdown, the parser will try to strip it, but please try to ret
             if response is not None:
                 break
 
-        if response is None:
+        if response is None or response.text is None:
             return ""
 
         text = response.text.strip()
-        if text.startswith("```c"):
-            text = text[4:]
-        elif text.startswith("```"):
-            text = text[3:]
+        for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
+            if text.lower().startswith(prefix):
+                text = text[len(prefix):]
+                break
         if text.endswith("```"):
             text = text[:-3]
 
         return text.strip()
 
     def refine_patch(self, source_code: str, bad_patch: str, error_message: str, crash_data: dict, debug: bool = False) -> str:
-        prompt = f"""You are a Senior C Security Engineer.
-We tried to patch a vulnerability in the following C code, but the patch failed.
+        prompt = f"""You are a Senior {self.lang_name} Security Engineer.
+We tried to patch a vulnerability in the following {self.lang_name} code, but the patch failed.
 
 ORIGINAL SOURCE CODE:
-```c
+```{self.lang_ext}
 {source_code}
 ```
 
@@ -253,7 +312,7 @@ VULNERABILITY DETAILS:
 - Exploit Payload Input Data: {crash_data.get("input_data")}
 
 THE ATTEMPTED PATCH CODE THAT FAILED:
-```c
+```{self.lang_ext}
 {bad_patch}
 ```
 
@@ -261,12 +320,12 @@ FAILURE DETAILS:
 {error_message}
 
 Please analyze the failure details and correct the patch code.
-Provide the ENTIRE corrected C source code file.
+Provide the ENTIRE corrected {self.lang_name} source code file.
 DO NOT use markdown formatting outside of the code block.
-Return ONLY the raw C code. DO NOT wrap it in ```c and ```.
-If you must use markdown, the parser will try to strip it, but please try to return just the C code."""
+Return ONLY the raw {self.lang_name} code. DO NOT wrap it in ```{self.lang_ext} and ```.
+If you must use markdown, the parser will try to strip it, but please try to return just the code."""
 
-        models_to_try = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
+        models_to_try = self._get_models(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"])
         response = None
         for model_name in models_to_try:
             for attempt in range(2):
@@ -289,14 +348,14 @@ If you must use markdown, the parser will try to strip it, but please try to ret
             if response is not None:
                 break
 
-        if response is None:
+        if response is None or response.text is None:
             return ""
 
         text = response.text.strip()
-        if text.startswith("```c"):
-            text = text[4:]
-        elif text.startswith("```"):
-            text = text[3:]
+        for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
+            if text.lower().startswith(prefix):
+                text = text[len(prefix):]
+                break
         if text.endswith("```"):
             text = text[:-3]
 
@@ -304,12 +363,12 @@ If you must use markdown, the parser will try to strip it, but please try to ret
 
     def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
         prompt = f"""You are a Senior Security QA Engineer writing a regression test.
-An automated fuzzer just found a memory corruption vulnerability in the following C code compiled as '{exe_path}'.
+An automated fuzzer just found a security vulnerability in the following {self.lang_name} code compiled as '{exe_path}'.
 
 The executable expects input via: {delivery_mode}.
 
 SOURCE CODE:
-```c
+```{self.lang_ext}
 {source_code}
 ```
 
@@ -340,7 +399,7 @@ DO NOT use markdown formatting outside of the code block.
 Return ONLY the raw Python code. DO NOT wrap it in ```python and ```.
 If you must use markdown, the parser will try to strip it, but please try to return just the Python code."""
 
-        models_to_try = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]
+        models_to_try = self._get_models(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"])
         response = None
         for model_name in models_to_try:
             for attempt in range(2):
@@ -361,7 +420,7 @@ If you must use markdown, the parser will try to strip it, but please try to ret
             if response is not None:
                 break
 
-        if response is None:
+        if response is None or response.text is None:
             return ""
 
         text = response.text.strip()
@@ -373,3 +432,59 @@ If you must use markdown, the parser will try to strip it, but please try to ret
             text = text[:-3]
 
         return text.strip()
+
+    def deobfuscate_code(self, raw_code: str, debug: bool = False) -> str:
+        prompt = f"""You are an expert reverse engineer and code deobfuscator.
+Your task is to analyze the following messy decompiled C pseudo-code and perform symbol recovery and deobfuscation to make it readable.
+
+Follow these rules:
+1. Rename all generic, auto-generated variables (like local_1c, param_1, pvVar2, iVar3) to clear, descriptive names based on how they are used in the code.
+2. Rename generic auto-generated function names (like FUN_004010a0, FUN_004011b0) to meaningful descriptive names based on their logic.
+3. Clean up complex control-flow loops or ternary statements into standard, structured C code equivalents.
+4. Add clear inline comments explaining what each logical block does.
+5. Provide the ENTIRE refactored, readable C source code file.
+6. Do NOT include any markdown block formatting or explanations outside of the code block. Return ONLY raw C code. DO NOT wrap it in ```c and ```.
+
+RAW DECOMPILED PSEUDO-CODE:
+```c
+{raw_code}
+```
+
+Return ONLY the refactored, commented, and readable C code."""
+
+        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-2.0-flash"])
+        response = None
+        for model_name in models_to_try:
+            for attempt in range(2):
+                try:
+                    if debug:
+                        console.print(f"[dim]  Deobfuscator trying model: {model_name}...[/dim]")
+                    response = self.client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config={
+                            "temperature": 0.2,
+                            "safety_settings": [
+                                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                            ],
+                        },
+                    )
+                    break
+                except Exception as e:
+                    time.sleep(2)
+            if response is not None:
+                break
+
+        if response is None or response.text is None:
+            return raw_code
+
+        text = response.text.strip()
+        if text.startswith("```c"):
+            text = text[4:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+
+        return text.strip()
+

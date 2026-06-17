@@ -52,11 +52,27 @@ class OllamaEngine(BaseEngine):
 
     @property
     def lang_name(self) -> str:
-        return "Rust" if self.lang == "rust" else "C"
+        if self.lang == "rust":
+            return "Rust"
+        elif self.lang == "go":
+            return "Go"
+        elif self.lang == "java":
+            return "Java"
+        elif self.lang == "csharp":
+            return "C#"
+        return "C"
 
     @property
     def lang_ext(self) -> str:
-        return "rs" if self.lang == "rust" else "c"
+        if self.lang == "rust":
+            return "rs"
+        elif self.lang == "go":
+            return "go"
+        elif self.lang == "java":
+            return "java"
+        elif self.lang == "csharp":
+            return "cs"
+        return "c"
 
     def _generate(self, prompt: str, system: str = "", format_json: bool = False) -> str:
         import os

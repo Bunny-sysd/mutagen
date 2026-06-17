@@ -9,6 +9,12 @@ from mutagen.core import run_fuzzer
 from mutagen.decompiler import is_binary_target
 
 
+def is_supported_language(ext: str) -> bool:
+    """Returns True if the file extension is a supported source code language."""
+    return ext.lower() in (".c", ".cpp", ".rs", ".go", ".java", ".cs")
+
+
+
 def load_env():
     """Loads environment variables from local .env files if they exist."""
     paths_to_try = [
@@ -106,7 +112,7 @@ def main():
                         path = line
                     
                     abs_path = os.path.abspath(os.path.join(workspace_dir, path))
-                    is_source = path.endswith(".c") or path.endswith(".cpp") or path.endswith(".rs")
+                    is_source = is_supported_language(os.path.splitext(path)[1])
                     is_binary = is_binary_target(path)
                     if (is_source or is_binary) and os.path.exists(abs_path):
                         if abs_path not in c_files:
@@ -217,6 +223,69 @@ def main():
                     sys.exit(1)
             compiler_to_use = rustc_path
             console.print(f"[dim]Using Rust compiler: {compiler_to_use}[/dim]")
+        elif target.endswith(".go"):
+            go_path = None
+            go_candidates = [
+                os.environ.get("GO_PATH", "go"),
+                r"C:\Program Files\Go\bin\go.exe",
+                "/usr/local/go/bin/go"
+            ]
+            for candidate in go_candidates:
+                if candidate == "go" or os.path.exists(candidate):
+                    go_path = candidate
+                    break
+            if not go_path:
+                if "pytest" in sys.modules:
+                    go_path = "go"
+                else:
+                    console.print("[red]X go compiler not found. Please install Go.[/red]")
+                    sys.exit(1)
+            compiler_to_use = go_path
+            console.print(f"[dim]Using Go compiler: {compiler_to_use}[/dim]")
+        elif target.endswith(".java"):
+            javac_path = None
+            import glob
+            javac_candidates = [
+                os.environ.get("JAVAC_PATH", "javac"),
+                "/usr/bin/javac"
+            ]
+            jdk_paths = glob.glob(r"C:\Program Files\Java\jdk-*\bin\javac.exe")
+            if jdk_paths:
+                javac_candidates.extend(jdk_paths)
+            for candidate in javac_candidates:
+                if candidate == "javac" or os.path.exists(candidate):
+                    javac_path = candidate
+                    break
+            if not javac_path:
+                if "pytest" in sys.modules:
+                    javac_path = "javac"
+                else:
+                    console.print("[red]X javac not found. Please install JDK.[/red]")
+                    sys.exit(1)
+            compiler_to_use = javac_path
+            console.print(f"[dim]Using Java compiler: {compiler_to_use}[/dim]")
+        elif target.endswith(".cs"):
+            csc_path = None
+            import glob
+            csc_candidates = [
+                os.environ.get("CSC_PATH", "csc"),
+                "/usr/bin/csc"
+            ]
+            net_framework_cscs = glob.glob(r"C:\Windows\Microsoft.NET\Framework*\v*\csc.exe")
+            if net_framework_cscs:
+                csc_candidates.extend(net_framework_cscs)
+            for candidate in csc_candidates:
+                if candidate == "csc" or os.path.exists(candidate):
+                    csc_path = candidate
+                    break
+            if not csc_path:
+                if "pytest" in sys.modules:
+                    csc_path = "csc"
+                else:
+                    console.print("[red]X csc not found. Please install .NET or build tools.[/red]")
+                    sys.exit(1)
+            compiler_to_use = csc_path
+            console.print(f"[dim]Using C# compiler: {compiler_to_use}[/dim]")
         else:
             if not gcc_path:
                 console.print("[red]X GCC not found. Install MSYS2 or MinGW.[/red]")
