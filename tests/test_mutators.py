@@ -80,12 +80,12 @@ class TestNullAndSpecialPayloads:
         assert len(payloads) >= 3
 
     def test_includes_empty_string(self):
-        values = [p["args"][0] for p in _null_and_special_payloads("args")]
-        assert "" in values
+        inputs = [p["input_data"] for p in _null_and_special_payloads("args")]
+        assert "" in inputs
 
     def test_includes_null_bytes(self):
-        values = [p["args"][0] for p in _null_and_special_payloads("args")]
-        assert any("\x00" in v for v in values)
+        inputs = [p["input_data"] for p in _null_and_special_payloads("args")]
+        assert any("\x00" in v for v in inputs)
 
 
 class TestCommandInjectionPayloads:

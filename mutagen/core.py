@@ -29,6 +29,114 @@ def _crash_signature(crash: dict) -> str:
     return f"{crash['crash_type']}::{crash['return_code']}::{crash.get('vuln_type', '')}"
 
 
+def verify_and_fallback_exploit(exploit_code: str, crash_data: dict, exe_path: str, delivery_mode: str) -> str:
+    """
+    Checks if the generated exploit code is valid Python.
+    If it is not, or if it's just raw payload strings, it generates a robust
+    boilerplate Python PoC that uses the crashing payload.
+    """
+    is_valid_python = False
+    # Check for basic Python landmarks
+    if exploit_code and ("import " in exploit_code or "def " in exploit_code or "sys.argv" in exploit_code):
+        is_valid_python = True
+
+    # If the code contains mostly a single repeating character (like A's), it is a raw payload dump
+    if exploit_code and len(exploit_code.strip()) > 50:
+        cleaned = exploit_code.strip()
+        first_char = cleaned[0]
+        if cleaned.count(first_char) > len(cleaned) * 0.8:
+            is_valid_python = False
+
+    if is_valid_python:
+        return exploit_code
+
+    # Fallback script generation
+    payload_repr = repr(crash_data.get("input_data", ""))
+    args_repr = repr(crash_data.get("args", []))
+    
+    fallback_script = f"""# -*- coding: utf-8 -*-
+\"\"\"
+Mutagen Auto-Generated Exploit PoC (Fallback)
+Target: {exe_path}
+Vulnerability Class: {crash_data.get("vuln_type", "Memory Corruption")}
+CWE: {crash_data.get("cwe", "CWE-120")}
+Reason: {crash_data.get("reason", "Heap/Stack buffer overflow or crash")}
+\"\"\"
+
+import sys
+import os
+import subprocess
+import socket
+import time
+
+def run_poc():
+    # Target path can be overridden by sys.argv[1]
+    exe_path = sys.argv[1] if len(sys.argv) > 1 else {repr(exe_path)}
+    delivery_mode = {repr(delivery_mode)}
+    payload = {payload_repr}
+    args = {args_repr}
+    
+    print(f"[*] Launching target: {{exe_path}}")
+    print(f"[*] Delivery mode: {{delivery_mode}}")
+    
+    if not os.path.exists(exe_path):
+        print(f"[!] Error: Target executable '{{exe_path}}' not found!")
+        sys.exit(1)
+        
+    if delivery_mode == "args":
+        # Launch with payload as command line arguments
+        print(f"[*] Executing with arguments: {{args}}")
+        cmd = [exe_path] + args
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = proc.communicate(timeout=5)
+        print(f"[*] Process exited with return code: {{proc.returncode}}")
+        
+    elif delivery_mode == "stdin":
+        # Launch and pipe payload into stdin
+        print(f"[*] Writing payload to stdin...")
+        proc = subprocess.Popen([exe_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            stdout, stderr = proc.communicate(input=payload.encode('utf-8', errors='ignore') if isinstance(payload, str) else payload, timeout=5)
+            print(f"[*] Process exited with return code: {{proc.returncode}}")
+        except subprocess.TimeoutExpired:
+            print("[!] Process hung (possible Denial of Service / infinite loop)!")
+            proc.kill()
+            sys.exit(0)
+            
+    elif delivery_mode.startswith("tcp:"):
+        # Launch process and send payload over socket
+        port = int(delivery_mode.split(":")[1])
+        print(f"[*] Launching server and waiting for port {{port}}...")
+        proc = subprocess.Popen([exe_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        time.sleep(0.5) # Wait for bind
+        
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(3.0)
+            s.connect(("127.0.0.1", port))
+            print(f"[*] Sending packet payload (len={{len(payload)}})...")
+            s.sendall(payload.encode('utf-8', errors='ignore') if isinstance(payload, str) else payload)
+            s.close()
+            print("[*] Payload sent successfully.")
+        except Exception as e:
+            print(f"[!] Socket connection failed: {{e}}")
+        finally:
+            # Check status
+            time.sleep(0.5)
+            ret = proc.poll()
+            if ret is not None:
+                print(f"[*] Server terminated with return code: {{ret}}")
+            else:
+                print("[*] Server is still running, terminating...")
+                proc.terminate()
+
+if __name__ == "__main__":
+    run_poc()
+"""
+    return fallback_script
+
+
+
 def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = ""):
     """Main fuzzer orchestration function."""
     engine = get_engine(provider, api_key, model, debug, console)
@@ -404,7 +512,16 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     else:
                         is_unique = "[dim]dupe"
             else:
-                needs_retry.append((i, original_p, result, args, input_data))
+                # Don't queue intentionally safe/benign payloads for retry —
+                # the AI itself said they wouldn't crash, so retrying wastes quota.
+                vuln_type = original_p.get("vuln_type", "").lower()
+                severity  = original_p.get("severity", "").lower()
+                is_benign = (
+                    severity == "low"
+                    or vuln_type in ("no_vulnerability", "safe_input", "none", "n/a", "")
+                )
+                if not is_benign:
+                    needs_retry.append((i, original_p, result, args, input_data))
 
             with results_lock:
                 results_table.add_row(
@@ -437,6 +554,20 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 if isinstance(r_args, str):
                     r_args = [r_args]
                 r_args = [str(a) for a in r_args]
+
+                # --- STUB GUARD: reject broken AI placeholder responses -------
+                # When the API rate-limits mid-retry, the fallback sometimes
+                # returns generic placeholders like "payload_refined" or empty
+                # strings. Executing these wastes a retry slot and produces
+                # misleading "OK" results. Skip them and log a warning instead.
+                _STUB_PLACEHOLDERS = {
+                    "payload_refined", "refined_payload", "placeholder",
+                    "<payload>", "your_payload_here", "payload", ""
+                }
+                payload_content = " ".join(r_args) + (r_input or "")
+                if len(payload_content.strip()) < 10 or payload_content.strip().lower() in _STUB_PLACEHOLDERS:
+                    console.print(f"[dim]    (Skipping stub/placeholder refined payload: {repr(payload_content[:40])})[/dim]")
+                    continue
 
                 result = execute_payload(exe_path, r_args, r_input, delivery_mode, timeout)
 
@@ -537,8 +668,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 TextColumn("[cyan]{task.description}"),
                 console=console,
             ) as progress:
-                progress.update(progress.add_task("[magenta]AI writing Python exploit script..."), total=None)
                 exploit_code = engine.generate_exploit(source_code, crashes[0], exe_path, delivery_mode, debug)
+                exploit_code = verify_and_fallback_exploit(exploit_code, crashes[0], exe_path, delivery_mode)
 
                 if exploit_code:
                     os.makedirs("exploits", exist_ok=True)
@@ -583,8 +714,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 TextColumn("[cyan]{task.description}"),
                 console=console,
             ) as progress:
-                progress.update(progress.add_task("[magenta]AI writing Python exploit script..."), total=None)
                 exploit_code = engine.generate_exploit(source_code, crashes[0], exe_path, delivery_mode, debug)
+                exploit_code = verify_and_fallback_exploit(exploit_code, crashes[0], exe_path, delivery_mode)
                 
                 if exploit_code:
                     os.makedirs("exploits", exist_ok=True)

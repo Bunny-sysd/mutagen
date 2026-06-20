@@ -57,22 +57,39 @@ class ClaudeEngine(BaseEngine):
         except Exception:
             return []
 
-    def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool) -> list[dict]:
-        prompt = f"""You are an audit security researcher. Analyze this C code for potential memory/logical vulnerabilities:
+    def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool, profile: str = "legacy-audit") -> list[dict]:
+        decompile_context = ""
+        if getattr(self, "is_decompiled", False):
+            decompile_context = (
+                "CRITICAL CONTEXT: This is DECOMPILED pseudo-C code from a binary (Ghidra). "
+                "Variable names are auto-generated. Focus on security patterns.\n\n"
+            )
+        if profile == "supply-chain":
+            focus_description = "unauthorized network calls, hardcoded backdoors, hidden command execution, environment variable exfiltration, and secrets/credential leaks."
+            vuln_types_example = '"backdoor", "credential_leak", "command_injection"'
+        elif profile == "malware-triage":
+            focus_description = "malware signatures, encryption algorithms (e.g., ransomware encryption loops), persistence mechanisms, keyloggers, evasion techniques, and command & control (C2) footprint."
+            vuln_types_example = '"malware_persistence", "ransomware_encryption", "keylogger_module"'
+        else:
+            focus_description = "potential memory/logical vulnerabilities (buffer overflows, format string bugs, integer overflows, use-after-free, double-free, command injection)."
+            vuln_types_example = '"buffer_overflow", "format_string", "integer_overflow"'
+
+        prompt = f"""{decompile_context}You are an audit security researcher. Analyze this C code for potential vulnerabilities and security risks, focusing on: {focus_description}
 {source_code}
 
 The program gets input via: {delivery_mode}.
 
-Generate up to {max_payloads} diverse fuzzing payloads.
+Generate up to {max_payloads} diverse fuzzing payloads or risk indicator scenarios.
 Respond with ONLY a JSON array of payloads containing:
 - "args": array of strings (argv)
 - "input_data": raw input string (stdin/network)
-- "vuln_type": vuln name string
+- "vuln_type": vuln/risk name string (e.g. {vuln_types_example})
 - "reason": logic explanation string
 - "severity": "critical"/"high"/"medium"/"low"
 - "cwe": CWE ID string if known
-
-Do not wrap inside extra explanation text. Print ONLY the JSON array."""
+- "data_flow": array of strings tracing execution flow from entry-point input (Source) to the vulnerability function/sink
+- "confidence_score": integer from 1 to 10 assessing vulnerability trigger confidence
+- "mitigations_detected": array of strings listing security checks/canaries/filters detected in the code path"""
         
         raw = self._generate(prompt, system="You are an automated code audit assistant. Respond only in raw JSON arrays.")
         if debug:
@@ -167,3 +184,29 @@ Return ONLY python code. No explanations, no markdown blocks, no backticks."""
         if text.endswith("```"):
             text = text[:-3]
         return text.strip()
+
+    def deobfuscate_code(self, raw_code: str, debug: bool = False) -> str:
+        prompt = f"""You are an expert reverse engineer and code deobfuscator.
+Your task is to analyze the following messy decompiled C pseudo-code and perform symbol recovery and deobfuscation to make it readable.
+
+Follow these rules:
+1. Rename all generic, auto-generated variables (like local_1c, param_1, pvVar2, iVar3) to clear, descriptive names based on how they are used in the code.
+2. Rename generic auto-generated function names (like FUN_004010a0, FUN_004011b0) to meaningful descriptive names based on their logic.
+3. Clean up complex control-flow loops or ternary statements into standard, structured C code equivalents.
+4. Add clear inline comments explaining what each logical block does.
+5. Provide the ENTIRE refactored, readable C source code file.
+6. Return ONLY raw C code. DO NOT wrap it in ```c and ```. No explanations outside of the code block.
+
+RAW DECOMPILED PSEUDO-CODE:
+{raw_code}
+
+Return ONLY the refactored, commented, and readable C code."""
+        text = self._generate(prompt, system="You are an expert reverse engineer. Output only raw refactored C code.")
+        if text.startswith("```c"):
+            text = text[4:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        return text.strip() or raw_code
+

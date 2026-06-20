@@ -1,0 +1,73 @@
+name: Mutagen AI Fuzzing & Auto-Patching
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Crucial for git diff to resolve PR changes against base branch
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Install Compiler (GCC)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc
+
+    - name: Run Mutagen AI Fuzzing
+      env:
+        MUTAGEN_PROVIDER: ${{ secrets.MUTAGEN_PROVIDER || 'gemini' }}
+        MUTAGEN_API_KEY: ${{ secrets.MUTAGEN_API_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      run: |
+        # Run Mutagen in CI mode to automatically scan and fuzz modified targets
+        python mutagen.py --ci --max-payloads 5
+
+    - name: Generate PR Comment Markdown
+      run: |
+        python mutagen/ci_helper.py
+      if: always()
+
+    - name: Post PR Comment
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        if [ -f comment.md ] && [ -n "$PR_NUMBER" ]; then
+          gh pr comment "$PR_NUMBER" --body-file comment.md
+        else
+          echo "No comment file found or event is not a pull request."
+        fi
+      if: always()
+
+    - name: Archive Security Reports & Patches
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: mutagen-security-artifacts
+        path: |
+          crashes/
+          patches/
+          exploits/

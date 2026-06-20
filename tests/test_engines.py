@@ -36,8 +36,9 @@ def test_gemini_engine_analyze_code(mock_client_class):
     # Verify client generate_content call
     mock_client.models.generate_content.assert_called()
     called_args, called_kwargs = mock_client.models.generate_content.call_args
-    assert called_kwargs["model"] == "gemini-2.5-flash-lite"
+    assert called_kwargs["model"] == "gemini-1.5-flash"
     assert called_kwargs["config"]["response_mime_type"] == "application/json"
+
 
 
 @patch("google.genai.Client")

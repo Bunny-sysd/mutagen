@@ -6,7 +6,7 @@ from mutagen.engines.claude import ClaudeEngine
 def get_engine(provider: str, api_key: str, model: str = "", debug: bool = False, console = None):
     provider = provider.lower()
     if provider == "gemini":
-        return GeminiEngine(api_key=api_key)
+        return GeminiEngine(api_key=api_key, model=model)
     elif provider == "openai":
         return OpenAIEngine(api_key=api_key, model=model)
     elif provider == "ollama":

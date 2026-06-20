@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/logo.png" alt="Mutagen Logo" width="200">
   <h1>🧬 Mutagen</h1>
-  <p><strong>AI-Powered Zero-Day Fuzzer & Auto-Patcher</strong></p>
+  <p><strong>AI-Powered Zero-Day Fuzzer &amp; Auto-Patcher</strong></p>
   <p>
     <em>The world's first agentic AI fuzzer that reads source code, finds vulnerabilities,<br>
     generates exploits, patches the bugs, and proves the fix works — fully autonomously.</em>
@@ -12,6 +12,7 @@
   <a href="#-quick-start"><img src="https://img.shields.io/badge/Quick%20Start-30%20seconds-00ff88?style=for-the-badge&logoColor=white" alt="Quick Start"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+"></a>
+  <a href=".github/workflows/mutagen-action.yml"><img src="https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white" alt="CI/CD"></a>
 
   <br><br>
 
@@ -19,6 +20,7 @@
   <a href="#-how-it-works">How It Works</a> •
   <a href="#-quick-start">Quick Start</a> •
   <a href="#-supported-llms">LLM Providers</a> •
+  <a href="#-scan-profiles">Scan Profiles</a> •
   <a href="#-contributing">Contributing</a>
 </div>
 
@@ -33,11 +35,11 @@ Mutagen is designed to help developers find and patch vulnerabilities in their o
 
 ## 🤔 Why Mutagen?
 
-Traditional fuzzers (AFL, libFuzzer, Honggfuzz) rely on **random mutation** and code coverage to find crashes. They're effective but require massive CPU time and often fail to bypass complex logic like authentication checks.
+Traditional fuzzers (AFL, libFuzzer, Honggfuzz) rely on **random mutation** and code coverage to find crashes. They're effective but require massive CPU time and often fail to bypass complex logic like authentication checks or SASL handshakes.
 
 **Mutagen is different.** It uses an **Agentic Large Language Model** to:
 
-1. **Read and understand** the target's source code
+1. **Read and understand** the target's source code (or decompiled binary)
 2. **Mathematically calculate** the exact payloads needed to trigger memory corruption
 3. **Learn from failures** — if a payload doesn't crash, the AI analyzes the output and tries again
 4. **Automatically patch** the vulnerability and **generate a proof-of-concept exploit**
@@ -50,10 +52,14 @@ Traditional fuzzers (AFL, libFuzzer, Honggfuzz) rely on **random mutation** and 
 |---------|:------------:|:---------:|:-----------:|
 | Mutation Strategy | Random bit-flip | Random + feedback | **AI-guided** |
 | Source Code Understanding | ❌ | ❌ | **✅ Full analysis** |
+| Binary / Decompiled Code | ❌ | ❌ | **✅ Ghidra integration** |
 | Bypasses Auth/Logic | ❌ | ❌ | **✅ Agentic retries** |
 | Auto-Patch Generation | ❌ | ❌ | **✅** |
 | Exploit (PoC) Generation | ❌ | ❌ | **✅** |
 | Patch Verification | ❌ | ❌ | **✅** |
+| Supply-Chain Auditing | ❌ | ❌ | **✅** |
+| Malware Triage | ❌ | ❌ | **✅** |
+| Enterprise Network Safe | ❌ | ❌ | **✅ HTTP/1.1 fallback** |
 | Time to First Crash | Hours/Days | Hours | **Seconds** |
 | Setup Complexity | High | Medium | **`pip install`** |
 
@@ -82,7 +88,7 @@ graph LR
 
 | Phase | What Happens |
 |-------|-------------|
-| **1. AI Code Analysis** | The AI reads the target `.c` file, performs Chain-of-Thought reasoning, identifies vulnerabilities (buffer overflows, format strings, UAFs, etc.), and generates targeted payloads. |
+| **1. AI Code Analysis** | The AI reads the target `.c` file (or Ghidra-decompiled binary), performs Chain-of-Thought reasoning, identifies vulnerabilities (buffer overflows, format strings, UAFs, etc.), and generates targeted payloads. |
 | **2. Compilation** | The target is compiled with Mutagen's crash handler injected, which captures register state (EIP/RIP) at the point of crash. |
 | **3. Agentic Fuzzing** | Payloads are injected concurrently. If a payload fails, the AI analyzes `stdout`, `stderr`, and exit codes, then generates refined payloads. This is the **agentic retry loop**. |
 | **4. Auto-Patch & Exploit** | The AI writes a secure C patch AND a standalone Python PoC exploit script for regression testing. |
@@ -98,12 +104,17 @@ graph LR
 - 💀 **Exploit Generation** — Writes standalone Python PoC scripts for regression testing
 - ✅ **Patch Verification** — Proves the patch works by attacking the fixed binary
 - 📊 **Beautiful HTML Reports** — Glassmorphism-styled interactive crash reports
-- 🔌 **Multi-LLM Support** — Works with Gemini, OpenAI GPT-4, and local Ollama models
+- 🔌 Multi-LLM Support — Works with Gemini, Anthropic Claude, OpenAI, and local Ollama models
 - ⚡ **Concurrent Execution** — Parallel payload injection with `ThreadPoolExecutor`
 - 🌐 **Multiple Delivery Modes** — Args, stdin, and TCP socket fuzzing
-- 🧬 **Traditional Fallback Mutations** — Classic fuzzing strategies (buffer overflow, format string, integer boundary, etc.) kick in automatically when AI models refuse
+- 🧬 **Traditional Fallback Mutations** — Classic fuzzing strategies (buffer overflow, format string, integer boundary) kick in automatically when AI is unavailable
 - 🔍 **Crash Deduplication** — Intelligent signature-based deduplication removes duplicate crash reports
+- 🏢 **Enterprise Network Safe** — HTTP/1.1 fallback and 5-second connect timeouts bypass TLS proxy hangs in corporate environments
+- 🔧 **Binary Fuzzing** — Headless Ghidra integration to decompile and fuzz compiled binaries without source
+- 🕵️ **Supply-Chain Auditing** — Detect backdoors, credential leaks, and unauthorized network calls
+- 🦠 **Malware Triage** — Identify ransomware loops, keyloggers, persistence mechanisms, and C2 footprints
 - ⚙️ **Local `.env` Config** — Store provider, model, and API keys in a local config file
+- 🔁 **CI/CD Integration** — GitHub Actions workflow template for automated fuzzing on every pull request
 
 ### Supported Vulnerability Classes
 
@@ -115,6 +126,8 @@ graph LR
 | [CWE-416](https://cwe.mitre.org/data/definitions/416.html) | Use-After-Free | 🔴 Critical |
 | [CWE-193](https://cwe.mitre.org/data/definitions/193.html) | Off-by-One Error | 🟡 High |
 | [CWE-415](https://cwe.mitre.org/data/definitions/415.html) | Double Free | 🔴 Critical |
+| [CWE-78](https://cwe.mitre.org/data/definitions/78.html) | Command Injection | 🔴 Critical |
+| [CWE-506](https://cwe.mitre.org/data/definitions/506.html) | Embedded Malicious Code | 🔴 Critical |
 
 ---
 
@@ -143,12 +156,12 @@ $env:GEMINI_API_KEY="your_key_here"            # Windows PowerShell
 
 ### Environment Configuration (`.env`)
 
-To avoid setting environment variables or flags on every invocation, you can create a local `.env` file in the root directory of the project:
+Create a `.env` file in the project root to avoid passing flags every time:
 
 ```env
 # Default provider (gemini, openai, or ollama)
 MUTAGEN_PROVIDER=gemini
-MUTAGEN_MODEL=gemini-2.5-flash-lite
+MUTAGEN_MODEL=gemini-2.5-flash
 
 # API Keys
 MUTAGEN_API_KEY=your_key_here
@@ -161,10 +174,13 @@ MUTAGEN_API_KEY=your_key_here
 ### Run
 
 ```bash
-# Fuzz a single target
+# Fuzz a single source-code target
 mutagen --target targets/01_buffer_overflow.c
 
-# Or use python -m
+# Fuzz a compiled binary (requires Ghidra)
+mutagen --target path/to/binary.exe --binary
+
+# Run with more AI payloads
 python -m mutagen --target targets/01_buffer_overflow.c --max-payloads 5
 
 # Fuzz ALL targets automatically
@@ -181,21 +197,99 @@ Mutagen produces:
 
 ---
 
+## 🔬 Scan Profiles
+
+Mutagen supports three specialized scan modes, selectable with `--profile`:
+
+```bash
+# Default — finds classic memory safety bugs
+mutagen --target targets/01_buffer_overflow.c --profile legacy-audit
+
+# Supply-Chain — finds backdoors, credential leaks, unauthorized sockets
+mutagen --target third_party_lib.c --profile supply-chain
+
+# Malware Triage — identifies ransomware, keyloggers, C2 implants
+mutagen --target suspicious_binary.exe --binary --profile malware-triage
+```
+
+| Profile | Focus |
+|---------|-------|
+| `legacy-audit` *(default)* | Buffer overflows, format strings, UAF, integer bugs |
+| `supply-chain` | Backdoors, hardcoded secrets, unauthorized network calls, env exfiltration |
+| `malware-triage` | Encryption loops, persistence mechanisms, keylogger patterns, C2 sockets |
+
+---
+
+## 🔧 Binary Fuzzing (Ghidra)
+
+Mutagen can fuzz compiled binaries with no source code by integrating with [Ghidra](https://ghidra-sre.org/):
+
+```bash
+# Decompile and fuzz a compiled binary
+mutagen --target path/to/program.exe --binary
+```
+
+Ghidra runs headlessly to decompile the binary into C pseudo-code. Mutagen then passes this to the AI with a special context note about decompiled variable names so the analysis is still accurate.
+
+---
+
 ## 🔌 Supported LLMs
 
 | Provider | Model | Setup | Cost |
 |----------|-------|-------|------|
 | **Google Gemini** (default) | `gemini-2.5-flash` | `export GEMINI_API_KEY=...` | Free tier available |
+| **Anthropic Claude** | `claude-3-5-sonnet-latest` | `export ANTHROPIC_API_KEY=...` | Pay-per-use |
 | **OpenAI** | `gpt-4o` | `pip install openai` + `export OPENAI_API_KEY=...` | Pay-per-use |
 | **Ollama** (local) | `llama3.2`, `codellama`, etc. | [Install Ollama](https://ollama.ai) | Free (runs locally) |
 
 ```bash
+# Use Anthropic Claude 3.5 Sonnet
+mutagen --target targets/01_buffer_overflow.c --provider claude --model claude-3-5-sonnet-latest
+
 # Use OpenAI GPT-4o
 mutagen --target targets/01_buffer_overflow.c --provider openai --model gpt-4o
 
 # Use local Ollama (no API key needed!)
 mutagen --target targets/01_buffer_overflow.c --provider ollama --model llama3.2
 ```
+
+### 🧠 Uncensoring Local LLMs (Heretic Support)
+
+When using local models via Ollama for vulnerability discovery and exploit generation, standard models can sometimes refuse prompts due to safety alignments. 
+
+To solve this, we recommend pairing Mutagen with **[Heretic](https://github.com/p-e-w/heretic)**, an open-source tool that uses **directional ablation (abliteration)** to automatically remove censorship guardrails from local transformer-based models (e.g., Llama, Qwen, Mistral).
+
+1. Clone and install Heretic:
+   ```bash
+   git clone https://github.com/p-e-w/heretic.git
+   cd heretic
+   pip install -r requirements.txt
+   ```
+2. Run Heretic's automatic optimizer on your local model weights to abliterate refusal vectors while maintaining model intelligence and reasoning capabilities.
+3. Import the uncensored model into Ollama and run Mutagen:
+   ```bash
+   mutagen --target targets/01_buffer_overflow.c --provider ollama --model your-abliterated-model
+   ```
+
+### Enterprise Network Compatibility
+
+Mutagen is built to work reliably in corporate and enterprise environments:
+- **HTTP/1.1 only** — disables HTTP/2 to avoid TLS proxy hangs behind deep-packet inspection firewalls
+- **Fast connect timeout** — fails in under 5 seconds instead of hanging indefinitely
+- **Automatic offline fallback** — if the API is blocked or rate-limited, Mutagen seamlessly switches to traditional mutation-based fuzzing so your pipeline never stops
+
+---
+
+## 🔁 CI/CD Integration
+
+Mutagen ships with a ready-to-use GitHub Actions workflow at [`.github/workflows/mutagen-action.yml`](.github/workflows/mutagen-action.yml):
+
+```yaml
+# Automatically fuzzes every PR — catches crashes before merge
+on: [pull_request]
+```
+
+This enables you to automatically detect new vulnerabilities the moment a developer opens a PR — the same approach used by top security teams at major tech companies.
 
 ---
 
@@ -209,14 +303,16 @@ mutagen/
 │   ├── compiler.py        # C compilation + crash handler injection
 │   ├── executor.py        # Payload execution + crash detection
 │   ├── reporter.py        # JSON/HTML report generation
+│   ├── models.py          # Pydantic payload schemas
 │   └── engines/           # LLM provider integrations
 │       ├── base.py        # Abstract engine interface
-│       ├── gemini.py      # Google Gemini
+│       ├── gemini.py      # Google Gemini (with resilient error handling)
 │       ├── openai_engine.py # OpenAI GPT
 │       └── ollama.py      # Local Ollama
-├── targets/               # Intentionally vulnerable C programs
-├── tests/                 # Unit test suite
-├── docs/                  # Documentation
+├── targets/               # Intentionally vulnerable C programs (20+ CVE targets)
+├── tests/                 # Unit test suite (130+ tests)
+├── docs/                  # Documentation & architecture
+├── .github/workflows/     # CI/CD GitHub Actions
 ├── pyproject.toml         # Python packaging config
 └── run_all.py             # Batch fuzzer for all targets
 ```
@@ -263,8 +359,9 @@ This project is licensed under the [MIT License](LICENSE).
 
 - [Google Gemini](https://ai.google.dev/) for the AI backbone
 - [Rich](https://github.com/Textualize/rich) for beautiful terminal output
+- [Ghidra](https://ghidra-sre.org/) for headless binary decompilation
 - [SANS Institute](https://www.sans.org/) for cybersecurity education
-- The open-source security community
+- The open-source security research community
 
 ---
 

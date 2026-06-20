@@ -93,3 +93,29 @@ def test_cli_specific_key_overrides_fallback(mock_run_fuzzer, mock_load_env):
         mock_run_fuzzer.assert_called_once()
         _, called_kwargs = mock_run_fuzzer.call_args
         assert called_kwargs["api_key"] == "specific_gemini_key"
+
+
+@patch("mutagen.cli.load_env")
+@patch("mutagen.cli.run_fuzzer")
+def test_cli_binary_routing(mock_run_fuzzer, mock_load_env):
+    """Test that a binary target correctly routes with binary_mode=True and flags."""
+    test_args = [
+        "mutagen", 
+        "--target", "targets/01_buffer_overflow.exe", 
+        "--provider", "gemini",
+        "--decompile-all",
+        "--ghidra-path", "C:\\ghidra_install"
+    ]
+    with patch.dict(os.environ, {
+        "GEMINI_API_KEY": "specific_gemini_key",
+    }, clear=True), patch("sys.argv", test_args):
+        # We also mock os.path.exists for the target to ensure main does not fail on file not found
+        with patch("os.path.exists", return_value=True):
+            main()
+            mock_run_fuzzer.assert_called_once()
+            _, called_kwargs = mock_run_fuzzer.call_args
+            assert called_kwargs["binary_mode"] is True
+            assert called_kwargs["decompile_all"] is True
+            assert called_kwargs["ghidra_path"] == "C:\\ghidra_install"
+            assert called_kwargs["gcc_path"] == ""
+

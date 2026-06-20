@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 class BaseEngine(ABC):
     @abstractmethod
-    def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool) -> list[dict]:
+    def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool, profile: str = "legacy-audit") -> list[dict]:
         pass
 
     @abstractmethod
@@ -20,3 +20,9 @@ class BaseEngine(ABC):
     @abstractmethod
     def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
         pass
+
+    def deobfuscate_code(self, raw_code: str, debug: bool = False) -> str:
+        """AI Symbol Recovery and deobfuscation pass. Retypes/renames symbols and adds inline comments.
+        Default implementation returns raw code if not implemented by subclass."""
+        return raw_code
+

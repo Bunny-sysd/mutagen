@@ -113,3 +113,97 @@ class TestSaveCrashReport:
         save_crash_report([sample_crash_data], "test_target", 1)
 
         assert os.path.exists("crashes")
+
+    def test_threat_capability_matrix_and_ioc(self):
+        """Threat Capability Matrix should map vulnerabilities to standard descriptions and group counts."""
+        crashes = [
+            {
+                "args": ["A" * 1024],
+                "vuln_type": "buffer_overflow",
+                "cwe": "CWE-120",
+                "severity": "critical",
+                "reason": "Overflow in strcpy",
+                "crash_type": "SIGSEGV"
+            },
+            {
+                "args": ["A" * 2048],
+                "vuln_type": "buffer_overflow",
+                "cwe": "CWE-120",
+                "severity": "high",
+                "reason": "Overflow in memcpy",
+                "crash_type": "SIGSEGV"
+            },
+            {
+                "args": ["%s%x"],
+                "vuln_type": "custom_vuln_type",
+                "cwe": "N/A",
+                "severity": "medium",
+                "reason": "Custom threat pattern",
+                "crash_type": "SIGILL"
+            }
+        ]
+
+        _, html_file = save_crash_report(
+            crashes, "threat_target", 3,
+            profile="malware-triage"
+        )
+
+        with open(html_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Should contain standard mapped capability name and description
+        assert "Memory Corruption / Buffer Overflow" in content
+        assert "The program writes data past the end of an allocated buffer" in content
+        # Should contain correct statistics: count = 2
+        assert "Detected 2 crash-causing payload contexts" in content
+        # Should pick the highest severity 'critical' instead of 'high'
+        assert "badge critical" in content or "CRITICAL" in content
+
+        # Fallback for custom vulnerability types
+        assert "Custom Vuln Type" in content
+        assert "Custom security vulnerability signature identified" in content
+        assert "Detected 1 crash-causing payload context" in content
+
+    def test_confidence_score_and_data_flow(self):
+        """Report should display confidence scores, visual data flow chains, and sort rows by confidence."""
+        crashes = [
+            {
+                "args": ["low_confidence"],
+                "vuln_type": "buffer_overflow",
+                "cwe": "CWE-120",
+                "severity": "medium",
+                "reason": "low confidence case",
+                "crash_type": "SIGSEGV",
+                "confidence_score": 3,
+                "data_flow": ["main", "vulnerable_func"]
+            },
+            {
+                "args": ["high_confidence"],
+                "vuln_type": "buffer_overflow",
+                "cwe": "CWE-120",
+                "severity": "critical",
+                "reason": "high confidence case",
+                "crash_type": "SIGSEGV",
+                "confidence_score": 9,
+                "data_flow": ["main", "helper", "vulnerable_func"]
+            }
+        ]
+
+        _, html_file = save_crash_report(crashes, "flow_target", 2)
+
+        with open(html_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Check score rendering
+        assert "9/10" in content
+        assert "3/10" in content
+        
+        # Check data flow chain rendering
+        assert "main" in content
+        assert "helper" in content
+        assert "vulnerable_func" in content
+
+        # Check sorting order: high confidence score should be listed first (index 1)
+        assert content.index("9/10") < content.index("3/10")
+
+

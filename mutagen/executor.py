@@ -25,6 +25,26 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
     else:
         args = [str(args)] if args is not None else []
 
+    # Sanitize null bytes from args in args-mode.
+    # Windows CreateProcess uses null-terminated strings for CLI arguments,
+    # so embedded \x00 bytes cause a ValueError at the OS level.
+    # In stdin/tcp mode null bytes are fine (binary data over a pipe/socket).
+    if delivery_mode == "args":
+        args = [a.replace('\x00', '') for a in args]
+
+    # Strip accidental program name (argv[0]) placeholder prepended by the LLM
+    if args and len(args) > 1:
+        first_arg = args[0].strip().lower()
+        exe_name = os.path.basename(exe_path).lower()
+        exe_name_no_ext = os.path.splitext(exe_name)[0]
+        placeholders = {
+            "program", "./program", "a.out", "./a.out", "target", "./target",
+            exe_name, f"./{exe_name}", exe_name_no_ext, f"./{exe_name_no_ext}"
+        }
+        if first_arg in placeholders:
+            args = args[1:]
+
+
     """
     Run the target program with the given arguments and check if it crashes.
 
@@ -83,10 +103,13 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     raise subprocess.TimeoutExpired(process.args, timeout, output=stdout, stderr=stderr)
             else:
                 raise ValueError(f"Unknown delivery mode: {delivery_mode}")
-        except OSError as e:
+        except (OSError, ValueError) as e:
+            # OSError  — executable not found, permission denied, etc.
+            # ValueError — embedded null character in args (Windows-only);
+            #              this payload cannot be tested via CLI args on Windows.
             return {
                 "crashed": False,
-                "crash_type": f"OS_ERROR: {e}",
+                "crash_type": f"DELIVERY_ERROR: {e}",
                 "return_code": -1,
                 "stdout": "",
                 "stderr": str(e)
@@ -108,6 +131,9 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 crash_type = "STACK_OVERFLOW"
             elif result.returncode == -1073741571:
                 crash_type = "STACK_BUFFER_OVERRUN"
+            # Rust panic exit code
+            elif result.returncode == 101:
+                crash_type = "RUST_PANIC (Safety Violation!)"
             # POSIX Signals (usually negative return codes in Python subprocess)
             elif result.returncode == -11:
                 crash_type = "SIGSEGV (Segmentation Fault)"
@@ -128,11 +154,13 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
 
         # --- ORACLE DETECTION -----------------------------------------------
         # Even if the program didn't physically crash, scan console outputs
-        # for signatures indicating a successful logical exploit/bypass.
+        # for signatures indicating a successful logical exploit/bypass OR
+        # a real memory corruption that was caught/masked by the harness.
+        stdout_lower = (result.stdout or "").lower()
+        stderr_lower = (result.stderr or "").lower()
+        combined_lower = stdout_lower + stderr_lower
+
         if not crashed:
-            stdout_lower = (result.stdout or "").lower()
-            stderr_lower = (result.stderr or "").lower()
-            
             logical_indicators = [
                 "access granted",
                 "privileges acquired",
@@ -149,9 +177,46 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             ]
             
             for indicator in logical_indicators:
-                if indicator in stdout_lower or indicator in stderr_lower:
+                if indicator in combined_lower:
                     crashed = True
                     crash_type = f"LOGICAL_EXPLOIT (Matched signature: '{indicator}')"
+                    break
+
+        # --- HEAP/MEMORY CORRUPTION ORACLE ----------------------------------
+        # Detect real memory corruption events that the harness caught and
+        # reported before they could raise a signal (e.g. SASL_BUFOVER after
+        # a strcpy overflow, asan reports, glibc heap corruption messages).
+        # These ARE real vulnerabilities even if return code is 0 or 1.
+        if not crashed:
+            heap_corruption_signatures = [
+                # Harness-level overflow detection
+                "sasl_bufover",
+                "bufover",
+                "buffer overflow",
+                "heap buffer overflow",
+                # ASan / UBSan runtime reports
+                "heap-buffer-overflow",
+                "stack-buffer-overflow",
+                "use-after-free",
+                "double-free",
+                "memory corruption",
+                "addresssanitizer",
+                "ubsanitizer",
+                # glibc / CRT heap corruption
+                "corrupted size vs. prev_size",
+                "malloc(): corrupted top size",
+                "free(): invalid next size",
+                "double free or corruption",
+                "invalid pointer",
+                # Windows CRT
+                "heap corruption detected",
+                "invalid heap pointer",
+                "_crtisvalidheappointer",
+            ]
+            for sig in heap_corruption_signatures:
+                if sig in combined_lower:
+                    crashed = True
+                    crash_type = f"HEAP_CORRUPTION (Caught overflow signature: '{sig}')"
                     break
 
         return {

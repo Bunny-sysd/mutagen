@@ -13,6 +13,51 @@ class GeminiEngine(BaseEngine):
         self.api_key = api_key
         self.model = model
         self.client = genai.Client(api_key=self.api_key)
+        # Override internal HTTP clients with custom timeouts to bypass connect/handshake timeout errors in this environment
+        import httpx
+        custom_timeout = httpx.Timeout(15.0, connect=5.0, read=10.0, write=10.0)
+        self.client._http_client = httpx.Client(timeout=custom_timeout, http2=False)
+        self.client._async_http_client = httpx.AsyncClient(timeout=custom_timeout, http2=False)
+
+    def _classify_and_handle_error(self, e: Exception, attempt: int) -> tuple[str, int]:
+        import httpx
+        err_str = str(e).upper()
+        
+        # 1. Check for connection/network/handshake/timeout errors
+        is_network = False
+        if isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout, httpx.NetworkError)):
+            is_network = True
+        elif any(k in err_str for k in ["CONNECTTIMEOUT", "CONNECTERROR", "READTIMEOUT", "TLS", "SSL", "HANDSHAKE", "NAMERESOLUTIONERROR", "CONNECTION REFUSED", "TIMEOUT"]):
+            is_network = True
+            
+        if is_network:
+            console.print("[red]  Network connection or TLS handshake failure detected.[/red]")
+            console.print("[yellow]  Skipping Gemini API calls. Mutagen will fall back to local traditional/offline fuzzing.[/yellow]")
+            return "abort_all", 0
+            
+        # 2. Check for invalid API key / auth errors
+        if any(k in err_str for k in ["API_KEY_INVALID", "API KEY NOT VALID", "INVALID_API_KEY", "APIKEY"]):
+            console.print("[red]  Critical Auth Error: The provided Gemini API Key is invalid.[/red]")
+            return "abort_all", 0
+            
+        # 3. Check for 429 Resource Exhausted (Rate Limit / Quota)
+        if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str or "QUOTA" in err_str:
+            wait_time = 20
+            console.print(f"[yellow]  Rate limit (429 RESOURCE_EXHAUSTED) hit. Waiting {wait_time}s to cool down API quota...[/yellow]")
+            return "retry", wait_time
+
+        # 4. Check for 404 Not Found (Model not supported or not found)
+        if "NOT_FOUND" in err_str or "404" in err_str or "NOT FOUND" in err_str:
+            console.print("[yellow]  Model not found or not supported. Skipping this model...[/yellow]")
+            return "skip_model", 0
+            
+        # 5. Default transient error (e.g. 500, 503)
+        wait_time = (attempt + 1) * 5
+        console.print(f"[red]  API Error: {str(e)[:200]}[/red]")
+        console.print(f"[yellow]  Waiting {wait_time}s before retry...[/yellow]")
+        return "retry", wait_time
+
+
 
     def _get_models(self, default_models: list[str]) -> list[str]:
         if not self.model:
@@ -104,9 +149,14 @@ IMPORTANT RULES:
 4. Generate up to {max_payloads} diverse payloads ranging from safe inputs to risk-inducing.
 5. Study the program entry point (like main() or fn main()) to see exactly how the program reads its input."""
 
-        models_to_try = self._get_models(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"])
+        from mutagen.models import FuzzPayloadList
+
+        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"])
         response = None
+        abort_outer = False
         for model_name in models_to_try:
+            if abort_outer:
+                break
             for attempt in range(3):
                 try:
                     console.print(f"[dim]  Trying model: {model_name} (attempt {attempt + 1})...[/dim]")
@@ -116,7 +166,7 @@ IMPORTANT RULES:
                         config={
                             "temperature": 0.7,
                             "response_mime_type": "application/json",
-                            "response_schema": list[FuzzPayload],
+                            "response_schema": FuzzPayloadList,
                             "safety_settings": [
                                 {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
                             ],
@@ -124,14 +174,16 @@ IMPORTANT RULES:
                     )
                     break
                 except Exception as e:
-                    error_msg = str(e)
-                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "503" in error_msg or "UNAVAILABLE" in error_msg:
-                        wait_time = (attempt + 1) * 20
-                        console.print(f"[yellow]  Rate limited or model overloaded. Waiting {wait_time}s before retry...[/yellow]")
-                        time.sleep(wait_time)
-                    else:
-                        console.print(f"[red]  Error: {error_msg[:200]}[/red]")
+                    action, wait_time = self._classify_and_handle_error(e, attempt)
+                    if action == "abort_all":
+                        abort_outer = True
                         break
+                    elif action == "skip_model":
+                        break
+                    elif action == "retry":
+                        if wait_time > 0:
+                            time.sleep(wait_time)
+
             if response is not None:
                 break
 
@@ -144,8 +196,12 @@ IMPORTANT RULES:
             with open("mutagen_debug.log", "a", encoding="utf-8") as f:
                 f.write(f"--- AI ANALYZE CODE RAW RESPONSE ---\n{raw}\n\n")
         try:
-            payloads = json.loads(raw)
-            return payloads
+            data = json.loads(raw)
+            if isinstance(data, dict) and "payloads" in data:
+                return data["payloads"]
+            elif isinstance(data, list):
+                return data
+            return []
         except json.JSONDecodeError:
             console.print(f"[red]!! Could not parse AI response as JSON.[/red]")
             console.print(f"[dim]First 300 chars: {raw[:300]}[/dim]")
@@ -187,9 +243,13 @@ IMPORTANT RULES:
 
 Respond with ONLY the JSON array."""
 
-        models_to_try = self._get_models(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"])
+        from mutagen.models import FuzzPayloadList
+        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"])
         response = None
+        abort_outer = False
         for model_name in models_to_try:
+            if abort_outer:
+                break
             for attempt in range(2):
                 try:
                     response = self.client.models.generate_content(
@@ -198,7 +258,7 @@ Respond with ONLY the JSON array."""
                         config={
                             "temperature": 0.8,
                             "response_mime_type": "application/json",
-                            "response_schema": list[FuzzPayload],
+                            "response_schema": FuzzPayloadList,
                             "safety_settings": [
                                 {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
                             ],
@@ -206,14 +266,15 @@ Respond with ONLY the JSON array."""
                     )
                     break
                 except Exception as e:
-                    error_msg = str(e)
-                    if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "503" in error_msg or "UNAVAILABLE" in error_msg:
-                        wait_time = (attempt + 1) * 10
-                        console.print(f"[yellow]  Rate limited on refinement. Waiting {wait_time}s before retry...[/yellow]")
-                        time.sleep(wait_time)
-                    else:
-                        console.print(f"[red]  Error during refinement: {error_msg[:200]}[/red]")
+                    action, wait_time = self._classify_and_handle_error(e, attempt)
+                    if action == "abort_all":
+                        abort_outer = True
                         break
+                    elif action == "skip_model":
+                        break
+                    elif action == "retry":
+                        if wait_time > 0:
+                            time.sleep(wait_time)
             if response is not None:
                 break
 
@@ -224,8 +285,12 @@ Respond with ONLY the JSON array."""
         with open("mutagen_debug.log", "a", encoding="utf-8") as f:
             f.write(f"--- AI REFINE PAYLOAD RAW RESPONSE ---\n{raw}\n\n")
         try:
-            payloads = json.loads(raw)
-            return payloads
+            data = json.loads(raw)
+            if isinstance(data, dict) and "payloads" in data:
+                return data["payloads"]
+            elif isinstance(data, list):
+                return data
+            return []
         except json.JSONDecodeError:
             return []
 
@@ -259,9 +324,12 @@ DO NOT use markdown formatting outside of the code block.
 Return ONLY the raw {self.lang_name} code. DO NOT wrap it in ```{self.lang_ext} and ```.
 If you must use markdown, the parser will try to strip it, but please try to return just the code."""
 
-        models_to_try = self._get_models(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"])
+        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"])
         response = None
+        abort_outer = False
         for model_name in models_to_try:
+            if abort_outer:
+                break
             for attempt in range(2):
                 try:
                     response = self.client.models.generate_content(
@@ -276,9 +344,15 @@ If you must use markdown, the parser will try to strip it, but please try to ret
                     )
                     break
                 except Exception as e:
-                    if debug:
-                        console.print(f"[red]Error in generate_patch ({model_name}): {e}[/red]")
-                    time.sleep((attempt + 1) * 5)
+                    action, wait_time = self._classify_and_handle_error(e, attempt)
+                    if action == "abort_all":
+                        abort_outer = True
+                        break
+                    elif action == "skip_model":
+                        break
+                    elif action == "retry":
+                        if wait_time > 0:
+                            time.sleep(wait_time)
             if response is not None:
                 break
 
@@ -325,9 +399,12 @@ DO NOT use markdown formatting outside of the code block.
 Return ONLY the raw {self.lang_name} code. DO NOT wrap it in ```{self.lang_ext} and ```.
 If you must use markdown, the parser will try to strip it, but please try to return just the code."""
 
-        models_to_try = self._get_models(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"])
+        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"])
         response = None
+        abort_outer = False
         for model_name in models_to_try:
+            if abort_outer:
+                break
             for attempt in range(2):
                 try:
                     response = self.client.models.generate_content(
@@ -342,9 +419,15 @@ If you must use markdown, the parser will try to strip it, but please try to ret
                     )
                     break
                 except Exception as e:
-                    if debug:
-                        console.print(f"[red]Error in refine_patch ({model_name}): {e}[/red]")
-                    time.sleep((attempt + 1) * 5)
+                    action, wait_time = self._classify_and_handle_error(e, attempt)
+                    if action == "abort_all":
+                        abort_outer = True
+                        break
+                    elif action == "skip_model":
+                        break
+                    elif action == "retry":
+                        if wait_time > 0:
+                            time.sleep(wait_time)
             if response is not None:
                 break
 
@@ -399,9 +482,12 @@ DO NOT use markdown formatting outside of the code block.
 Return ONLY the raw Python code. DO NOT wrap it in ```python and ```.
 If you must use markdown, the parser will try to strip it, but please try to return just the Python code."""
 
-        models_to_try = self._get_models(["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"])
+        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"])
         response = None
+        abort_outer = False
         for model_name in models_to_try:
+            if abort_outer:
+                break
             for attempt in range(2):
                 try:
                     response = self.client.models.generate_content(
@@ -416,7 +502,15 @@ If you must use markdown, the parser will try to strip it, but please try to ret
                     )
                     break
                 except Exception as e:
-                    time.sleep((attempt + 1) * 5)
+                    action, wait_time = self._classify_and_handle_error(e, attempt)
+                    if action == "abort_all":
+                        abort_outer = True
+                        break
+                    elif action == "skip_model":
+                        break
+                    elif action == "retry":
+                        if wait_time > 0:
+                            time.sleep(wait_time)
             if response is not None:
                 break
 
@@ -452,9 +546,12 @@ RAW DECOMPILED PSEUDO-CODE:
 
 Return ONLY the refactored, commented, and readable C code."""
 
-        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-2.0-flash"])
+        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"])
         response = None
+        abort_outer = False
         for model_name in models_to_try:
+            if abort_outer:
+                break
             for attempt in range(2):
                 try:
                     if debug:
@@ -471,7 +568,15 @@ Return ONLY the refactored, commented, and readable C code."""
                     )
                     break
                 except Exception as e:
-                    time.sleep(2)
+                    action, wait_time = self._classify_and_handle_error(e, attempt)
+                    if action == "abort_all":
+                        abort_outer = True
+                        break
+                    elif action == "skip_model":
+                        break
+                    elif action == "retry":
+                        if wait_time > 0:
+                            time.sleep(wait_time)
             if response is not None:
                 break
 
@@ -487,4 +592,5 @@ Return ONLY the refactored, commented, and readable C code."""
             text = text[:-3]
 
         return text.strip()
+
 

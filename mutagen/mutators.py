@@ -88,7 +88,14 @@ def _integer_boundary_payloads(delivery_mode: str) -> list[dict]:
 
 
 def _null_and_special_payloads(delivery_mode: str) -> list[dict]:
-    """Null bytes, newlines, and other special characters."""
+    """Null bytes, newlines, and other special characters.
+    
+    NOTE: Null bytes CANNOT be passed as CLI args on Windows (CreateProcess
+    uses null-terminated arg strings). These payloads always go to input_data
+    and are only effective when delivery_mode != 'args'. In args mode they are
+    still generated but the executor will sanitize the \x00s out of args,
+    so the test degrades gracefully to a long-string test.
+    """
     specials = [
         ("\x00" * 16, "embedded null bytes"),
         ("A" * 50 + "\x00" + "B" * 50, "null byte in middle of string"),
@@ -100,9 +107,16 @@ def _null_and_special_payloads(delivery_mode: str) -> list[dict]:
     ]
     payloads = []
     for data, reason in specials:
+        # Always put special/binary content in input_data.
+        # In args mode, also put a sanitized version in args as a best-effort.
+        if delivery_mode == "args":
+            sanitized = data.replace("\x00", "")  # strip nulls for args safety
+            args_val = [sanitized] if sanitized else []
+        else:
+            args_val = []
         payloads.append({
-            "args": [data] if delivery_mode == "args" else [],
-            "input_data": data if delivery_mode != "args" else "",
+            "args": args_val,
+            "input_data": data,
             "vuln_type": "input_validation",
             "reason": f"Traditional mutator: {reason}",
             "severity": "medium",

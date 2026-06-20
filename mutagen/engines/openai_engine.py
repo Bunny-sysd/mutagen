@@ -12,19 +12,37 @@ class OpenAIEngine(BaseEngine):
         from openai import OpenAI
         self.client = OpenAI(api_key=self.api_key)
 
-    def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool) -> list[dict]:
+    def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool, profile: str = "legacy-audit") -> list[dict]:
+        decompile_context = ""
+        if getattr(self, "is_decompiled", False):
+            decompile_context = """
+CRITICAL CONTEXT: This is DECOMPILED pseudo-C code extracted from a compiled binary via Ghidra.
+- Variable names are auto-generated (e.g., param_1, iVar2, local_28) — infer their purpose from usage.
+- Some constructs may be approximated by the decompiler and may not match the original source exactly.
+- Focus on security patterns, buffer operations, pointer arithmetic, unsafe casts, and control flow.
+- The original binary may have been compiled from C, C++, or another language.
+
+"""
+        if profile == "supply-chain":
+            focus_description = "unauthorized network calls, hardcoded backdoors, hidden command execution, environment variable exfiltration, and secrets/credential leaks."
+            vuln_types_example = '"backdoor", "credential_leak", "command_injection", "unauthorized_socket"'
+        elif profile == "malware-triage":
+            focus_description = "malware signatures, encryption algorithms (e.g., ransomware encryption loops), persistence mechanisms, keyloggers, evasion techniques, and command & control (C2) footprint."
+            vuln_types_example = '"malware_persistence", "ransomware_encryption", "keylogger_module", "c2_socket"'
+        else:
+            focus_description = "buffer overflows, format string bugs, integer overflows, use-after-free, off-by-one errors, double-free, heap overflows, and command injection."
+            vuln_types_example = '"buffer_overflow", "format_string", "integer_overflow", "use_after_free"'
+
         prompt = f"""You are an expert defensive security researcher conducting a code audit.
-Your job is to analyze the following C source code for potential vulnerabilities
-such as buffer overflows, format string bugs, integer overflows, use-after-free,
-off-by-one errors, double-free, heap overflows, and command injection.
+{decompile_context}Your job is to analyze the following C source code for potential vulnerabilities and security risks, focusing on: {focus_description}
 
 The target program receives input via: {delivery_mode}.
 
 First, analyze the source code step by step using a Chain of Thought process to understand
 the control flow, data flow, and memory management. Identify where untrusted inputs 
-are used in dangerous operations without proper validation or bounds checking.
+are used in dangerous operations or suspicious/unauthorized behaviors.
 
-For each vulnerability you find, generate a specific test payload.
+For each security risk or vulnerability you find, generate a specific test payload or indicator scenario.
 
 SOURCE CODE:
 ```c
@@ -36,12 +54,15 @@ IMPORTANT RULES:
 2. Each element must have these fields:
    - "args": an array of strings, one per command-line argument (used if delivery mode is 'args')
    - "input_data": a string containing the raw input to feed via stdin or network (used if delivery mode is 'stdin' or 'tcp')
-   - "vuln_type": the vulnerability type (e.g. "buffer_overflow", "format_string", "integer_overflow", "use_after_free")
-   - "reason": brief explanation of why this triggers the bug, containing your chain of thought logic
+   - "vuln_type": the vulnerability or capability type (e.g. {vuln_types_example})
+   - "reason": brief explanation of why this triggers the bug or capability, containing your chain of thought logic
    - "severity": "critical", "high", "medium", or "low"
    - "cwe": the CWE ID if known (e.g. "CWE-120")
+   - "data_flow": an array of strings tracing execution flow from entry-point input (Source) to the vulnerability function/sink
+   - "confidence_score": an integer from 1 to 10 assessing vulnerability trigger confidence
+   - "mitigations_detected": array of strings listing security checks/canaries/filters detected in the code path
 3. For long repeated strings, write them out literally (e.g. "AAAAAAAAAA" not "A"*10). Limit any repeated strings to a maximum of 1000 characters to prevent parsing truncation.
-4. Generate up to {max_payloads} diverse payloads ranging from safe inputs to crash-inducing.
+4. Generate up to {max_payloads} diverse payloads ranging from safe inputs to risk-inducing.
 5. Study the main() function to see exactly how the program reads its input (e.g., argv, fgets, scanf, recv).
 
 Respond with ONLY the JSON array."""
@@ -51,7 +72,7 @@ Respond with ONLY the JSON array."""
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
-                response_format={"type": "json_object"} if "gpt-4" in self.model or "gpt-3.5" in self.model or "o1" in self.model else None
+                response_format={"type": "json_object"} if ("gpt-4" in self.model or "gpt-3.5" in self.model) and "o1" not in self.model else None
             )
             raw = response.choices[0].message.content.strip()
             if debug:
@@ -111,7 +132,7 @@ Respond with ONLY the JSON array."""
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.8,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"} if ("gpt-4" in self.model or "gpt-3.5" in self.model) and "o1" not in self.model else None
             )
             raw = response.choices[0].message.content.strip()
             data = json.loads(raw)
@@ -256,3 +277,41 @@ If you must use markdown, the parser will try to strip it, but please try to ret
             if debug:
                 console.print(f"[red]OpenAI exploit generation failed: {e}[/red]")
             return ""
+
+    def deobfuscate_code(self, raw_code: str, debug: bool = False) -> str:
+        prompt = f"""You are an expert reverse engineer and code deobfuscator.
+Your task is to analyze the following messy decompiled C pseudo-code and perform symbol recovery and deobfuscation to make it readable.
+
+Follow these rules:
+1. Rename all generic, auto-generated variables (like local_1c, param_1, pvVar2, iVar3) to clear, descriptive names based on how they are used in the code.
+2. Rename generic auto-generated function names (like FUN_004010a0, FUN_004011b0) to meaningful descriptive names based on their logic.
+3. Clean up complex control-flow loops or ternary statements into standard, structured C code equivalents.
+4. Add clear inline comments explaining what each logical block does.
+5. Provide the ENTIRE refactored, readable C source code file.
+6. Do NOT include any markdown block formatting or explanations outside of the code block. Return ONLY raw C code. DO NOT wrap it in ```c and ```.
+
+RAW DECOMPILED PSEUDO-CODE:
+```c
+{raw_code}
+```
+
+Return ONLY the refactored, commented, and readable C code."""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2
+            )
+            text = response.choices[0].message.content.strip()
+            if text.startswith("```c"):
+                text = text[4:]
+            elif text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            return text.strip()
+        except Exception as e:
+            if debug:
+                console.print(f"[red]OpenAI deobfuscation failed: {e}[/red]")
+            return raw_code
+
