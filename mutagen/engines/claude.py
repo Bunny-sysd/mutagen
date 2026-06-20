@@ -14,21 +14,34 @@ class ClaudeEngine(BaseEngine):
         self.client = Anthropic(api_key=self.api_key)
 
     def _generate(self, prompt: str, system: str = "") -> str:
-        try:
-            kwargs = {
-                "model": self.model,
-                "max_tokens": 4000,
-                "temperature": 0.2,
-                "messages": [{"role": "user", "content": prompt}]
-            }
-            if system:
-                kwargs["system"] = system
-            
-            message = self.client.messages.create(**kwargs)
-            return message.content[0].text.strip()
-        except Exception as e:
-            console.print(f"[red]Claude API error: {e}[/red]")
-            return ""
+        kwargs = {
+            "model": self.model,
+            "max_tokens": 4000,
+            "temperature": 0.2,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+        if system:
+            kwargs["system"] = system
+
+        for attempt in range(3):
+            try:
+                message = self.client.messages.create(**kwargs)
+                return message.content[0].text.strip()
+            except Exception as e:
+                err_str = str(e).lower()
+                if "rate limit" in err_str or "429" in err_str or "quota" in err_str:
+                    wait_time = 20
+                    console.print(f"[yellow]  Rate limit (429) hit on Claude. Waiting {wait_time}s to cool down...[/yellow]")
+                    time.sleep(wait_time)
+                elif "500" in err_str or "503" in err_str or "timeout" in err_str:
+                    wait_time = (attempt + 1) * 5
+                    console.print(f"[yellow]  Claude transient error. Waiting {wait_time}s before retry...[/yellow]")
+                    time.sleep(wait_time)
+                else:
+                    console.print(f"[red]Claude API error: {e}[/red]")
+                    return ""
+        console.print("[red]Claude API failed after multiple retries.[/red]")
+        return ""
 
     def _extract_json(self, text: str) -> list[dict]:
         text = text.strip()

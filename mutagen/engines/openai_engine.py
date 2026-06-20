@@ -12,6 +12,24 @@ class OpenAIEngine(BaseEngine):
         from openai import OpenAI
         self.client = OpenAI(api_key=self.api_key)
 
+    def _create_chat_completion(self, **kwargs) -> any:
+        for attempt in range(3):
+            try:
+                return self.client.chat.completions.create(**kwargs)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "rate limit" in err_str or "429" in err_str or "quota" in err_str:
+                    wait_time = 20
+                    console.print(f"[yellow]  Rate limit (429) hit on OpenAI. Waiting {wait_time}s to cool down...[/yellow]")
+                    time.sleep(wait_time)
+                elif "500" in err_str or "503" in err_str or "timeout" in err_str:
+                    wait_time = (attempt + 1) * 5
+                    console.print(f"[yellow]  OpenAI transient error. Waiting {wait_time}s before retry...[/yellow]")
+                    time.sleep(wait_time)
+                else:
+                    raise e
+        raise Exception("OpenAI API call failed after multiple retries.")
+
     def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool, profile: str = "legacy-audit") -> list[dict]:
         decompile_context = ""
         if getattr(self, "is_decompiled", False):
@@ -68,7 +86,7 @@ IMPORTANT RULES:
 Respond with ONLY the JSON array."""
 
         try:
-            response = self.client.chat.completions.create(
+            response = self._create_chat_completion(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
@@ -128,7 +146,7 @@ IMPORTANT RULES:
 Respond with ONLY the JSON array."""
 
         try:
-            response = self.client.chat.completions.create(
+            response = self._create_chat_completion(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.8,
@@ -157,7 +175,7 @@ Vulnerability details:
 
 Provide the ENTIRE patched C code file. No markdown block formatting, return raw C code only."""
         try:
-            response = self.client.chat.completions.create(
+            response = self._create_chat_completion(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2
@@ -204,7 +222,7 @@ Provide the ENTIRE corrected C source code file.
 DO NOT use markdown formatting outside of the code block.
 Return ONLY the raw C code. DO NOT wrap it in ```c and ```."""
         try:
-            response = self.client.chat.completions.create(
+            response = self._create_chat_completion(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2
@@ -260,7 +278,7 @@ DO NOT use markdown formatting outside of the code block.
 Return ONLY the raw Python code. DO NOT wrap it in ```python and ```.
 If you must use markdown, the parser will try to strip it, but please try to return just the Python code."""
         try:
-            response = self.client.chat.completions.create(
+            response = self._create_chat_completion(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3
@@ -297,7 +315,7 @@ RAW DECOMPILED PSEUDO-CODE:
 
 Return ONLY the refactored, commented, and readable C code."""
         try:
-            response = self.client.chat.completions.create(
+            response = self._create_chat_completion(
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2
