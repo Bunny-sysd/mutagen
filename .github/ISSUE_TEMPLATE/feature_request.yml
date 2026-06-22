@@ -1,0 +1,41 @@
+name: 💡 Feature Request
+description: Suggest an idea or new capability for Mutagen.
+title: "[Feature Request]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest a new feature or improvement for Mutagen!
+  - type: textarea
+    id: problem
+    attributes:
+      label: Is your feature request related to a problem?
+      description: A clear and concise description of what the problem is (e.g., "I'm always frustrated when...").
+      placeholder: Describe the current limitation...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the solution you'd like
+      description: A clear and concise description of how you want this feature to work in the pipeline.
+      placeholder: "E.g., Add support for a new local LLM engine, a real-time web dashboard component, or additional sandbox targets..."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Describe alternatives you've considered
+      description: Any alternative solutions or workarounds you've considered.
+      placeholder: Alternatives or temporary workarounds...
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Add any other context, screenshots, or examples here.
+      placeholder: Additional references or screenshots...
+    validations:
+      required: false

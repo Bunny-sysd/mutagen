@@ -72,6 +72,9 @@ body:
       options:
         - Gemini
         - OpenAI
+        - Claude
         - Ollama (Local)
+        - None (Traditional offline mutation only)
     validations:
       required: true
+
