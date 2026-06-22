@@ -3,17 +3,17 @@ import re
 FUNCTION_HEADER_REGEX = re.compile(r'^// --- Function: (\w+) @ ([0-9a-fA-F]+) ---')
 
 DANGEROUS_KEYWORDS = {
-    "strcpy", "strncpy", "strcat", "strncat", "sprintf", "vsprintf", "memcpy", 
-    "memmove", "gets", "scanf", "fscanf", "sscanf", "malloc", "calloc", "realloc", 
-    "free", "system", "popen", "exec", "execve", "execvp", "CreateProcess", 
-    "VirtualAlloc", "VirtualProtect", "WriteProcessMemory", "socket", "connect", 
+    "strcpy", "strncpy", "strcat", "strncat", "sprintf", "vsprintf", "memcpy",
+    "memmove", "gets", "scanf", "fscanf", "sscanf", "malloc", "calloc", "realloc",
+    "free", "system", "popen", "exec", "execve", "execvp", "CreateProcess",
+    "VirtualAlloc", "VirtualProtect", "WriteProcessMemory", "socket", "connect",
     "bind", "listen", "accept", "send", "recv", "recvfrom", "sendto"
 }
 
 def split_functions(pseudo_code: str) -> tuple[str, list[dict]]:
     """
     Split decompiled pseudo-code into a meta-header and a list of functions.
-    
+
     Returns:
         tuple: (meta_header, list of dicts [{"name": str, "address": str, "code": str}])
     """
@@ -21,7 +21,7 @@ def split_functions(pseudo_code: str) -> tuple[str, list[dict]]:
     current_func = None
     current_lines = []
     meta_lines = []
-    
+
     for line in pseudo_code.splitlines():
         match = FUNCTION_HEADER_REGEX.match(line)
         if match:
@@ -39,11 +39,11 @@ def split_functions(pseudo_code: str) -> tuple[str, list[dict]]:
                 current_lines.append(line)
             else:
                 meta_lines.append(line)
-                
+
     if current_func:
         current_func["code"] = "\n".join(current_lines).strip()
         functions.append(current_func)
-        
+
     meta_header = "\n".join(meta_lines).strip()
     return meta_header, functions
 
@@ -60,7 +60,7 @@ def filter_functions(functions: list[dict], preserve_names: list[str] = None) ->
     if preserve_names is None:
         preserve_names = ["main", "_main", "entry"]
     preserve_names_lower = [name.lower() for name in preserve_names]
-    
+
     filtered = []
     for f in functions:
         name_lower = f["name"].lower()

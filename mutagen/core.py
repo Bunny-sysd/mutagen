@@ -1,25 +1,25 @@
 import os
 import sys
-import time
-import datetime
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from rich import box
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
 from rich.text import Text
-from rich import box
 
-from mutagen.engines import get_engine
-from mutagen.compiler import compile_target, CompilationError
-from mutagen.executor import execute_payload, _check_docker_functional
-from mutagen.reporter import save_crash_report
-from mutagen.mutators import generate_fallback_payloads
+from mutagen.compiler import CompilationError, compile_target
 from mutagen.decompiler import (
-    is_binary_target, find_ghidra, decompile_binary,
-    DecompilationError, DecompilationResult,
+    DecompilationError,
+    decompile_binary,
+    find_ghidra,
 )
+from mutagen.engines import get_engine
+from mutagen.executor import _check_docker_functional, execute_payload
+from mutagen.mutators import generate_fallback_payloads
+from mutagen.reporter import save_crash_report
 
 console = Console(force_terminal=True, force_jupyter=False)
 
@@ -30,13 +30,13 @@ def _crash_signature(crash: dict) -> str:
     # Normalize stdout/stderr by stripping memory addresses and temporary file paths to avoid ASLR/env noise
     stdout = crash.get("stdout", "")
     stderr = crash.get("stderr", "")
-    
+
     stdout_norm = re.sub(r'0x[0-9a-fA-F]+', '0xADDR', stdout).strip()
     stderr_norm = re.sub(r'0x[0-9a-fA-F]+', '0xADDR', stderr).strip()
-    
+
     stdout_norm = re.sub(r'[a-zA-Z]:\\[^\s:]+', 'FILE_PATH', stdout_norm)
     stderr_norm = re.sub(r'[a-zA-Z]:\\[^\s:]+', 'FILE_PATH', stderr_norm)
-    
+
     return f"{crash['crash_type']}::{crash['return_code']}::{crash.get('vuln_type', '')}::{stdout_norm}::{stderr_norm}"
 
 
@@ -64,7 +64,7 @@ def verify_and_fallback_exploit(exploit_code: str, crash_data: dict, exe_path: s
     # Fallback script generation
     payload_repr = repr(crash_data.get("input_data", ""))
     args_repr = repr(crash_data.get("args", []))
-    
+
     fallback_script = f"""# -*- coding: utf-8 -*-
 \"\"\"
 Mutagen Auto-Generated Exploit PoC (Fallback)
@@ -86,14 +86,14 @@ def run_poc():
     delivery_mode = {repr(delivery_mode)}
     payload = {payload_repr}
     args = {args_repr}
-    
+
     print(f"[*] Launching target: {{exe_path}}")
     print(f"[*] Delivery mode: {{delivery_mode}}")
-    
+
     if not os.path.exists(exe_path):
         print(f"[!] Error: Target executable '{{exe_path}}' not found!")
         sys.exit(1)
-        
+
     if delivery_mode == "args":
         # Launch with payload as command line arguments
         print(f"[*] Executing with arguments: {{args}}")
@@ -101,7 +101,7 @@ def run_poc():
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = proc.communicate(timeout=5)
         print(f"[*] Process exited with return code: {{proc.returncode}}")
-        
+
     elif delivery_mode == "stdin":
         # Launch and pipe payload into stdin
         print(f"[*] Writing payload to stdin...")
@@ -113,14 +113,14 @@ def run_poc():
             print("[!] Process hung (possible Denial of Service / infinite loop)!")
             proc.kill()
             sys.exit(0)
-            
+
     elif delivery_mode.startswith("tcp:"):
         # Launch process and send payload over socket
         port = int(delivery_mode.split(":")[1])
         print(f"[*] Launching server and waiting for port {{port}}...")
         proc = subprocess.Popen([exe_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         time.sleep(0.5) # Wait for bind
-        
+
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(3.0)
@@ -151,7 +151,7 @@ def mutate_input(args: list[str], input_data: str, delivery_mode: str) -> tuple[
     """Applies a random mutation (bit flip, byte replace, arithmetic, or insert) to args or input_data."""
     import random
     import re
-    
+
     def mutate_string(s: str) -> str:
         if not s:
             return random.choice(["A", "1", "%s", "\x00", "; ls"])
@@ -186,7 +186,7 @@ def mutate_input(args: list[str], input_data: str, delivery_mode: str) -> tuple[
         elif choice == 4:  # Truncation
             trunc_len = random.randint(1, len(s_list))
             s_list = s_list[:trunc_len]
-            
+
         return "".join(s_list)
 
     if delivery_mode == "args":
@@ -307,15 +307,15 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         console.print()
 
         raw_decompiled_code = decompilation_info.pseudo_source
-        
+
         # --- CONTEXT WINDOW CHUNKING ---
-        from mutagen.chunker import split_functions, filter_functions, reconstruct_pseudo_code
+        from mutagen.chunker import filter_functions, reconstruct_pseudo_code, split_functions
         meta_header, functions = split_functions(raw_decompiled_code)
         filtered_funcs = filter_functions(functions)
-        
+
         # Log chunking action details
         console.print(f"[dim]  Context Window Chunker: split {len(functions)} functions down to {len(filtered_funcs)} high-priority functions containing risk keywords[/dim]")
-        
+
         source_code = reconstruct_pseudo_code(meta_header, filtered_funcs)
         console.print(f"[dim]  Extracted {len(source_code)} bytes of filtered C pseudo-code[/dim]")
         console.print()
@@ -343,7 +343,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         # --- STEP 1: READ THE TARGET SOURCE CODE -----------------------------
         console.print(f"[cyan]> TARGET:[/cyan] {source_path}")
 
-        with open(source_path, "r", encoding="utf-8") as f:
+        with open(source_path, encoding="utf-8") as f:
             source_code = f.read()
 
         console.print(f"[dim]  Read {len(source_code)} bytes of source code[/dim]")
@@ -400,7 +400,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         input_data = p.get("input_data", "")
         if isinstance(args, str):
             args = [args]
-        
+
         if delivery_mode == "args":
             preview = " | ".join(str(a)[:15] for a in args)
         else:
@@ -428,13 +428,13 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             f"[dim]Profile: {profile.upper()} | Skipping compilation, execution, and patch verification phases.[/dim]",
             border_style="yellow"
         ))
-        
+
         target_name = os.path.basename(source_path)
         for ext_to_strip in (".rs", ".cpp", ".c"):
             if target_name.endswith(ext_to_strip):
                 target_name = target_name[:-len(ext_to_strip)]
                 break
-        
+
         # Format payloads into static findings
         static_findings = []
         for i, p in enumerate(payloads):
@@ -498,7 +498,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         except CompilationError as e:
             console.print(f"[bold red]X Initial compilation failed![/bold red]\n{e}")
             sys.exit(1)
-            
+
         console.print(f"[green]>> Compiled to: {exe_path}[/green]")
         console.print()
 
@@ -513,7 +513,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     seen_signatures = set()   # For deduplication
     unique_crashes = []       # Deduplicated crash list
     results_lock = threading.Lock()
-    
+
     global_coverage = set()
     seed_queue = []
 
@@ -610,7 +610,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                         is_unique = "[green]✓ NEW"
                     else:
                         is_unique = "[dim]dupe"
-            
+
             # --- TRACK COVERAGE SEEDS --------------------------------------
             if result.get("coverage"):
                 cov_set = set(result["coverage"])
@@ -653,7 +653,6 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 )
 
     # --- Sequential Phase: agentic retries for non-crashing payloads ---
-    max_retries = 2
     for i, original_p, last_result, last_args, last_input in needs_retry:
         retry_attempt = 1
         current_max_retries = 2
@@ -730,7 +729,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     else:
                         is_unique = "[dim]dupe"
                     retry_crashed = True
-                
+
                 # --- TRACK COVERAGE FOR REFINEMENTS ------------------------
                 if result.get("coverage"):
                     cov_set = set(result["coverage"])
@@ -785,33 +784,33 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             f"[dim]Initial coverage: {len(global_coverage)} basic blocks. Starting mutation feedback loop...[/dim]",
             border_style="cyan"
         ))
-        
+
         mutation_rounds = 200
         mutation_hits = 0
         new_crashes_found = 0
-        
+
         import random
-        
+
         with Progress(
             SpinnerColumn(style="cyan"),
             TextColumn("[cyan]Mutating seeds and exploring branches ({task.completed}/{task.total} rounds)..."),
             console=console,
         ) as progress:
             task = progress.add_task("Fuzzing", total=mutation_rounds)
-            
+
             for round_idx in range(mutation_rounds):
                 if not seed_queue:
                     break
-                    
+
                 # Select seed
                 seed = random.choice(seed_queue)
-                
+
                 # Mutate input
                 mutated_args, mutated_input = mutate_input(seed["args"], seed["input_data"], delivery_mode)
-                
+
                 # Execute mutated payload
                 res = execute_payload(exe_path, mutated_args, mutated_input, delivery_mode, timeout, sandbox)
-                
+
                 if res["crashed"]:
                     crash_entry = {
                         "args": mutated_args,
@@ -852,9 +851,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                                 "reason": f"Mutated seed discovered {len(new_blocks)} new block(s)",
                             }
                             seed_queue.append(new_seed)
-                            
+
                 progress.update(task, advance=1)
-                
+
         console.print(f"[green]>> Mutation loop finished. Discovered {mutation_hits} new code paths and {new_crashes_found} unique crashes.[/green]")
         console.print(f"[green]>> Global basic block coverage reached: {len(global_coverage)} blocks.[/green]")
         console.print()
@@ -934,7 +933,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 "[dim]Asking AI to generate a secure fix and Python exploit...[/dim]",
                 border_style="cyan"
             ))
-            
+
             patch_file = f"patches/{target_name}_FIXED.{patch_ext}"
             with Progress(
                 SpinnerColumn(style="cyan"),
@@ -943,13 +942,13 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             ) as progress:
                 exploit_code = engine.generate_exploit(source_code, crashes[0], exe_path, delivery_mode, debug)
                 exploit_code = verify_and_fallback_exploit(exploit_code, crashes[0], exe_path, delivery_mode)
-                
+
                 if exploit_code:
                     os.makedirs("exploits", exist_ok=True)
                     exploit_file = f"exploits/{target_name}_exploit.py"
                     with open(exploit_file, "w", encoding="utf-8") as f:
                         f.write(exploit_code)
-                        
+
             if exploit_file:
                 console.print(f"[green]>> Python exploit saved to: {exploit_file}[/green]\n")
             else:
@@ -957,13 +956,13 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
             # --- PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING -----------------
             error_details = ""
-            
+
             console.print(Panel(
                 "[bold cyan]PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING[/bold cyan]\n"
                 f"[dim]Mathematically proving the patch works (Max self-healing retries: {max_patch_retries})...[/dim]",
                 border_style="cyan"
             ))
-            
+
             attempt = 0
             current_max_retries = max_patch_retries
             while attempt <= current_max_retries:
@@ -980,7 +979,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                             patch_code = engine.generate_patch(source_code, crashes[0], debug)
                         else:
                             patch_code = engine.refine_patch(source_code, "", error_details or "Initial patch was empty", crashes[0], debug)
-                    
+
                     if not patch_code:
                         error_details = "AI returned an empty C patch response."
                         console.print("[red]    X AI returned empty C patch.[/red]\n")
@@ -994,7 +993,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                                     pass
                         attempt += 1
                         continue
-                
+
                 elif attempt > 0:
                     console.print(f"[yellow]  ↳ Self-Healing Attempt {attempt}/{current_max_retries} initializing...[/yellow]")
                     with Progress(
@@ -1004,7 +1003,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     ) as progress:
                         task = progress.add_task("", total=None)
                         patch_code = engine.refine_patch(source_code, patch_code, error_details, crashes[0], debug)
-                    
+
                     if not patch_code:
                         error_details = "AI returned an empty C patch response during refinement."
                         console.print("[red]    X AI failed to return refined C patch.[/red]\n")
@@ -1018,16 +1017,16 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                                     pass
                         attempt += 1
                         continue
-                
+
                 # Write patch file
                 os.makedirs("patches", exist_ok=True)
                 with open(patch_file, "w", encoding="utf-8") as f:
                     f.write(patch_code)
-                
+
                 try:
                     patched_exe = compile_target(patch_file, gcc_path)
-                    console.print(f"[green]    [+] Patched target compiled successfully[/green]")
-                    
+                    console.print("[green]    [+] Patched target compiled successfully[/green]")
+
                     with Progress(
                         SpinnerColumn(style="cyan"),
                         TextColumn("[cyan]    Firing exploit at patched target..."),
@@ -1035,7 +1034,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     ) as progress:
                         task = progress.add_task("", total=None)
                         verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout, sandbox)
-                        
+
                     if verify_result["crashed"]:
                         error_details = f"The patched binary compiled successfully but still crashed when executed with the exploit payload.\nCrash Type: {verify_result['crash_type']}\nReturn Code: {verify_result['return_code']}"
                         console.print(f"[bold red]    X Verification Failed:[/bold red] The patched program still crashed: {verify_result['crash_type']}\n")
@@ -1076,8 +1075,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""
         exploit_text = f"  Exploit generated:[magenta]{exploit_file}[/magenta]\n" if exploit_file else ""
-        verification_text = f"  Verification:     [bold green]VERIFIED SECURE[/bold green]\n" if patch_verified else (f"  Verification:     [bold red]FAILED[/bold red]\n" if patch_file else "")
-        
+        verification_text = "  Verification:     [bold green]VERIFIED SECURE[/bold green]\n" if patch_verified else ("  Verification:     [bold red]FAILED[/bold red]\n" if patch_file else "")
+
         healing_text = ""
         if patch_file:
             if patch_verified:
@@ -1087,7 +1086,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         binary_text = ""
         if binary_mode:
-            binary_text = f"  Analysis mode:    [bold cyan]BINARY DECOMPILATION[/bold cyan]\n"
+            binary_text = "  Analysis mode:    [bold cyan]BINARY DECOMPILATION[/bold cyan]\n"
             if decompilation_info:
                 binary_text += f"  Architecture:     [cyan]{decompilation_info.architecture}[/cyan]\n"
                 binary_text += f"  Functions found:  [cyan]{decompilation_info.functions_found}[/cyan]\n"

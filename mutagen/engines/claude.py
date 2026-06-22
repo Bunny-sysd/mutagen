@@ -1,7 +1,8 @@
-import os
 import json
 import time
+
 from rich.console import Console
+
 from mutagen.engines.base import BaseEngine
 
 console = Console(force_terminal=True, force_jupyter=False)
@@ -104,7 +105,7 @@ Respond with ONLY a JSON array of payloads containing:
 - "data_flow": array of strings tracing execution flow from entry-point input (Source) to the vulnerability function/sink
 - "confidence_score": integer from 1 to 10 assessing vulnerability trigger confidence
 - "mitigations_detected": array of strings listing security checks/canaries/filters detected in the code path"""
-        
+
         raw = self._generate(prompt, system="You are an automated code audit assistant. Respond only in raw JSON arrays.")
         if debug:
             with open("mutagen_debug.log", "a", encoding="utf-8") as f:
@@ -129,7 +130,7 @@ EXECUTION METRICS:
 
 Generate 2-3 new, refined payloads.
 Respond ONLY with a valid JSON array matching the original schema. No extra words."""
-        
+
         raw = self._generate(prompt, system="You are an automated payload refinement assistant. Respond only in raw JSON arrays.")
         return self._extract_json(raw)
 
@@ -142,7 +143,7 @@ Reason: {crash_data.get("reason")}
 Args: {crash_data.get("args")}
 
 Return the ENTIRE updated {self.lang_name} source code file. Do not include markdown blocks, explanations, or backticks."""
-        
+
         text = self._generate(prompt, system=f"You are a senior {self.lang_name} developer. Output only the {self.lang_name} code. No markup, no markdown formatting, no backticks, no comments outside {self.lang_name}.")
         for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
             if text.lower().startswith(prefix):
@@ -168,7 +169,7 @@ Vulnerability: {crash_data.get("vuln_type")}
 Args: {crash_data.get("args")}
 
 Return the ENTIRE corrected {self.lang_name} source code file. Do not include markdown blocks, explanations, or backticks."""
-        
+
         text = self._generate(prompt, system=f"You are a senior {self.lang_name} developer. Output only the corrected {self.lang_name} code. No markup, no markdown formatting, no backticks, no comments outside {self.lang_name}.")
         for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
             if text.lower().startswith(prefix):
@@ -189,7 +190,7 @@ Crash payload:
 
 The script must accept target exe as sys.argv[1] (defaulting to '{exe_path}').
 Return ONLY python code. No explanations, no markdown blocks, no backticks."""
-        
+
         text = self._generate(prompt, system="You are a security QA developer. Output only raw Python code.")
         if text.startswith("```python"):
             text = text[9:]

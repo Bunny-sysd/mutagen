@@ -1,6 +1,7 @@
 import json
-import time
+
 from rich.console import Console
+
 from mutagen.engines.base import BaseEngine
 
 console = Console(force_terminal=True, force_jupyter=False)
@@ -12,12 +13,12 @@ class OllamaEngine(BaseEngine):
         self.model = model or os.environ.get("MUTAGEN_MODEL", "llama3.2")
         import requests
         self.requests = requests
-        
+
         # Get standard MUTAGEN_OLLAMA_URL or fall back to constructing it from OLLAMA_HOST
         env_url = os.environ.get("MUTAGEN_OLLAMA_URL", "")
         if not env_url:
             env_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434").strip()
-            
+
         urls = []
         if "," in env_url:
             raw_urls = env_url.split(",")
@@ -29,7 +30,7 @@ class OllamaEngine(BaseEngine):
                     raw_url = f"http://{raw_url}"
                 elif not raw_url.startswith("http"):
                     raw_url = f"http://{raw_url}"
-                
+
                 if not raw_url.endswith("/api/generate"):
                     raw_url = f"{raw_url.rstrip('/')}/api/generate"
                 urls.append(raw_url)
@@ -38,7 +39,7 @@ class OllamaEngine(BaseEngine):
                 env_url = f"http://{env_url}"
             elif not env_url.startswith("http"):
                 env_url = f"http://{env_url}"
-            
+
             if not env_url.endswith("/api/generate"):
                 env_url = f"{env_url.rstrip('/')}/api/generate"
             urls = [env_url]

@@ -1,7 +1,8 @@
-import os
-import json
 import datetime
 import html
+import json
+import os
+
 from mutagen.compliance import map_cwe_to_compliance
 
 VULN_CAPABILITIES = {
@@ -98,7 +99,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
 
     # --- HTML REPORT ---------------------------------------------------
     html_file = f"crashes/report_{target_name}_{timestamp}.html"
-    
+
     crash_rows = ""
     crashes_sorted = sorted(crashes, key=lambda x: x.get("confidence_score", 5), reverse=True)
     for i, c in enumerate(crashes_sorted):
@@ -107,7 +108,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
             args_display = args_display[:57] + "..."
         severity = c.get("severity", "unknown")
         sev_class = severity if severity in ("critical", "high", "medium", "low") else "low"
-        
+
         # Security: Prevent XSS by HTML-escaping all untrusted input
         safe_args = html.escape(args_display)
         safe_vuln = html.escape(c.get("vuln_type", "unknown"))
@@ -125,7 +126,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
             conf_color = "#ffb84d"
         else:
             conf_color = "#00ff88"
-            
+
         # Format mitigations
         mitigations = c.get("mitigations_detected", [])
         safe_mitigations = ", ".join(html.escape(m) for m in mitigations) if mitigations else "None"
@@ -161,7 +162,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
 
     crash_rate = (len(crashes)/total_tested*100) if total_tested else 0
     vuln_types = list(set(c.get("vuln_type", "") for c in crashes))
-    
+
     # --- PARSE SECURITY TELEMETRY (IoCs & Capabilities) ---------------------
     ioc_rows = ""
     capability_rows = ""
@@ -183,11 +184,11 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
             caps_found[vt]["count"] += 1
             if severity_rank.get(sev, 0) > severity_rank.get(caps_found[vt]["severity"], 0):
                 caps_found[vt]["severity"] = sev
-        
+
         # Build capability matrix rows
         for i, (vt, details) in enumerate(caps_found.items()):
             vt_norm = vt.lower().strip().replace(" ", "_").replace("-", "_")
-            
+
             # Lookup capability details
             cap_info = VULN_CAPABILITIES.get(vt_norm)
             if cap_info:
@@ -196,12 +197,12 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
             else:
                 # Fallback for custom or dynamically generated types
                 cap_name = vt.replace("_", " ").title()
-                cap_desc = f"Custom security vulnerability signature identified during static triage."
-            
+                cap_desc = "Custom security vulnerability signature identified during static triage."
+
             count = details["count"]
             occurrences_str = f"Detected {count} crash-causing payload context{'s' if count > 1 else ''}."
             details_text = f"{cap_desc} ({occurrences_str})"
-            
+
             sev = details["severity"].upper()
             sev_class = details["severity"].lower() if details["severity"].lower() in ("critical", "high", "medium", "low") else "low"
             capability_rows += f"""
@@ -211,7 +212,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
                 <td><strong>{html.escape(cap_name)}</strong></td>
                 <td>{html.escape(details_text)}</td>
             </tr>"""
-            
+
         # Extract IoCs using simple regexes/rules
         import re
         ip_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b')
@@ -283,7 +284,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     else:
         safe_patch_code = html.escape(patch_code or "// No patch code was generated.")
     safe_exploit_code = html.escape(exploit_code or "# No regression exploit script was generated.")
-    
+
     # Dynamic Tab buttons
     patch_tab_btn = ""
     exploit_tab_btn = ""
@@ -347,27 +348,27 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
 <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
 <style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{ 
-    font-family: 'Inter', system-ui, sans-serif; 
+  body {{
+    font-family: 'Inter', system-ui, sans-serif;
     background: radial-gradient(circle at 50% 0%, #151528 0%, #080810 100%);
-    color: #e2e8f0; 
-    padding: 3rem; 
+    color: #e2e8f0;
+    padding: 3rem;
     min-height: 100vh;
   }}
   .container {{ max-width: 1200px; margin: 0 auto; }}
   .header {{ text-align: center; margin-bottom: 3rem; }}
-  .header h1 {{ 
+  .header h1 {{
     font-family: 'Outfit', sans-serif;
-    font-size: 3.8rem; 
+    font-size: 3.8rem;
     font-weight: 800;
     letter-spacing: -0.03em;
-    background: linear-gradient(135deg, #00ff88, #00ccff); 
-    -webkit-background-clip: text; 
-    -webkit-text-fill-color: transparent; 
+    background: linear-gradient(135deg, #00ff88, #00ccff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
     filter: drop-shadow(0 0 30px rgba(0, 255, 136, 0.25));
   }}
   .header .subtitle {{ color: #94a3b8; margin-top: 0.5rem; font-size: 1.1rem; }}
-  
+
   /* Tabs Layout */
   .tabs {{
     display: flex;
@@ -409,18 +410,18 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
 
   /* Stats cards */
   .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; }}
-  .stat-card {{ 
-    background: rgba(15, 15, 25, 0.5); 
-    border: 1px solid rgba(255, 255, 255, 0.04); 
-    border-radius: 16px; 
-    padding: 2rem; 
-    text-align: center; 
+  .stat-card {{
+    background: rgba(15, 15, 25, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
     backdrop-filter: blur(16px);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }}
-  .stat-card:hover {{ 
-    transform: translateY(-4px); 
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6); 
+  .stat-card:hover {{
+    transform: translateY(-4px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
     border-color: rgba(255, 255, 255, 0.08);
   }}
   .stat-card .value {{ font-size: 2.8rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; }}
@@ -429,7 +430,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
   .stat-card.success .value {{ color: #00ff88; text-shadow: 0 0 20px rgba(0, 255, 136, 0.25); }}
   .stat-card.info .value {{ color: #00ccff; text-shadow: 0 0 20px rgba(0, 204, 255, 0.25); }}
   .stat-card.warn .value {{ color: #ffb84d; text-shadow: 0 0 20px rgba(255, 184, 77, 0.25); }}
-  
+
   /* Table styling */
   .table-container {{
     background: rgba(15, 15, 25, 0.5);
@@ -440,36 +441,36 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     box-shadow: 0 20px 40px rgba(0,0,0,0.5);
   }}
   table {{ width: 100%; border-collapse: collapse; }}
-  th {{ 
-    background: rgba(20, 20, 35, 0.8); 
-    padding: 1.2rem 1.5rem; 
-    text-align: left; 
-    font-size: 0.8rem; 
-    text-transform: uppercase; 
-    letter-spacing: 0.1em; 
-    color: #00ccff; 
+  th {{
+    background: rgba(20, 20, 35, 0.8);
+    padding: 1.2rem 1.5rem;
+    text-align: left;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #00ccff;
     border-bottom: 2px solid rgba(0, 204, 255, 0.15);
   }}
   td {{ padding: 1.2rem 1.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.04); font-size: 0.95rem; }}
   tr:last-child td {{ border-bottom: none; }}
   tr:hover td {{ background: rgba(255, 255, 255, 0.01); }}
-  code {{ 
-    background: rgba(0, 0, 0, 0.4); 
-    padding: 0.4rem 0.6rem; 
-    border-radius: 6px; 
-    font-family: 'JetBrains Mono', monospace; 
-    font-size: 0.85rem; 
-    color: #00ff88; 
-    word-break: break-all; 
+  code {{
+    background: rgba(0, 0, 0, 0.4);
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    color: #00ff88;
+    word-break: break-all;
     border: 1px solid rgba(0, 255, 136, 0.08);
   }}
-  
+
   /* Badges */
-  .badge {{ 
-    padding: 0.4rem 0.8rem; 
-    border-radius: 999px; 
-    font-size: 0.72rem; 
-    font-weight: 700; 
+  .badge {{
+    padding: 0.4rem 0.8rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     display: inline-block;
@@ -479,7 +480,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
   .badge.medium {{ background: rgba(255, 184, 77, 0.12); color: #ffb84d; border: 1px solid rgba(255, 184, 77, 0.25); }}
   .badge.low {{ background: rgba(0, 255, 136, 0.12); color: #00ff88; border: 1px solid rgba(0, 255, 136, 0.25); }}
   .reason {{ font-size: 0.9rem; color: #cbd5e1; line-height: 1.55; }}
-  
+
   /* Code tab viewports */
   .code-viewer {{
     background: rgba(10, 10, 20, 0.6);
@@ -495,9 +496,9 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     border-radius: 0 !important;
     padding: 0 !important;
   }}
-  
+
   .footer {{ text-align: center; margin-top: 5rem; color: #64748b; font-size: 0.8rem; letter-spacing: 0.08em; font-weight: 600; }}
-  
+
   @keyframes fadeIn {{
     from {{ opacity: 0; transform: translateY(15px); }}
     to {{ opacity: 1; transform: translateY(0); }}
@@ -571,7 +572,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         // Hide all contents and remove active class from all buttons
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-        
+
         // Show selected tab content and activate target button
         document.getElementById(tabId).classList.add('active');
         event.currentTarget.classList.add('active');

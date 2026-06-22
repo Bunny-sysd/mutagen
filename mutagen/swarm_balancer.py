@@ -1,5 +1,6 @@
 import threading
 
+
 class SwarmBalancer:
     def __init__(self, urls: list[str]):
         self.urls = [url.strip() for url in urls if url.strip()]

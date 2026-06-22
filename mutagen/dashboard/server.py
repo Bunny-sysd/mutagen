@@ -1,9 +1,9 @@
-import uuid
 import time
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import uuid
+
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
 
 from mutagen.dashboard.auth import get_token_payload
 
@@ -14,16 +14,16 @@ security = HTTPBearer()
 scans_db = []
 
 class CrashPayload(BaseModel):
-    args: List[str]
+    args: list[str]
     vuln_type: str
-    input_data: Optional[str] = ""
+    input_data: str | None = ""
 
 class ScanReportPayload(BaseModel):
     target: str
-    crashes: List[CrashPayload]
+    crashes: list[CrashPayload]
     total_tested: int
-    patch_code: Optional[str] = ""
-    exploit_code: Optional[str] = ""
+    patch_code: str | None = ""
+    exploit_code: str | None = ""
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     token = credentials.credentials
@@ -43,7 +43,7 @@ def submit_scan(report: ScanReportPayload, user: dict = Depends(get_current_user
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operation not permitted for this role"
         )
-    
+
     scan_id = str(uuid.uuid4())
     scan_record = {
         "scan_id": scan_id,
@@ -63,7 +63,7 @@ def submit_scan(report: ScanReportPayload, user: dict = Depends(get_current_user
 def list_scans(user: dict = Depends(get_current_user)):
     role = user.get("role")
     username = user.get("username")
-    
+
     if role in ("ciso", "admin"):
         return scans_db
     elif role == "developer":

@@ -1,5 +1,5 @@
-import subprocess
 import os
+import subprocess
 
 _DOCKER_WARNED = False
 
@@ -11,7 +11,7 @@ def _check_docker_functional() -> bool:
             return True
     except Exception:
         pass
-    
+
     if not _DOCKER_WARNED:
         try:
             from rich.console import Console
@@ -140,7 +140,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     sock.close()
                 except Exception:
                     pass # Might fail if process died immediately
-                
+
                 try:
                     stdout, stderr = process.communicate(timeout=timeout)
                     result = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
@@ -187,7 +187,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
 
         if result.returncode != 0:
             crashed = True
-            
+
             # Windows NTSTATUS codes
             if result.returncode in (-1073741819, 3221225477):
                 crash_type = "ACCESS_VIOLATION (Memory Corruption!)"
@@ -239,7 +239,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 "exploit_success",
                 "authenticated as admin"
             ]
-            
+
             for indicator in logical_indicators:
                 if indicator in combined_lower:
                     crashed = True
@@ -279,7 +279,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             ]
             for sig in heap_corruption_signatures:
                 if sig in combined_lower:
-                    # Globally differentiate safe handled program exit (rc=1, typical for safe error/assert exit) 
+                    # Globally differentiate safe handled program exit (rc=1, typical for safe error/assert exit)
                     # from unhandled crash states when checking soft signatures.
                     # Hard indicators (asan/ubsan/corrupted size) remain crashes regardless of rc.
                     is_hard_sanitizer = any(k in sig for k in ["addresssanitizer", "ubsanitizer", "corrupted", "malloc()", "free()", "double free", "invalid pointer", "heap corruption detected"])

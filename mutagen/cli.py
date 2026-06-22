@@ -1,7 +1,8 @@
-import sys
-import os
-import io
 import argparse
+import io
+import os
+import sys
+
 from rich.console import Console
 from rich.panel import Panel
 
@@ -24,7 +25,7 @@ def load_env():
     for env_path in paths_to_try:
         if os.path.exists(env_path):
             try:
-                with open(env_path, "r", encoding="utf-8") as f:
+                with open(env_path, encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if not line or line.startswith("#"):
@@ -57,7 +58,7 @@ def main():
         description="Mutagen: AI-Powered Zero-Day Fuzzer",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    
+
     parser.add_argument("-t", "--target", help="Path to the target C source file (e.g., targets/01_buffer_overflow.c)")
     parser.add_argument("--ci", action="store_true", help="CI/CD mode: scan and fuzz modified C files via git diff")
     parser.add_argument("-k", "--api-key", help="API Key. If not provided, falls back to environment variables.")
@@ -75,7 +76,7 @@ def main():
     parser.add_argument("--webhook-url", default="", help="Custom automation webhook endpoint to post scanning payloads to (e.g. n8n, Jira, Slack)")
     parser.add_argument("--sandbox", default="none", choices=["none", "docker"], help="Isolation sandbox engine to execute target binaries in (default: none)")
     parser.add_argument("--coverage", action="store_true", help="Enable coverage-guided hybrid fuzzing (default: False)")
-    
+
     args = parser.parse_args()
 
     # Safety logic: force static-only if performing malware triage
@@ -112,7 +113,7 @@ def main():
                             continue
                     else:
                         path = line
-                    
+
                     abs_path = os.path.abspath(os.path.join(workspace_dir, path))
                     is_source = is_supported_language(os.path.splitext(path)[1])
                     is_binary = is_binary_target(path)
@@ -124,11 +125,11 @@ def main():
                             c_files.append(abs_path)
             except Exception:
                 pass
-        
+
         if not c_files:
             console.print("[bold green]✔ CI/CD Scan: No target files modified. Nothing to fuzz.[/bold green]")
             sys.exit(0)
-        
+
         console.print(f"[bold cyan]CI/CD Scan: Found {len(c_files)} modified target file(s) to fuzz.[/bold cyan]")
         for f in c_files:
             console.print(f"  ↳ [dim]{os.path.relpath(f, workspace_dir)}[/dim]")
@@ -159,7 +160,7 @@ def main():
 
     if not api_key and args.provider != "ollama":
         console.print(f"[red]X API key for {args.provider} not provided.[/red]")
-        console.print(f"[dim]  Pass it via --api-key or set the corresponding environment variable.[/dim]")
+        console.print("[dim]  Pass it via --api-key or set the corresponding environment variable.[/dim]")
         sys.exit(1)
 
     # --- FIND GCC (Standard C/C++ Fallback) ------------------------------
@@ -185,7 +186,7 @@ def main():
         # --- BINARY TARGET: Route through decompilation pipeline ---
         if is_binary_target(target):
             console.print(f"[bold magenta]⚡ Binary Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
-            console.print(f"[dim]  Mode: Binary Decompilation Analysis[/dim]")
+            console.print("[dim]  Mode: Binary Decompilation Analysis[/dim]")
             crashes_found = run_fuzzer(
                 source_path=target,
                 api_key=api_key,
@@ -303,11 +304,11 @@ def main():
 
         console.print(f"[bold magenta]⚡ Fuzzing Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
         crashes_found = run_fuzzer(
-            source_path=target, 
-            api_key=api_key, 
-            gcc_path=compiler_to_use, 
-            max_payloads=args.max_payloads, 
-            timeout=args.timeout, 
+            source_path=target,
+            api_key=api_key,
+            gcc_path=compiler_to_use,
+            max_payloads=args.max_payloads,
+            timeout=args.timeout,
             debug=args.debug,
             provider=args.provider,
             model=args.model,

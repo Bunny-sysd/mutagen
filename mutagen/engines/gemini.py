@@ -1,9 +1,9 @@
 import json
 import time
+
 from google import genai
 from rich.console import Console
 
-from mutagen.models import FuzzPayload
 from mutagen.engines.base import BaseEngine
 
 console = Console(force_terminal=True, force_jupyter=False)
@@ -23,24 +23,24 @@ class GeminiEngine(BaseEngine):
     def _classify_and_handle_error(self, e: Exception, attempt: int) -> tuple[str, int]:
         import httpx
         err_str = str(e).upper()
-        
+
         # 1. Check for connection/network/handshake/timeout errors
         is_network = False
         if isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout, httpx.NetworkError)):
             is_network = True
         elif any(k in err_str for k in ["CONNECTTIMEOUT", "CONNECTERROR", "READTIMEOUT", "TLS", "SSL", "HANDSHAKE", "NAMERESOLUTIONERROR", "CONNECTION REFUSED", "TIMEOUT"]):
             is_network = True
-            
+
         if is_network:
             console.print("[red]  Network connection or TLS handshake failure detected.[/red]")
             console.print("[yellow]  Skipping Gemini API calls. Mutagen will fall back to local traditional/offline fuzzing.[/yellow]")
             return "abort_all", 0
-            
+
         # 2. Check for invalid API key / auth errors
         if any(k in err_str for k in ["API_KEY_INVALID", "API KEY NOT VALID", "INVALID_API_KEY", "APIKEY"]):
             console.print("[red]  Critical Auth Error: The provided Gemini API Key is invalid.[/red]")
             return "abort_all", 0
-            
+
         # 3. Check for 429 Resource Exhausted (Rate Limit / Quota)
         if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str or "QUOTA" in err_str:
             wait_time = 20
@@ -51,7 +51,7 @@ class GeminiEngine(BaseEngine):
         if "NOT_FOUND" in err_str or "404" in err_str or "NOT FOUND" in err_str:
             console.print("[yellow]  Model not found or not supported. Skipping this model...[/yellow]")
             return "skip_model", 0
-            
+
         # 5. Default transient error (e.g. 500, 503)
         wait_time = (attempt + 1) * 5
         console.print(f"[red]  API Error: {str(e)[:200]}[/red]")
@@ -98,7 +98,7 @@ CRITICAL CONTEXT: This is DECOMPILED pseudo-C code extracted from a compiled bin
 The target program receives input via: {delivery_mode}.
 
 First, analyze the source code step by step using a Chain of Thought process to understand
-the control flow, data flow, and memory management. Identify where untrusted inputs 
+the control flow, data flow, and memory management. Identify where untrusted inputs
 are used in dangerous operations or suspicious/unauthorized behaviors.
 
 For each security risk or vulnerability you find, generate a specific test payload or indicator scenario.
@@ -178,7 +178,7 @@ IMPORTANT RULES:
                 return data
             return []
         except json.JSONDecodeError:
-            console.print(f"[red]!! Could not parse AI response as JSON.[/red]")
+            console.print("[red]!! Could not parse AI response as JSON.[/red]")
             console.print(f"[dim]First 300 chars: {raw[:300]}[/dim]")
             return []
 

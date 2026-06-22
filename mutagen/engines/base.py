@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+
 class BaseEngine(ABC):
     @property
     def lang(self) -> str:

@@ -9,13 +9,14 @@ Enterprise Use Case:
     before deploying them to production, even without access to source code.
 """
 
-import os
-import sys
 import glob
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
 from rich.console import Console
 
 console = Console(force_terminal=True, force_jupyter=False)
@@ -54,7 +55,7 @@ def ensure_compatible_java_home():
     and set os.environ['JAVA_HOME'] for current and child processes.
     """
     current_java_home = os.environ.get("JAVA_HOME", "")
-    
+
     def is_valid_java_21_home(java_home_dir: str) -> bool:
         if not java_home_dir or not os.path.isdir(java_home_dir):
             return False
@@ -74,7 +75,7 @@ def ensure_compatible_java_home():
 
     # Gather candidates from standard directories
     candidates = []
-    
+
     if sys.platform == "win32":
         roots = [
             r"C:\Program Files\Microsoft",
@@ -404,7 +405,7 @@ def decompile_binary(
             "-scriptlog", os.path.join(tmpdir, "script.log"),
         ]
 
-        console.print(f"[dim]  Invoking Ghidra headless analyzer...[/dim]")
+        console.print("[dim]  Invoking Ghidra headless analyzer...[/dim]")
         console.print(f"[dim]  Command: {' '.join(os.path.basename(c) for c in cmd[:3])} ...[/dim]")
 
         try:
@@ -440,7 +441,7 @@ def decompile_binary(
                 "The binary may not contain recognizable code."
             )
 
-        with open(output_file, "r", encoding="utf-8", errors="replace") as f:
+        with open(output_file, encoding="utf-8", errors="replace") as f:
             pseudo_source = f.read()
 
         if not pseudo_source.strip():

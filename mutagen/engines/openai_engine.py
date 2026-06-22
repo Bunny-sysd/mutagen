@@ -1,6 +1,8 @@
 import json
 import time
+
 from rich.console import Console
+
 from mutagen.engines.base import BaseEngine
 
 console = Console(force_terminal=True, force_jupyter=False)
@@ -58,7 +60,7 @@ CRITICAL CONTEXT: This is DECOMPILED pseudo-C code extracted from a compiled bin
 The target program receives input via: {delivery_mode}.
 
 First, analyze the source code step by step using a Chain of Thought process to understand
-the control flow, data flow, and memory management. Identify where untrusted inputs 
+the control flow, data flow, and memory management. Identify where untrusted inputs
 are used in dangerous operations or suspicious/unauthorized behaviors.
 
 For each security risk or vulnerability you find, generate a specific test payload or indicator scenario.
@@ -97,7 +99,7 @@ Respond with ONLY the JSON array."""
             if debug:
                 with open("mutagen_debug.log", "a", encoding="utf-8") as f:
                     f.write(f"--- OpenAI ANALYZE CODE RAW RESPONSE ---\n{raw}\n\n")
-            
+
             data = json.loads(raw)
             # OpenAI response_format json_object returns an object, so if it's not a list, extract the list
             if isinstance(data, dict):

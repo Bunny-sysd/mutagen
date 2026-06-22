@@ -1,7 +1,8 @@
-from mutagen.engines.gemini import GeminiEngine
-from mutagen.engines.openai_engine import OpenAIEngine
-from mutagen.engines.ollama import OllamaEngine
 from mutagen.engines.claude import ClaudeEngine
+from mutagen.engines.gemini import GeminiEngine
+from mutagen.engines.ollama import OllamaEngine
+from mutagen.engines.openai_engine import OpenAIEngine
+
 
 def get_engine(provider: str, api_key: str, model: str = "", debug: bool = False, console = None):
     provider = provider.lower()

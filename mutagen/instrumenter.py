@@ -1,9 +1,10 @@
 import re
 
+
 def instrument_c_source(source_code: str) -> tuple[str, int]:
     """
     Instruments C/C++ source code to track basic block coverage.
-    
+
     Returns a tuple of (instrumented_code, total_blocks).
     """
     # 1. Strip comments and string/char literals temporarily to avoid matching braces inside them
@@ -44,12 +45,12 @@ def instrument_c_source(source_code: str) -> tuple[str, int]:
     # Find all '{' in the processed code
     for match in re.finditer(r'\{', processed):
         brace_idx = match.start()
-        
+
         # Determine if this brace should be instrumented
         # Scan backward to find preceding statement context
         idx = brace_idx - 1
         preceding = []
-        
+
         while idx >= 0:
             char = processed[idx]
             # Stop if we hit a statement/block boundary
@@ -57,27 +58,27 @@ def instrument_c_source(source_code: str) -> tuple[str, int]:
                 break
             preceding.append(char)
             idx -= 1
-            
+
         preceding_str = "".join(reversed(preceding)).strip()
-        
+
         # Normalize spaces
         normalized = " ".join(preceding_str.split())
-        
+
         # Check if we should instrument this brace
         is_executable = True
-        
+
         # Skip if preceded by struct/union/enum/class/namespace declaration
         skip_keywords = ["struct", "enum", "union", "class", "namespace", "typedef"]
         for kw in skip_keywords:
             if re.search(r'\b' + kw + r'\b', normalized):
                 is_executable = False
                 break
-                
+
         # Skip if it is an initializer list (preceded by assignment but not comparison operators)
         if is_executable:
             if re.search(r'(?<![=!<>])=(?![=])', normalized):
                 is_executable = False
-                
+
         # Skip if it has nested commas indicating an initializer list or compound literal
         if is_executable:
             # If the preceding string contains commas and is not a function signature (e.g. no parentheses enclosing the commas)
@@ -118,33 +119,33 @@ def instrument_c_source(source_code: str) -> tuple[str, int]:
     # We define the header with a destructor function to dump the coverage map to stdout at exit.
     # To support clean exit on Windows and Linux, we use __attribute__((destructor)) which runs
     # automatically at termination.
-    header = f"""/* --- MUTAGEN COVERAGE INSTRUMENTATION HEADER --- */
+    header = """/* --- MUTAGEN COVERAGE INSTRUMENTATION HEADER --- */
 #include <stdio.h>
 #define __MUTAGEN_COV_MAX 4096
-static unsigned char __mutagen_cov_map[__MUTAGEN_COV_MAX] = {{0}};
-static void __mutagen_cov_trace(int block_id) {{
-    if (block_id >= 0 && block_id < __MUTAGEN_COV_MAX) {{
+static unsigned char __mutagen_cov_map[__MUTAGEN_COV_MAX] = {0};
+static void __mutagen_cov_trace(int block_id) {
+    if (block_id >= 0 && block_id < __MUTAGEN_COV_MAX) {
         __mutagen_cov_map[block_id] = 1;
-    }}
-}}
-static void __mutagen_cov_dump(void) {{
+    }
+}
+static void __mutagen_cov_dump(void) {
     printf("\\n__MUTAGEN_COV__:");
-    for (int i = 0; i < __MUTAGEN_COV_MAX; i++) {{
-        if (__mutagen_cov_map[i]) {{
+    for (int i = 0; i < __MUTAGEN_COV_MAX; i++) {
+        if (__mutagen_cov_map[i]) {
             printf("%d,", i);
-        }}
-    }}
+        }
+    }
     printf("\\n");
     fflush(stdout);
-}}
+}
 #ifdef _MSC_VER
 #pragma section(".CRT$XCU", read)
-static void __cdecl __mutagen_msc_exit(void) {{ __mutagen_cov_dump(); }}
+static void __cdecl __mutagen_msc_exit(void) { __mutagen_cov_dump(); }
 __declspec(allocate(".CRT$XCU")) static void (__cdecl *__mutagen_msc_reg)(void) = __mutagen_msc_exit;
 #else
-__attribute__((destructor)) static void __mutagen_cov_destructor(void) {{
+__attribute__((destructor)) static void __mutagen_cov_destructor(void) {
     __mutagen_cov_dump();
-}}
+}
 #endif
 /* ------------------------------------------------ */
 """
