@@ -7,9 +7,10 @@ from mutagen.engines.base import BaseEngine
 console = Console(force_terminal=True, force_jupyter=False)
 
 class ClaudeEngine(BaseEngine):
-    def __init__(self, api_key: str, model: str = ""):
+    def __init__(self, api_key: str, model: str = "", debug: bool = False):
         self.api_key = api_key
         self.model = model or "claude-3-5-sonnet-latest"
+        self.debug = debug
         from anthropic import Anthropic
         self.client = Anthropic(api_key=self.api_key)
 
@@ -87,7 +88,7 @@ class ClaudeEngine(BaseEngine):
             focus_description = "potential memory/logical vulnerabilities (buffer overflows, format string bugs, integer overflows, use-after-free, double-free, command injection)."
             vuln_types_example = '"buffer_overflow", "format_string", "integer_overflow"'
 
-        prompt = f"""{decompile_context}You are an audit security researcher. Analyze this C code for potential vulnerabilities and security risks, focusing on: {focus_description}
+        prompt = f"""{decompile_context}You are an audit security researcher. Analyze this {self.lang_name} code for potential vulnerabilities and security risks, focusing on: {focus_description}
 {source_code}
 
 The program gets input via: {delivery_mode}.
@@ -111,7 +112,7 @@ Respond with ONLY a JSON array of payloads containing:
         return self._extract_json(raw)
 
     def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str) -> list[dict]:
-        prompt = f"""You audit security vulnerabilities in C code.
+        prompt = f"""You audit security vulnerabilities in {self.lang_name} code.
 A previous payload did not crash the target. Refine it to trigger the bug.
 
 SOURCE CODE:
@@ -133,26 +134,26 @@ Respond ONLY with a valid JSON array matching the original schema. No extra word
         return self._extract_json(raw)
 
     def generate_patch(self, source_code: str, crash_data: dict, debug: bool = False) -> str:
-        prompt = f"""Securely patch the vulnerability in this C code:
+        prompt = f"""Securely patch the vulnerability in this {self.lang_name} code:
 {source_code}
 
 Vulnerability: {crash_data.get("vuln_type")}
 Reason: {crash_data.get("reason")}
 Args: {crash_data.get("args")}
 
-Return the ENTIRE updated C source code file. Do not include markdown blocks, explanations, or backticks."""
+Return the ENTIRE updated {self.lang_name} source code file. Do not include markdown blocks, explanations, or backticks."""
         
-        text = self._generate(prompt, system="You are a senior C developer. Output only the C code. No markup, no markdown formatting, no backticks, no comments outside C.")
-        if text.startswith("```c"):
-            text = text[4:]
-        elif text.startswith("```"):
-            text = text[3:]
+        text = self._generate(prompt, system=f"You are a senior {self.lang_name} developer. Output only the {self.lang_name} code. No markup, no markdown formatting, no backticks, no comments outside {self.lang_name}.")
+        for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
+            if text.lower().startswith(prefix):
+                text = text[len(prefix):]
+                break
         if text.endswith("```"):
             text = text[:-3]
         return text.strip()
 
     def refine_patch(self, source_code: str, bad_patch: str, error_message: str, crash_data: dict, debug: bool = False) -> str:
-        prompt = f"""Correct the patch for this C code. The previous attempt failed.
+        prompt = f"""Correct the patch for this {self.lang_name} code. The previous attempt failed.
 
 ORIGINAL CODE:
 {source_code}
@@ -166,20 +167,20 @@ FAILURE DETAILS:
 Vulnerability: {crash_data.get("vuln_type")}
 Args: {crash_data.get("args")}
 
-Return the ENTIRE corrected C source code file. Do not include markdown blocks, explanations, or backticks."""
+Return the ENTIRE corrected {self.lang_name} source code file. Do not include markdown blocks, explanations, or backticks."""
         
-        text = self._generate(prompt, system="You are a senior C developer. Output only the corrected C code. No markup, no markdown formatting, no backticks, no comments outside C.")
-        if text.startswith("```c"):
-            text = text[4:]
-        elif text.startswith("```"):
-            text = text[3:]
+        text = self._generate(prompt, system=f"You are a senior {self.lang_name} developer. Output only the corrected {self.lang_name} code. No markup, no markdown formatting, no backticks, no comments outside {self.lang_name}.")
+        for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
+            if text.lower().startswith(prefix):
+                text = text[len(prefix):]
+                break
         if text.endswith("```"):
             text = text[:-3]
         return text.strip()
 
     def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
         prompt = f"""Write a Python 3 script replicating the crash in '{exe_path}' (delivery via '{delivery_mode}').
-C Source:
+{self.lang_name} Source:
 {source_code}
 
 Crash payload:

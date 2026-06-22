@@ -1,6 +1,6 @@
 import os
 import sys
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import pytest
 
 from mutagen.cli import load_env, main
@@ -118,4 +118,35 @@ def test_cli_binary_routing(mock_run_fuzzer, mock_load_env):
             assert called_kwargs["decompile_all"] is True
             assert called_kwargs["ghidra_path"] == "C:\\ghidra_install"
             assert called_kwargs["gcc_path"] == ""
+
+
+@patch("mutagen.cli.load_env")
+@patch("mutagen.cli.run_fuzzer")
+def test_cli_ci_mode_ignores_binaries(mock_run_fuzzer, mock_load_env):
+    """Test that CI/CD mode diff checking ignores binary targets."""
+    mock_run_fuzzer.return_value = 0
+    # Mock sys.argv to run in CI mode
+    test_args = ["mutagen", "--ci"]
+    
+    # Mock git commands to return a binary target
+    import subprocess
+    mock_run_proc = MagicMock()
+    # Let git diff --name-only return target.exe and target.c
+    mock_run_proc.stdout = "targets/target.exe\ntargets/target.c\n"
+    mock_run_proc.returncode = 0
+    
+    with patch("subprocess.run", return_value=mock_run_proc), \
+         patch("sys.argv", test_args), \
+         patch("os.path.exists", return_value=True), \
+         patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"}, clear=True):
+         
+        # We expect mutagen to warning/ignore target.exe and only pass target.c to run_fuzzer
+        main()
+        
+        # Verify run_fuzzer was called but NEVER with target.exe
+        assert mock_run_fuzzer.call_count > 0
+        for call in mock_run_fuzzer.call_args_list:
+            _, called_kwargs = call
+            assert not called_kwargs["source_path"].endswith("target.exe")
+
 

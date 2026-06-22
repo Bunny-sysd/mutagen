@@ -40,7 +40,7 @@ class CompilationError(Exception):
     """Exception raised when C compilation fails."""
     pass
 
-def compile_target(source_path: str, gcc_path: str) -> str:
+def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> str:
     """Compile C/C++ or Rust target file using the provided compiler path."""
     ext = os.path.splitext(source_path)[1].lower()
     
@@ -124,6 +124,26 @@ def compile_target(source_path: str, gcc_path: str) -> str:
     else:
         output_path = source_path.replace(".c", ".out").replace(".cpp", ".out")
         
+    compile_source_path = source_path
+    temp_instrumented = None
+    
+    if coverage:
+        try:
+            from mutagen.instrumenter import instrument_c_source
+            with open(source_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            instrumented_code, total_blocks = instrument_c_source(content)
+            console.print(f"[cyan]  Coverage feedback enabled! Instrumented {total_blocks} basic blocks.[/cyan]")
+            
+            temp_instrumented = source_path.replace(".c", ".instrumented.c").replace(".cpp", ".instrumented.cpp")
+            with open(temp_instrumented, "w", encoding="utf-8") as f:
+                f.write(instrumented_code)
+            compile_source_path = temp_instrumented
+        except Exception as e:
+            console.print(f"[yellow]  ⚠ Warning: Source-level instrumentation failed: {e}. Falling back to standard compilation.[/yellow]")
+            compile_source_path = source_path
+            temp_instrumented = None
+        
     # Check if sanitizers are supported
     use_sanitizers = check_sanitizer_support(gcc_path)
     compile_args = [gcc_path]
@@ -133,7 +153,7 @@ def compile_target(source_path: str, gcc_path: str) -> str:
     else:
         console.print("[dim]  Sanitizers not supported (or using TCC). Compiling standard binary...[/dim]")
         
-    compile_args.extend(["-o", output_path, source_path])
+    compile_args.extend(["-o", output_path, compile_source_path])
     
     # MinGW/MSYS2 needs explicit linking for Winsock
     if os.name == 'nt' and "tcc" not in os.path.basename(gcc_path).lower():
@@ -152,6 +172,13 @@ def compile_target(source_path: str, gcc_path: str) -> str:
         env["PATH"] = gcc_dir + os.pathsep + env.get("PATH", "")
         
     result = subprocess.run(compile_args, capture_output=True, text=True, env=env)
+
+    # Clean up temp instrumented source
+    if temp_instrumented and os.path.exists(temp_instrumented):
+        try:
+            os.remove(temp_instrumented)
+        except Exception:
+            pass
 
     if result.returncode != 0:
         raise CompilationError(result.stderr)

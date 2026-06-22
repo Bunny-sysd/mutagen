@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description="Mutagen Batch Runner")
     parser.add_argument("--max-payloads", type=int, default=3, help="Max payloads per target")
     parser.add_argument("--api-key", help="API Key")
-    parser.add_argument("--provider", default="gemini", choices=["gemini", "openai", "ollama"], help="LLM Provider")
+    parser.add_argument("--provider", default="gemini", choices=["gemini", "openai", "ollama", "claude"], help="LLM Provider")
     parser.add_argument("--model", default="", help="Specific model to use")
     args = parser.parse_args()
 

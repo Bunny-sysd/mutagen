@@ -261,3 +261,26 @@ def test_crash_signature_different_vuln_types():
 
     assert _crash_signature(crash_a) != _crash_signature(crash_b)
 
+
+def test_crash_signature_normalization():
+    """Verify that _crash_signature normalizes memory addresses and paths correctly."""
+    from mutagen.core import _crash_signature
+
+    crash_a = {
+        "crash_type": "ACCESS_VIOLATION",
+        "return_code": -1073741819,
+        "vuln_type": "buffer_overflow",
+        "stdout": "Faulting address at 0x7ffd1234a010",
+        "stderr": "C:\\Temp\\dir1\\test.c: failed"
+    }
+    crash_b = {
+        "crash_type": "ACCESS_VIOLATION",
+        "return_code": -1073741819,
+        "vuln_type": "buffer_overflow",
+        "stdout": "Faulting address at 0x000002ab3e4f",
+        "stderr": "D:\\some\\other\\path\\test.c: failed"
+    }
+
+    assert _crash_signature(crash_a) == _crash_signature(crash_b)
+
+

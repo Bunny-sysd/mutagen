@@ -80,12 +80,49 @@ typedef int (*sasl_canon_user_t)(
 
 static void *bson_malloc(size_t size)
 {
-    void *p = malloc(size);
+    // Allocate space for user data + size header + 8-byte canary
+    size_t total_size = size + sizeof(size_t) + 8;
+    void *p = malloc(total_size);
     if (!p) { fprintf(stderr, "bson_malloc: OOM\n"); exit(1); }
-    return p;
+    
+    // Store size at the start of the raw block
+    *(size_t *)p = size;
+    
+    // Place canary at the end of the user block
+    char *user_ptr = (char *)p + sizeof(size_t);
+    unsigned char *canary_ptr = (unsigned char *)(user_ptr + size);
+    canary_ptr[0] = 0xDE;
+    canary_ptr[1] = 0xAD;
+    canary_ptr[2] = 0xC0;
+    canary_ptr[3] = 0xDE;
+    canary_ptr[4] = 0xEF;
+    canary_ptr[5] = 0xBE;
+    canary_ptr[6] = 0xAD;
+    canary_ptr[7] = 0xDE;
+    
+    return user_ptr;
 }
 
-static void bson_free(void *ptr) { free(ptr); }
+static void bson_free(void *ptr)
+{
+    if (!ptr) return;
+    
+    // Retrieve the size header
+    void *raw_ptr = (char *)ptr - sizeof(size_t);
+    size_t size = *(size_t *)raw_ptr;
+    
+    // Validate canary integrity
+    unsigned char *canary_ptr = (unsigned char *)((char *)ptr + size);
+    if (canary_ptr[0] != 0xDE || canary_ptr[1] != 0xAD ||
+        canary_ptr[2] != 0xC0 || canary_ptr[3] != 0xDE ||
+        canary_ptr[4] != 0xEF || canary_ptr[5] != 0xBE ||
+        canary_ptr[6] != 0xAD || canary_ptr[7] != 0xDE) {
+        fprintf(stderr, "HEAP CORRUPTION DETECTED: Heap block at %p (size %zu) canary corrupted!\n", ptr, size);
+        abort(); // Force an OS abort / crash signal
+    }
+    
+    free(raw_ptr);
+}
 
 /* -----------------------------------------------------------------------
  * Reproduced vulnerable mongoc_sasl_canon_user callback

@@ -9,9 +9,10 @@ from mutagen.engines.base import BaseEngine
 console = Console(force_terminal=True, force_jupyter=False)
 
 class GeminiEngine(BaseEngine):
-    def __init__(self, api_key: str, model: str = ""):
+    def __init__(self, api_key: str, model: str = "", debug: bool = False):
         self.api_key = api_key
         self.model = model
+        self.debug = debug
         self.client = genai.Client(api_key=self.api_key)
         # Override internal HTTP clients with custom timeouts to bypass connect/handshake timeout errors in this environment
         import httpx
@@ -68,33 +69,7 @@ class GeminiEngine(BaseEngine):
         models.insert(0, self.model)
         return models
 
-    @property
-    def lang(self) -> str:
-        return getattr(self, "language", "c").lower()
 
-    @property
-    def lang_name(self) -> str:
-        if self.lang == "rust":
-            return "Rust"
-        elif self.lang == "go":
-            return "Go"
-        elif self.lang == "java":
-            return "Java"
-        elif self.lang == "csharp":
-            return "C#"
-        return "C"
-
-    @property
-    def lang_ext(self) -> str:
-        if self.lang == "rust":
-            return "rs"
-        elif self.lang == "go":
-            return "go"
-        elif self.lang == "java":
-            return "java"
-        elif self.lang == "csharp":
-            return "cs"
-        return "c"
 
     def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool, profile: str = "legacy-audit") -> list[dict]:
         decompile_context = ""
@@ -282,8 +257,9 @@ Respond with ONLY the JSON array."""
             return []
 
         raw = response.text.strip()
-        with open("mutagen_debug.log", "a", encoding="utf-8") as f:
-            f.write(f"--- AI REFINE PAYLOAD RAW RESPONSE ---\n{raw}\n\n")
+        if self.debug:
+            with open("mutagen_debug.log", "a", encoding="utf-8") as f:
+                f.write(f"--- AI REFINE PAYLOAD RAW RESPONSE ---\n{raw}\n\n")
         try:
             data = json.loads(raw)
             if isinstance(data, dict) and "payloads" in data:

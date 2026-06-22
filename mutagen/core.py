@@ -13,7 +13,7 @@ from rich import box
 
 from mutagen.engines import get_engine
 from mutagen.compiler import compile_target, CompilationError
-from mutagen.executor import execute_payload
+from mutagen.executor import execute_payload, _check_docker_functional
 from mutagen.reporter import save_crash_report
 from mutagen.mutators import generate_fallback_payloads
 from mutagen.decompiler import (
@@ -26,7 +26,18 @@ console = Console(force_terminal=True, force_jupyter=False)
 
 def _crash_signature(crash: dict) -> str:
     """Generate a deduplication key from a crash result."""
-    return f"{crash['crash_type']}::{crash['return_code']}::{crash.get('vuln_type', '')}"
+    import re
+    # Normalize stdout/stderr by stripping memory addresses and temporary file paths to avoid ASLR/env noise
+    stdout = crash.get("stdout", "")
+    stderr = crash.get("stderr", "")
+    
+    stdout_norm = re.sub(r'0x[0-9a-fA-F]+', '0xADDR', stdout).strip()
+    stderr_norm = re.sub(r'0x[0-9a-fA-F]+', '0xADDR', stderr).strip()
+    
+    stdout_norm = re.sub(r'[a-zA-Z]:\\[^\s:]+', 'FILE_PATH', stdout_norm)
+    stderr_norm = re.sub(r'[a-zA-Z]:\\[^\s:]+', 'FILE_PATH', stderr_norm)
+    
+    return f"{crash['crash_type']}::{crash['return_code']}::{crash.get('vuln_type', '')}::{stdout_norm}::{stderr_norm}"
 
 
 def verify_and_fallback_exploit(exploit_code: str, crash_data: dict, exe_path: str, delivery_mode: str) -> str:
@@ -136,10 +147,77 @@ if __name__ == "__main__":
     return fallback_script
 
 
+def mutate_input(args: list[str], input_data: str, delivery_mode: str) -> tuple[list[str], str]:
+    """Applies a random mutation (bit flip, byte replace, arithmetic, or insert) to args or input_data."""
+    import random
+    import re
+    
+    def mutate_string(s: str) -> str:
+        if not s:
+            return random.choice(["A", "1", "%s", "\x00", "; ls"])
+        s_list = list(s)
+        choice = random.randint(0, 4)
+        if choice == 0:  # Bit flip
+            idx = random.randint(0, len(s_list) - 1)
+            try:
+                char_code = ord(s_list[idx])
+                bit = 1 << random.randint(0, 7)
+                s_list[idx] = chr(char_code ^ bit)
+            except Exception:
+                pass
+        elif choice == 1:  # Byte replacement
+            idx = random.randint(0, len(s_list) - 1)
+            s_list[idx] = random.choice(["\x00", "\xff", "%s", "A", "\n", ";"])
+        elif choice == 2:  # Arithmetic mutation (increment/decrement digits)
+            nums = re.findall(r'\d+', s)
+            if nums:
+                num = random.choice(nums)
+                try:
+                    val = int(num)
+                    new_val = val + random.choice([-1, 1, -10, 10, -100, 100])
+                    s = s.replace(num, str(new_val), 1)
+                    return s
+                except Exception:
+                    pass
+        elif choice == 3:  # Substring duplication/insertion
+            idx = random.randint(0, len(s_list))
+            insert_str = random.choice(["A" * 16, "B" * 64, "%s" * 5, "\x00" * 8, "; id;"])
+            s_list.insert(idx, insert_str)
+        elif choice == 4:  # Truncation
+            trunc_len = random.randint(1, len(s_list))
+            s_list = s_list[:trunc_len]
+            
+        return "".join(s_list)
 
-def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = ""):
+    if delivery_mode == "args":
+        new_args = list(args)
+        if new_args:
+            idx = random.randint(0, len(new_args) - 1)
+            new_args[idx] = mutate_string(new_args[idx])
+        else:
+            new_args = [mutate_string("")]
+        return new_args, input_data
+    else:
+        return args, mutate_string(input_data)
+
+
+def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = "", sandbox: str = "none", coverage: bool = False):
     """Main fuzzer orchestration function."""
     engine = get_engine(provider, api_key, model, debug, console)
+
+    # --- UPFRONT DOCKER IMAGE PULLING -------------------------------------
+    if sandbox == "docker" and _check_docker_functional():
+        import subprocess
+        image = os.environ.get("MUTAGEN_SANDBOX_IMAGE", "ubuntu:latest")
+        console.print(f"[cyan]>> Docker sandbox mode active. Pulling image '{image}' upfront to prevent timeouts...[/cyan]")
+        try:
+            res = subprocess.run(["docker", "pull", image], capture_output=True, text=True, timeout=120)
+            if res.returncode == 0:
+                console.print(f"[green]>> Successfully pulled/verified image '{image}'[/green]")
+            else:
+                console.print(f"[yellow]⚠ Warning: docker pull returned code {res.returncode}: {res.stderr.strip()}[/yellow]")
+        except Exception as e:
+            console.print(f"[yellow]⚠ Warning: Failed to pull Docker image '{image}': {e}[/yellow]")
 
     # Detect language dynamically
     ext = os.path.splitext(source_path)[1].lower()
@@ -416,7 +494,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         ))
 
         try:
-            exe_path = compile_target(source_path, gcc_path)
+            exe_path = compile_target(source_path, gcc_path, coverage)
         except CompilationError as e:
             console.print(f"[bold red]X Initial compilation failed![/bold red]\n{e}")
             sys.exit(1)
@@ -435,6 +513,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     seen_signatures = set()   # For deduplication
     unique_crashes = []       # Deduplicated crash list
     results_lock = threading.Lock()
+    
+    global_coverage = set()
+    seed_queue = []
 
     results_table = Table(title="Fuzzing Results", box=box.ROUNDED, border_style="green")
     results_table.add_column("#", style="dim", width=4)
@@ -452,7 +533,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             args = [args]
         args = [str(a) for a in args]
 
-        result = execute_payload(exe_path, args, input_data, delivery_mode, timeout)
+        result = execute_payload(exe_path, args, input_data, delivery_mode, timeout, sandbox)
         return {
             "index": i,
             "payload": p,
@@ -462,7 +543,23 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         }
 
     # --- Parallel Phase: fire all payloads concurrently ---
-    worker_count = min(4, len(payloads))
+    # Deduplicate payloads before execution and track them globally
+    executed_payloads = set()
+    unique_payloads = []
+    for p in payloads:
+        p_args = p.get("args", [])
+        p_input = p.get("input_data", "")
+        if isinstance(p_args, str):
+            p_args = [p_args]
+        p_args = [str(a) for a in p_args]
+        p_key = (tuple(p_args), p_input or "")
+        if p_key not in executed_payloads:
+            executed_payloads.add(p_key)
+            unique_payloads.append(p)
+    payloads = unique_payloads
+
+    # Set worker count to 1 for TCP port delivery to avoid socket bind conflicts
+    worker_count = 1 if delivery_mode.startswith("tcp:") else min(4, len(payloads))
     futures_map = {}
     needs_retry = []  # Payloads that didn't crash → eligible for agentic retry
 
@@ -500,6 +597,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     "severity": original_p.get("severity", ""),
                     "crash_type": result["crash_type"],
                     "return_code": result["return_code"],
+                    "stdout": result.get("stdout", ""),
+                    "stderr": result.get("stderr", ""),
                     "retries": 0,
                 }
                 sig = _crash_signature(crash_entry)
@@ -511,7 +610,27 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                         is_unique = "[green]✓ NEW"
                     else:
                         is_unique = "[dim]dupe"
-            else:
+            
+            # --- TRACK COVERAGE SEEDS --------------------------------------
+            if result.get("coverage"):
+                cov_set = set(result["coverage"])
+                with results_lock:
+                    new_blocks = cov_set - global_coverage
+                    if new_blocks:
+                        global_coverage.update(new_blocks)
+                        if not result["crashed"]:
+                            seed_queue.append({
+                                "args": args,
+                                "input_data": input_data,
+                                "vuln_type": original_p.get("vuln_type", "mutation_seed"),
+                                "cwe": original_p.get("cwe", ""),
+                                "severity": original_p.get("severity", "medium"),
+                                "reason": original_p.get("reason", "Discovered new basic blocks"),
+                            })
+                    else:
+                        global_coverage.update(cov_set)
+
+            if not result["crashed"]:
                 # Don't queue intentionally safe/benign payloads for retry —
                 # the AI itself said they wouldn't crash, so retrying wastes quota.
                 vuln_type = original_p.get("vuln_type", "").lower()
@@ -555,6 +674,13 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     r_args = [r_args]
                 r_args = [str(a) for a in r_args]
 
+                # Check if this refined payload has already been executed in this run
+                r_key = (tuple(r_args), r_input or "")
+                if r_key in executed_payloads:
+                    console.print(f"[dim]    (Skipping duplicate refined payload: args={r_args}, input={repr(r_input[:40])})[/dim]")
+                    continue
+                executed_payloads.add(r_key)
+
                 # --- STUB GUARD: reject broken AI placeholder responses -------
                 # When the API rate-limits mid-retry, the fallback sometimes
                 # returns generic placeholders like "payload_refined" or empty
@@ -569,7 +695,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     console.print(f"[dim]    (Skipping stub/placeholder refined payload: {repr(payload_content[:40])})[/dim]")
                     continue
 
-                result = execute_payload(exe_path, r_args, r_input, delivery_mode, timeout)
+                result = execute_payload(exe_path, r_args, r_input, delivery_mode, timeout, sandbox)
 
                 status = "[bold red]CRASH!!" if result["crashed"] else "[green]OK"
                 if delivery_mode == "args":
@@ -591,6 +717,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                         "severity": rp.get("severity", ""),
                         "crash_type": result["crash_type"],
                         "return_code": result["return_code"],
+                        "stdout": result.get("stdout", ""),
+                        "stderr": result.get("stderr", ""),
                         "retries": retry_attempt,
                     }
                     sig = _crash_signature(crash_entry)
@@ -602,6 +730,24 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     else:
                         is_unique = "[dim]dupe"
                     retry_crashed = True
+                
+                # --- TRACK COVERAGE FOR REFINEMENTS ------------------------
+                if result.get("coverage"):
+                    cov_set = set(result["coverage"])
+                    new_blocks = cov_set - global_coverage
+                    if new_blocks:
+                        global_coverage.update(new_blocks)
+                        if not result["crashed"]:
+                            seed_queue.append({
+                                "args": r_args,
+                                "input_data": r_input,
+                                "vuln_type": rp.get("vuln_type", "mutation_seed"),
+                                "cwe": rp.get("cwe", ""),
+                                "severity": rp.get("severity", "medium"),
+                                "reason": rp.get("reason", "Refined payload hit new coverage"),
+                            })
+                    else:
+                        global_coverage.update(cov_set)
 
                 results_table.add_row(
                     f"{i + 1}.{retry_attempt}",
@@ -631,6 +777,87 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     except (KeyboardInterrupt, EOFError):
                         pass
             retry_attempt += 1
+
+    # --- COVERAGE-GUIDED MUTATION FUZZING FEEDBACK LOOP --------------------
+    if coverage and seed_queue:
+        console.print(Panel(
+            "[bold cyan]PHASE 3.5: COVERAGE-GUIDED HYBRID FUZZING[/bold cyan]\n"
+            f"[dim]Initial coverage: {len(global_coverage)} basic blocks. Starting mutation feedback loop...[/dim]",
+            border_style="cyan"
+        ))
+        
+        mutation_rounds = 200
+        mutation_hits = 0
+        new_crashes_found = 0
+        
+        import random
+        
+        with Progress(
+            SpinnerColumn(style="cyan"),
+            TextColumn("[cyan]Mutating seeds and exploring branches ({task.completed}/{task.total} rounds)..."),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Fuzzing", total=mutation_rounds)
+            
+            for round_idx in range(mutation_rounds):
+                if not seed_queue:
+                    break
+                    
+                # Select seed
+                seed = random.choice(seed_queue)
+                
+                # Mutate input
+                mutated_args, mutated_input = mutate_input(seed["args"], seed["input_data"], delivery_mode)
+                
+                # Execute mutated payload
+                res = execute_payload(exe_path, mutated_args, mutated_input, delivery_mode, timeout, sandbox)
+                
+                if res["crashed"]:
+                    crash_entry = {
+                        "args": mutated_args,
+                        "input_data": mutated_input,
+                        "payload": mutated_input if mutated_input else " ".join(mutated_args),
+                        "vuln_type": seed.get("vuln_type", "mutative_vulnerability"),
+                        "cwe": seed.get("cwe", "CWE-120"),
+                        "reason": f"Mutation fuzzing: crash triggered via input mutation of seed (original reason: {seed.get('reason')})",
+                        "severity": seed.get("severity", "high"),
+                        "crash_type": res["crash_type"],
+                        "return_code": res["return_code"],
+                        "stdout": res.get("stdout", ""),
+                        "stderr": res.get("stderr", ""),
+                        "retries": 99,  # Marker for mutator source
+                    }
+                    sig = _crash_signature(crash_entry)
+                    if sig not in seen_signatures:
+                        seen_signatures.add(sig)
+                        unique_crashes.append(crash_entry)
+                        all_crashes.append(crash_entry)
+                        new_crashes_found += 1
+                        console.print(f"[bold red]    [+] Mutator triggered NEW unique crash: {res['crash_type']}[/bold red]")
+                else:
+                    # Check coverage
+                    cov = res.get("coverage", [])
+                    if cov:
+                        cov_set = set(cov)
+                        new_blocks = cov_set - global_coverage
+                        if new_blocks:
+                            global_coverage.update(new_blocks)
+                            mutation_hits += 1
+                            new_seed = {
+                                "args": mutated_args,
+                                "input_data": mutated_input,
+                                "vuln_type": seed.get("vuln_type"),
+                                "cwe": seed.get("cwe"),
+                                "severity": seed.get("severity"),
+                                "reason": f"Mutated seed discovered {len(new_blocks)} new block(s)",
+                            }
+                            seed_queue.append(new_seed)
+                            
+                progress.update(task, advance=1)
+                
+        console.print(f"[green]>> Mutation loop finished. Discovered {mutation_hits} new code paths and {new_crashes_found} unique crashes.[/green]")
+        console.print(f"[green]>> Global basic block coverage reached: {len(global_coverage)} blocks.[/green]")
+        console.print()
 
     console.print(results_table)
     console.print()
@@ -807,7 +1034,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                         console=console,
                     ) as progress:
                         task = progress.add_task("", total=None)
-                        verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout)
+                        verify_result = execute_payload(patched_exe, crashes[0]["args"], crashes[0].get("input_data", ""), delivery_mode, timeout, sandbox)
                         
                     if verify_result["crashed"]:
                         error_details = f"The patched binary compiled successfully but still crashed when executed with the exploit payload.\nCrash Type: {verify_result['crash_type']}\nReturn Code: {verify_result['return_code']}"

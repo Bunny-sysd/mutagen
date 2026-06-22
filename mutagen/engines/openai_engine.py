@@ -6,9 +6,10 @@ from mutagen.engines.base import BaseEngine
 console = Console(force_terminal=True, force_jupyter=False)
 
 class OpenAIEngine(BaseEngine):
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", debug: bool = False):
         self.api_key = api_key
         self.model = model or "gpt-4o-mini"
+        self.debug = debug
         from openai import OpenAI
         self.client = OpenAI(api_key=self.api_key)
 
@@ -52,7 +53,7 @@ CRITICAL CONTEXT: This is DECOMPILED pseudo-C code extracted from a compiled bin
             vuln_types_example = '"buffer_overflow", "format_string", "integer_overflow", "use_after_free"'
 
         prompt = f"""You are an expert defensive security researcher conducting a code audit.
-{decompile_context}Your job is to analyze the following C source code for potential vulnerabilities and security risks, focusing on: {focus_description}
+{decompile_context}Your job is to analyze the following {self.lang_name} source code for potential vulnerabilities and security risks, focusing on: {focus_description}
 
 The target program receives input via: {delivery_mode}.
 
@@ -63,7 +64,7 @@ are used in dangerous operations or suspicious/unauthorized behaviors.
 For each security risk or vulnerability you find, generate a specific test payload or indicator scenario.
 
 SOURCE CODE:
-```c
+```{self.lang_ext}
 {source_code}
 ```
 
@@ -110,13 +111,13 @@ Respond with ONLY the JSON array."""
             return []
 
     def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str) -> list[dict]:
-        prompt = f"""You are an expert defensive security researcher. You previously analyzed this C source code to find vulnerabilities.
+        prompt = f"""You are an expert defensive security researcher. You previously analyzed this {self.lang_name} source code to find vulnerabilities.
 Your previous payload DID NOT CRASH the target program. We need to refine the attack.
 
 The target program receives input via: {delivery_mode}.
 
 SOURCE CODE:
-```c
+```{self.lang_ext}
 {source_code}
 ```
 
@@ -165,7 +166,7 @@ Respond with ONLY the JSON array."""
             return []
 
     def generate_patch(self, source_code: str, crash_data: dict, debug: bool = False) -> str:
-        prompt = f"""You are a Senior C Security Engineer. Securely patch this C code:
+        prompt = f"""You are a Senior {self.lang_name} Security Engineer. Securely patch this {self.lang_name} code:
 {source_code}
 
 Vulnerability details:
@@ -173,7 +174,7 @@ Vulnerability details:
 - Vuln: {crash_data.get("vuln_type")}
 - Reason: {crash_data.get("reason")}
 
-Provide the ENTIRE patched C code file. No markdown block formatting, return raw C code only."""
+Provide the ENTIRE patched {self.lang_name} code file. No markdown block formatting, return raw {self.lang_name} code only."""
         try:
             response = self._create_chat_completion(
                 model=self.model,
@@ -181,10 +182,10 @@ Provide the ENTIRE patched C code file. No markdown block formatting, return raw
                 temperature=0.2
             )
             text = response.choices[0].message.content.strip()
-            if text.startswith("```c"):
-                text = text[4:]
-            elif text.startswith("```"):
-                text = text[3:]
+            for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
+                if text.lower().startswith(prefix):
+                    text = text[len(prefix):]
+                    break
             if text.endswith("```"):
                 text = text[:-3]
             return text.strip()
@@ -194,11 +195,11 @@ Provide the ENTIRE patched C code file. No markdown block formatting, return raw
             return ""
 
     def refine_patch(self, source_code: str, bad_patch: str, error_message: str, crash_data: dict, debug: bool = False) -> str:
-        prompt = f"""You are a Senior C Security Engineer.
-We tried to patch a vulnerability in the following C code, but the patch failed.
+        prompt = f"""You are a Senior {self.lang_name} Security Engineer.
+We tried to patch a vulnerability in the following {self.lang_name} code, but the patch failed.
 
 ORIGINAL SOURCE CODE:
-```c
+```{self.lang_ext}
 {source_code}
 ```
 
@@ -210,7 +211,7 @@ VULNERABILITY DETAILS:
 - Exploit Payload Input Data: {crash_data.get("input_data")}
 
 THE ATTEMPTED PATCH CODE THAT FAILED:
-```c
+```{self.lang_ext}
 {bad_patch}
 ```
 
@@ -218,9 +219,9 @@ FAILURE DETAILS:
 {error_message}
 
 Please analyze the failure details and correct the patch code.
-Provide the ENTIRE corrected C source code file.
+Provide the ENTIRE corrected {self.lang_name} source code file.
 DO NOT use markdown formatting outside of the code block.
-Return ONLY the raw C code. DO NOT wrap it in ```c and ```."""
+Return ONLY the raw {self.lang_name} code. DO NOT wrap it in ```{self.lang_ext} and ```."""
         try:
             response = self._create_chat_completion(
                 model=self.model,
@@ -228,10 +229,10 @@ Return ONLY the raw C code. DO NOT wrap it in ```c and ```."""
                 temperature=0.2
             )
             text = response.choices[0].message.content.strip()
-            if text.startswith("```c"):
-                text = text[4:]
-            elif text.startswith("```"):
-                text = text[3:]
+            for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
+                if text.lower().startswith(prefix):
+                    text = text[len(prefix):]
+                    break
             if text.endswith("```"):
                 text = text[:-3]
             return text.strip()
@@ -242,12 +243,12 @@ Return ONLY the raw C code. DO NOT wrap it in ```c and ```."""
 
     def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
         prompt = f"""You are a Senior Security QA Engineer writing a regression test.
-An automated fuzzer just found a memory corruption vulnerability in the following C code compiled as '{exe_path}'.
+An automated fuzzer just found a security vulnerability in the following {self.lang_name} code compiled as '{exe_path}'.
 
 The executable expects input via: {delivery_mode}.
 
 SOURCE CODE:
-```c
+```{self.lang_ext}
 {source_code}
 ```
 

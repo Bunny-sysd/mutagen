@@ -30,6 +30,8 @@ mutagen_debug.log
 # Environment variables / secrets
 .env
 secret.txt
+memory.md
+
 
 # Bundled compiler archive
 tcc.zip

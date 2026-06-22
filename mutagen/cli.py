@@ -73,6 +73,8 @@ def main():
     parser.add_argument("--profile", default="legacy-audit", choices=["legacy-audit", "supply-chain", "malware-triage"], help="Security profile for analysis (default: legacy-audit)")
     parser.add_argument("--static-only", action="store_true", help="Enable static-only analysis, skipping dynamic fuzzer execution")
     parser.add_argument("--webhook-url", default="", help="Custom automation webhook endpoint to post scanning payloads to (e.g. n8n, Jira, Slack)")
+    parser.add_argument("--sandbox", default="none", choices=["none", "docker"], help="Isolation sandbox engine to execute target binaries in (default: none)")
+    parser.add_argument("--coverage", action="store_true", help="Enable coverage-guided hybrid fuzzing (default: False)")
     
     args = parser.parse_args()
 
@@ -114,7 +116,10 @@ def main():
                     abs_path = os.path.abspath(os.path.join(workspace_dir, path))
                     is_source = is_supported_language(os.path.splitext(path)[1])
                     is_binary = is_binary_target(path)
-                    if (is_source or is_binary) and os.path.exists(abs_path):
+                    if is_binary and os.path.exists(abs_path):
+                        console.print(f"[yellow]⚠ CI/CD Safety: Ignoring binary target '{path}' to prevent execution of untrusted pre-compiled code.[/yellow]")
+                        continue
+                    if is_source and os.path.exists(abs_path):
                         if abs_path not in c_files:
                             c_files.append(abs_path)
             except Exception:
@@ -165,7 +170,7 @@ def main():
         r"C:\MinGW\bin\gcc.exe",
         r"C:\TDM-GCC-64\bin\gcc.exe",
         "gcc",  # Fall back to PATH
-        r"c:\mutagen\tcc\tcc\tcc.exe",  # TCC as final fallback
+        os.path.join(workspace_dir, "tcc", "tcc", "tcc.exe"),  # TCC as final fallback
     ]
 
     gcc_path = None
@@ -198,6 +203,8 @@ def main():
                 profile=args.profile,
                 static_only=args.static_only,
                 webhook_url=args.webhook_url,
+                sandbox=args.sandbox,
+                coverage=args.coverage,
             )
             total_crashes += (crashes_found or 0)
             console.print()
@@ -208,7 +215,8 @@ def main():
             rustc_path = None
             rustc_candidates = [
                 os.environ.get("RUSTC_PATH", "rustc"),
-                r"C:\Users\admin\.cargo\bin\rustc.exe",
+                os.path.join(os.path.expanduser("~"), ".cargo", "bin", "rustc.exe"),
+                os.path.join(os.path.expanduser("~"), ".cargo", "bin", "rustc"),
                 os.path.expanduser("~/.cargo/bin/rustc")
             ]
             for candidate in rustc_candidates:
@@ -308,6 +316,8 @@ def main():
             profile=args.profile,
             static_only=args.static_only,
             webhook_url=args.webhook_url,
+            sandbox=args.sandbox,
+            coverage=args.coverage,
         )
         total_crashes += (crashes_found or 0)
         console.print()

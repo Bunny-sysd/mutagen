@@ -1,7 +1,29 @@
 import subprocess
 import os
 
-def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: str, timeout: int) -> dict:
+_DOCKER_WARNED = False
+
+def _check_docker_functional() -> bool:
+    global _DOCKER_WARNED
+    try:
+        res = subprocess.run(["docker", "ps"], capture_output=True, text=True, timeout=2)
+        if res.returncode == 0:
+            return True
+    except Exception:
+        pass
+    
+    if not _DOCKER_WARNED:
+        try:
+            from rich.console import Console
+            console = Console(force_terminal=True, force_jupyter=False)
+            console.print("[yellow]⚠ Warning: Docker sandbox requested but Docker is not installed or daemon is offline.[/yellow]")
+            console.print("[yellow]  Falling back to host direct execution.[/yellow]")
+        except Exception:
+            pass
+        _DOCKER_WARNED = True
+    return False
+
+def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: str, timeout: int, sandbox: str = "none") -> dict:
     # Coerce input_data to string
     if isinstance(input_data, dict):
         lowered_keys = {k.lower(): v for k, v in input_data.items()}
@@ -44,6 +66,31 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         if first_arg in placeholders:
             args = args[1:]
 
+    # --- SANDBOX COMMAND CONSTRUCT ------------------------------------------
+    run_cmd = [exe_path]
+    if sandbox == "docker" and _check_docker_functional():
+        abs_exe_path = os.path.abspath(exe_path)
+        exe_dir = os.path.dirname(abs_exe_path)
+        exe_name = os.path.basename(abs_exe_path)
+        image = os.environ.get("MUTAGEN_SANDBOX_IMAGE", "ubuntu:latest")
+
+        docker_args = [
+            "docker", "run", "--rm", "-i",
+            "--memory=512m",
+            "--cpus=1.0",
+            "-v", f"{exe_dir}:/target:ro",
+            "-w", "/target"
+        ]
+
+        if delivery_mode.startswith("tcp:"):
+            port = int(delivery_mode.split(":")[1])
+            docker_args.extend(["-p", f"{port}:{port}"])
+        else:
+            docker_args.append("--network=none")
+
+        docker_args.extend([image, f"./{exe_name}"])
+        run_cmd = docker_args
+
 
     """
     Run the target program with the given arguments and check if it crashes.
@@ -61,14 +108,14 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         try:
             if delivery_mode == "args":
                 result = subprocess.run(
-                    [exe_path] + args,
+                    run_cmd + args,
                     capture_output=True,
                     text=True,
                     timeout=timeout  # Kill if it hangs
                 )
             elif delivery_mode == "stdin":
                 result = subprocess.run(
-                    [exe_path],
+                    run_cmd,
                     input=input_data,
                     capture_output=True,
                     text=True,
@@ -79,7 +126,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 import socket
                 import time
                 process = subprocess.Popen(
-                    [exe_path],
+                    run_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True
@@ -112,8 +159,25 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 "crash_type": f"DELIVERY_ERROR: {e}",
                 "return_code": -1,
                 "stdout": "",
-                "stderr": str(e)
+                "stderr": str(e),
+                "coverage": []
             }
+
+        # --- PARSE COVERAGE FEEDBACK ---------------------------------------
+        coverage = []
+        if result.stdout:
+            import re
+            cov_match = re.search(r'__MUTAGEN_COV__:([0-9,]*)\b', result.stdout)
+            if cov_match:
+                try:
+                    raw_ids = cov_match.group(1)
+                    if raw_ids:
+                        coverage = [int(x) for x in raw_ids.split(",") if x]
+                except Exception:
+                    pass
+                # Strip the coverage line from stdout to keep stdout clean
+                cleaned_stdout = re.sub(r'\n?__MUTAGEN_COV__:[0-9,]*\b\n?', '\n', result.stdout).strip()
+                result.stdout = cleaned_stdout
 
         # --- CRASH DETECTION -----------------------------------------------
         # On Windows, an "Access Violation" (segfault equivalent)
@@ -215,9 +279,19 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             ]
             for sig in heap_corruption_signatures:
                 if sig in combined_lower:
-                    crashed = True
-                    crash_type = f"HEAP_CORRUPTION (Caught overflow signature: '{sig}')"
-                    break
+                    # Globally differentiate safe handled program exit (rc=1, typical for safe error/assert exit) 
+                    # from unhandled crash states when checking soft signatures.
+                    # Hard indicators (asan/ubsan/corrupted size) remain crashes regardless of rc.
+                    is_hard_sanitizer = any(k in sig for k in ["addresssanitizer", "ubsanitizer", "corrupted", "malloc()", "free()", "double free", "invalid pointer", "heap corruption detected"])
+                    if is_hard_sanitizer or (result.returncode != 0 and result.returncode != 1):
+                        crashed = True
+                        crash_type = f"HEAP_CORRUPTION (Caught overflow signature: '{sig}')"
+                        break
+                    elif sig in ["sasl_bufover", "bufover", "buffer overflow", "heap buffer overflow"]:
+                        # If a diagnostic string was printed but it exited with controlled code 1,
+                        # this is a safe, handled mitigation exit, NOT a crash.
+                        crashed = False
+                        crash_type = "none"
 
         return {
             "crashed": crashed,
@@ -225,6 +299,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             "return_code": result.returncode,
             "stdout": result.stdout[:200] if result.stdout else "",
             "stderr": result.stderr[:200] if result.stderr else "",
+            "coverage": coverage,
         }
 
     except subprocess.TimeoutExpired:
@@ -234,4 +309,5 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             "return_code": -1,
             "stdout": "",
             "stderr": "Process killed after timeout",
+            "coverage": []
         }

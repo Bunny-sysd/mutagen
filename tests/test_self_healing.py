@@ -57,7 +57,7 @@ def test_run_fuzzer_self_healing_compilation_failure(mock_makedirs, mock_file, m
         "int main() { return 0; }",
         "bad_patch_code",
         "The patched C code failed to compile with the following compiler errors:\ncompiler error!",
-        {"vuln_type": "buffer_overflow", "cwe": "CWE-120", "severity": "high", "args": ["A"*100], "payload": "A"*100, "crash_type": "ACCESS_VIOLATION", "return_code": -1073741819, "retries": 0, "input_data": "", "reason": ""},
+        {"vuln_type": "buffer_overflow", "cwe": "CWE-120", "severity": "high", "args": ["A"*100], "payload": "A"*100, "crash_type": "ACCESS_VIOLATION", "return_code": -1073741819, "retries": 0, "input_data": "", "reason": "", "stdout": "", "stderr": ""},
         False
     )
 

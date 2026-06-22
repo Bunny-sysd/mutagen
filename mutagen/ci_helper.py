@@ -45,24 +45,43 @@ def main():
                 f"| `{target}` | {severity_str} | {vuln_type} | {cwe} | `{crash_type}` |"
             )
 
-        # Check for patch file
-        patch_path = f"patches/{target}_FIXED.c"
-        if os.path.exists(patch_path):
+        # Check for patch file across all supported languages
+        supported_exts = ["c", "cpp", "rs", "go", "java", "cs"]
+        found_patch = None
+        found_ext = None
+        for ext in supported_exts:
+            path = f"patches/{target}_FIXED.{ext}"
+            if os.path.exists(path):
+                found_patch = path
+                found_ext = ext
+                break
+                
+        if found_patch:
             try:
-                with open(patch_path, "r", encoding="utf-8") as f:
+                with open(found_patch, "r", encoding="utf-8") as f:
                     patch_code = f.read()
                 
+                lang_mapping = {
+                    "c": "c",
+                    "cpp": "cpp",
+                    "rs": "rust",
+                    "go": "go",
+                    "java": "java",
+                    "cs": "csharp"
+                }
+                md_lang = lang_mapping.get(found_ext, "text")
+                
                 patch_sections.append(
-                    f"#### Target: `{target}.c`\n"
+                    f"#### Target: `{target}.{found_ext}`\n"
                     f"<details>\n"
                     f"<summary><b>🩹 View Auto-Generated Secure Patch</b></summary>\n\n"
-                    f"```c\n"
+                    f"```{md_lang}\n"
                     f"{patch_code}\n"
                     f"```\n\n"
                     f"</details>"
                 )
             except Exception as e:
-                print(f"Error reading patch {patch_path}: {e}")
+                print(f"Error reading patch {found_patch}: {e}")
 
     if total_crashes == 0:
         print("No crashes found in reports.")

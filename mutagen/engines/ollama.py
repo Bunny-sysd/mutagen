@@ -6,8 +6,9 @@ from mutagen.engines.base import BaseEngine
 console = Console(force_terminal=True, force_jupyter=False)
 
 class OllamaEngine(BaseEngine):
-    def __init__(self, model: str = ""):
+    def __init__(self, model: str = "", debug: bool = False):
         import os
+        self.debug = debug
         self.model = model or os.environ.get("MUTAGEN_MODEL", "llama3.2")
         import requests
         self.requests = requests
@@ -45,34 +46,6 @@ class OllamaEngine(BaseEngine):
         from mutagen.swarm_balancer import SwarmBalancer
         self.balancer = SwarmBalancer(urls)
         self.url = urls[0] if urls else "http://localhost:11434/api/generate"
-
-    @property
-    def lang(self) -> str:
-        return getattr(self, "language", "c").lower()
-
-    @property
-    def lang_name(self) -> str:
-        if self.lang == "rust":
-            return "Rust"
-        elif self.lang == "go":
-            return "Go"
-        elif self.lang == "java":
-            return "Java"
-        elif self.lang == "csharp":
-            return "C#"
-        return "C"
-
-    @property
-    def lang_ext(self) -> str:
-        if self.lang == "rust":
-            return "rs"
-        elif self.lang == "go":
-            return "go"
-        elif self.lang == "java":
-            return "java"
-        elif self.lang == "csharp":
-            return "cs"
-        return "c"
 
     def _generate(self, prompt: str, system: str = "", format_json: bool = False) -> str:
         import os
