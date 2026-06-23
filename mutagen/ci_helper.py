@@ -32,9 +32,9 @@ def main():
             if severity == "CRITICAL":
                 severity_str = "[!] **CRITICAL**"
             elif severity == "HIGH":
-                severity_str = "🟠 **HIGH**"
+                severity_str = "**HIGH**"
             elif severity == "MEDIUM":
-                severity_str = "🟡 **MEDIUM**"
+                severity_str = "**MEDIUM**"
             elif severity == "LOW":
                 severity_str = "[+] **LOW**"
 
@@ -89,11 +89,11 @@ def main():
         return
 
     # Construct comment.md
-    markdown_content = f"""## 🧬 Mutagen Security Analysis Report
+    markdown_content = f"""## Mutagen Security Analysis Report
 
 Mutagen has completed automated security fuzzing on the modified targets in this Pull Request and identified **{total_crashes}** unique vulnerability crash(es).
 
-### 🚨 Vulnerability Summary
+### Vulnerability Summary
 
 | Target | Severity | Vulnerability Type | CWE | Crash Signal |
 |--------|----------|-------------------|-----|--------------|

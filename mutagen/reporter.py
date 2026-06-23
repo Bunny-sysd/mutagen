@@ -519,7 +519,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     </div>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="showTab('dashboard-tab')">📊 Overview</button>
+      <button class="tab-btn active" onclick="showTab('dashboard-tab')">Overview</button>
       {deobfuscated_tab_btn}
       {raw_decompiled_tab_btn}
       {patch_tab_btn}

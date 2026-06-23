@@ -6,7 +6,7 @@ Please take a moment to review this guide before submitting issues, feature requ
 
 ---
 
-## 🛠 Setting Up Your Development Environment
+## Setting Up Your Development Environment
 
 Mutagen is built with Python 3 and integrates with local compilers and sandboxes.
 

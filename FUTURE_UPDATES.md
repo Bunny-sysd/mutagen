@@ -4,7 +4,7 @@ This file tracks completed development milestones and acts as a log for upcoming
 
 ---
 
-## 🚀 Completed Phases
+## Completed Phases
 
 ### Phase 1: Secure Containerized Sandboxing (Docker Sandbox Mode)
 - **Opt-in CLI flag**: Added `--sandbox docker` to isolate targets.

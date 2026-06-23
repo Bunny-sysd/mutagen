@@ -7,7 +7,7 @@ Welcome! This handbook is designed to help AI coding agents and human developers
 
 ---
 
-## 🛠 Active Skills for Mutagen Development
+## Active Skills for Mutagen Development
 
 When planning updates or debugging errors, cross-reference these core skills:
 

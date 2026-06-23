@@ -1,6 +1,6 @@
 <div align="center">
   <img src="docs/logo.png" alt="Mutagen Logo" width="200">
-  <h1>🧬 Mutagen</h1>
+  <h1>Mutagen</h1>
   <p><strong>AI-Powered Zero-Day Fuzzer &amp; Auto-Patcher</strong></p>
   <p>
     <em>The world's first agentic AI fuzzer that reads source code, finds vulnerabilities,<br>
@@ -26,14 +26,14 @@
 
 ---
 
-## ⚠️ Disclaimer
+## Disclaimer
 
 **For Educational and Defensive Purposes Only.**
 Mutagen is designed to help developers find and patch vulnerabilities in their own code. Do not use this tool against targets you do not have explicit permission to test.
 
 ---
 
-## 🤔 Why Mutagen?
+## Why Mutagen?
 
 Traditional fuzzers (AFL, libFuzzer, Honggfuzz) rely on **random mutation** and code coverage to find crashes. They're effective but require massive CPU time and often fail to bypass complex logic like authentication checks or SASL handshakes.
 
@@ -65,7 +65,7 @@ Traditional fuzzers (AFL, libFuzzer, Honggfuzz) rely on **random mutation** and 
 
 ---
 
-## ⚙️ How It Works
+## How It Works
 
 Mutagen executes a fully autonomous **5-phase zero-day hunting loop**:
 
@@ -73,8 +73,8 @@ Mutagen executes a fully autonomous **5-phase zero-day hunting loop**:
 graph LR
     A["Phase 1\nAI Code Analysis"] --> B["Phase 2\nCompilation"]
     B --> C["Phase 3\nAgentic Fuzzing"]
-    C -->|"Crash Found"| D["🩹 Phase 4\nAuto-Patch + Exploit"]
-    C -->|"No Crash"| C2["🔄 Agentic Retry\n(learns from output)"]
+    C -->|"Crash Found"| D["Phase 4\nAuto-Patch + Exploit"]
+    C -->|"No Crash"| C2["Agentic Retry\n(learns from output)"]
     C2 --> C
     D --> E["Phase 5\nPatch Verification"]
 
@@ -120,14 +120,14 @@ graph LR
 
 | CWE | Vulnerability | Severity |
 |-----|--------------|----------|
-| [CWE-120](https://cwe.mitre.org/data/definitions/120.html) | Buffer Overflow | 🔴 Critical |
-| [CWE-134](https://cwe.mitre.org/data/definitions/134.html) | Format String Bug | 🔴 Critical |
-| [CWE-190](https://cwe.mitre.org/data/definitions/190.html) | Integer Overflow | 🟡 High |
-| [CWE-416](https://cwe.mitre.org/data/definitions/416.html) | Use-After-Free | 🔴 Critical |
-| [CWE-193](https://cwe.mitre.org/data/definitions/193.html) | Off-by-One Error | 🟡 High |
-| [CWE-415](https://cwe.mitre.org/data/definitions/415.html) | Double Free | 🔴 Critical |
-| [CWE-78](https://cwe.mitre.org/data/definitions/78.html) | Command Injection | 🔴 Critical |
-| [CWE-506](https://cwe.mitre.org/data/definitions/506.html) | Embedded Malicious Code | 🔴 Critical |
+| [CWE-120](https://cwe.mitre.org/data/definitions/120.html) | Buffer Overflow | Critical |
+| [CWE-134](https://cwe.mitre.org/data/definitions/134.html) | Format String Bug | Critical |
+| [CWE-190](https://cwe.mitre.org/data/definitions/190.html) | Integer Overflow | High |
+| [CWE-416](https://cwe.mitre.org/data/definitions/416.html) | Use-After-Free | Critical |
+| [CWE-193](https://cwe.mitre.org/data/definitions/193.html) | Off-by-One Error | High |
+| [CWE-415](https://cwe.mitre.org/data/definitions/415.html) | Double Free | Critical |
+| [CWE-78](https://cwe.mitre.org/data/definitions/78.html) | Command Injection | Critical |
+| [CWE-506](https://cwe.mitre.org/data/definitions/506.html) | Embedded Malicious Code | Critical |
 
 ---
 
@@ -190,10 +190,10 @@ python run_all.py --max-payloads 3
 ### Output
 
 Mutagen produces:
-- 📄 **JSON crash report** in `crashes/`
-- 🌐 **Interactive HTML report** in `crashes/`
+- **JSON crash report** in `crashes/`
+- **Interactive HTML report** in `crashes/`
 - 🩹 **Patched C source** in `patches/`
-- 💀 **Python exploit script** in `exploits/`
+- **Python exploit script** in `exploits/`
 
 ---
 
