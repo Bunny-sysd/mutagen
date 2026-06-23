@@ -38,7 +38,7 @@ Mutagen is built with Python 3 and integrates with local compilers and sandboxes
 
 ---
 
-## 🧪 Testing Your Changes
+## Testing Your Changes
 
 Before submitting any Pull Request, ensure the entire test suite passes:
 
@@ -50,7 +50,7 @@ If you are adding new features (e.g., a new LLM provider, path handling, or sand
 
 ---
 
-## 📥 Pull Request Guidelines
+## Pull Request Guidelines
 
 1. **Create a Feature Branch**:
    ```bash
@@ -65,7 +65,7 @@ If you are adding new features (e.g., a new LLM provider, path handling, or sand
 
 ---
 
-## 💡 Suggesting New Vulnerability Targets
+## Suggesting New Vulnerability Targets
 
 If you'd like to add a new C/C++/Rust target binary or source file for the fuzzer to analyze:
 1. Save the file under the `targets/` directory using standard numbering notation (e.g., `17_your_vuln_description.c`).

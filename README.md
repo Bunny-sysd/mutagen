@@ -9,19 +9,19 @@
 
   <br>
 
-  <a href="#-quick-start"><img src="https://img.shields.io/badge/Quick%20Start-30%20seconds-00ff88?style=for-the-badge&logoColor=white" alt="Quick Start"></a>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/Quick%20Start-30%20seconds-00ff88?style=for-the-badge&logoColor=white" alt="Quick Start"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+"></a>
   <a href=".github/workflows/mutagen-action.yml"><img src="https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white" alt="CI/CD"></a>
 
   <br><br>
 
-  <a href="#-features">Features</a> •
-  <a href="#-how-it-works">How It Works</a> •
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="#-supported-llms">LLM Providers</a> •
-  <a href="#-scan-profiles">Scan Profiles</a> •
-  <a href="#-contributing">Contributing</a>
+  <a href="#features">Features</a> •
+  <a href="#how-it-works">How It Works</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#supported-llms">LLM Providers</a> •
+  <a href="#scan-profiles">Scan Profiles</a> •
+  <a href="#contributing">Contributing</a>
 </div>
 
 ---
@@ -51,15 +51,15 @@ Traditional fuzzers (AFL, libFuzzer, Honggfuzz) rely on **random mutation** and 
 | Feature | AFL/libFuzzer | Honggfuzz | **Mutagen** |
 |---------|:------------:|:---------:|:-----------:|
 | Mutation Strategy | Random bit-flip | Random + feedback | **AI-guided** |
-| Source Code Understanding | ❌ | ❌ | **✅ Full analysis** |
-| Binary / Decompiled Code | ❌ | ❌ | **✅ Ghidra integration** |
-| Bypasses Auth/Logic | ❌ | ❌ | **✅ Agentic retries** |
-| Auto-Patch Generation | ❌ | ❌ | **✅** |
-| Exploit (PoC) Generation | ❌ | ❌ | **✅** |
-| Patch Verification | ❌ | ❌ | **✅** |
-| Supply-Chain Auditing | ❌ | ❌ | **✅** |
-| Malware Triage | ❌ | ❌ | **✅** |
-| Enterprise Network Safe | ❌ | ❌ | **✅ HTTP/1.1 fallback** |
+| Source Code Understanding | No | No | **Yes Full analysis** |
+| Binary / Decompiled Code | No | No | **Yes Ghidra integration** |
+| Bypasses Auth/Logic | No | No | **Yes Agentic retries** |
+| Auto-Patch Generation | No | No | **Yes** |
+| Exploit (PoC) Generation | No | No | **Yes** |
+| Patch Verification | No | No | **Yes** |
+| Supply-Chain Auditing | No | No | **Yes** |
+| Malware Triage | No | No | **Yes** |
+| Enterprise Network Safe | No | No | **Yes HTTP/1.1 fallback** |
 | Time to First Crash | Hours/Days | Hours | **Seconds** |
 | Setup Complexity | High | Medium | **`pip install`** |
 
@@ -71,12 +71,12 @@ Mutagen executes a fully autonomous **5-phase zero-day hunting loop**:
 
 ```mermaid
 graph LR
-    A["📖 Phase 1\nAI Code Analysis"] --> B["🔨 Phase 2\nCompilation"]
-    B --> C["💥 Phase 3\nAgentic Fuzzing"]
+    A["Phase 1\nAI Code Analysis"] --> B["Phase 2\nCompilation"]
+    B --> C["Phase 3\nAgentic Fuzzing"]
     C -->|"Crash Found"| D["🩹 Phase 4\nAuto-Patch + Exploit"]
     C -->|"No Crash"| C2["🔄 Agentic Retry\n(learns from output)"]
     C2 --> C
-    D --> E["✅ Phase 5\nPatch Verification"]
+    D --> E["Phase 5\nPatch Verification"]
 
     style A fill:#1a1a2e,stroke:#00ccff,color:#00ccff
     style B fill:#1a1a2e,stroke:#00ccff,color:#00ccff
@@ -96,25 +96,25 @@ graph LR
 
 ---
 
-## ✨ Features
+## Features
 
-- 🧠 **AI-Powered Analysis** — Understands code semantics, not just random fuzzing
-- 🔄 **Agentic Retries** — Learns from `stdout/stderr` to bypass auth checks and complex logic
-- 🩹 **Auto-Patching** — Generates secure C patches for every vulnerability found
-- 💀 **Exploit Generation** — Writes standalone Python PoC scripts for regression testing
-- ✅ **Patch Verification** — Proves the patch works by attacking the fixed binary
-- 📊 **Beautiful HTML Reports** — Glassmorphism-styled interactive crash reports
-- 🔌 Multi-LLM Support — Works with Gemini, Anthropic Claude, OpenAI, and local Ollama models
-- ⚡ **Concurrent Execution** — Parallel payload injection with `ThreadPoolExecutor`
-- 🌐 **Multiple Delivery Modes** — Args, stdin, and TCP socket fuzzing
-- 🧬 **Traditional Fallback Mutations** — Classic fuzzing strategies (buffer overflow, format string, integer boundary) kick in automatically when AI is unavailable
-- 🔍 **Crash Deduplication** — Intelligent signature-based deduplication removes duplicate crash reports
-- 🏢 **Enterprise Network Safe** — HTTP/1.1 fallback and 5-second connect timeouts bypass TLS proxy hangs in corporate environments
-- 🔧 **Binary Fuzzing** — Headless Ghidra integration to decompile and fuzz compiled binaries without source
-- 🕵️ **Supply-Chain Auditing** — Detect backdoors, credential leaks, and unauthorized network calls
-- 🦠 **Malware Triage** — Identify ransomware loops, keyloggers, persistence mechanisms, and C2 footprints
-- ⚙️ **Local `.env` Config** — Store provider, model, and API keys in a local config file
-- 🔁 **CI/CD Integration** — GitHub Actions workflow template for automated fuzzing on every pull request
+- **AI-Powered Analysis** — Understands code semantics, not just random fuzzing
+- **Agentic Retries** — Learns from `stdout/stderr` to bypass auth checks and complex logic
+- **Auto-Patching** — Generates secure C patches for every vulnerability found
+- **Exploit Generation** — Writes standalone Python PoC scripts for regression testing
+- **Patch Verification** — Proves the patch works by attacking the fixed binary
+- **Beautiful HTML Reports** — Glassmorphism-styled interactive crash reports
+- Multi-LLM Support — Works with Gemini, Anthropic Claude, OpenAI, and local Ollama models
+- **Concurrent Execution** — Parallel payload injection with `ThreadPoolExecutor`
+- **Multiple Delivery Modes** — Args, stdin, and TCP socket fuzzing
+- **Traditional Fallback Mutations** — Classic fuzzing strategies (buffer overflow, format string, integer boundary) kick in automatically when AI is unavailable
+- **Crash Deduplication** — Intelligent signature-based deduplication removes duplicate crash reports
+- **Enterprise Network Safe** — HTTP/1.1 fallback and 5-second connect timeouts bypass TLS proxy hangs in corporate environments
+- **Binary Fuzzing** — Headless Ghidra integration to decompile and fuzz compiled binaries without source
+- **Supply-Chain Auditing** — Detect backdoors, credential leaks, and unauthorized network calls
+- **Malware Triage** — Identify ransomware loops, keyloggers, persistence mechanisms, and C2 footprints
+- **Local `.env` Config** — Store provider, model, and API keys in a local config file
+- **CI/CD Integration** — GitHub Actions workflow template for automated fuzzing on every pull request
 
 ### Supported Vulnerability Classes
 
@@ -131,7 +131,7 @@ graph LR
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -197,7 +197,7 @@ Mutagen produces:
 
 ---
 
-## 🔬 Scan Profiles
+## Scan Profiles
 
 Mutagen supports three specialized scan modes, selectable with `--profile`:
 
@@ -220,7 +220,7 @@ mutagen --target suspicious_binary.exe --binary --profile malware-triage
 
 ---
 
-## 🔧 Binary Fuzzing (Ghidra)
+## Binary Fuzzing (Ghidra)
 
 Mutagen can fuzz compiled binaries with no source code by integrating with [Ghidra](https://ghidra-sre.org/):
 
@@ -233,7 +233,7 @@ Ghidra runs headlessly to decompile the binary into C pseudo-code. Mutagen then 
 
 ---
 
-## 🔌 Supported LLMs
+## Supported LLMs
 
 | Provider | Model | Setup | Cost |
 |----------|-------|-------|------|
@@ -253,7 +253,7 @@ mutagen --target targets/01_buffer_overflow.c --provider openai --model gpt-4o
 mutagen --target targets/01_buffer_overflow.c --provider ollama --model llama3.2
 ```
 
-### 🧠 Uncensoring Local LLMs (Heretic Support)
+### Uncensoring Local LLMs (Heretic Support)
 
 When using local models via Ollama for vulnerability discovery and exploit generation, standard models can sometimes refuse prompts due to safety alignments. 
 
@@ -280,7 +280,7 @@ Mutagen is built to work reliably in corporate and enterprise environments:
 
 ---
 
-## 🔁 CI/CD Integration
+## CI/CD Integration
 
 Mutagen ships with a ready-to-use GitHub Actions workflow at [`.github/workflows/mutagen-action.yml`](.github/workflows/mutagen-action.yml):
 
@@ -293,7 +293,7 @@ This enables you to automatically detect new vulnerabilities the moment a develo
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 mutagen/
@@ -319,7 +319,7 @@ mutagen/
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Install dev dependencies
@@ -337,25 +337,25 @@ ruff check mutagen/
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 **Easy ways to contribute:**
-- 🎯 Add new vulnerable C targets to `targets/`
-- 🔌 Add new LLM engine integrations
-- 📝 Improve documentation
-- 🐛 Report bugs or request features
+- Add new vulnerable C targets to `targets/`
+- Add new LLM engine integrations
+- Improve documentation
+- Report bugs or request features
 
 ---
 
-## 📜 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [Google Gemini](https://ai.google.dev/) for the AI backbone
 - [Rich](https://github.com/Textualize/rich) for beautiful terminal output
@@ -371,5 +371,5 @@ This project is licensed under the [MIT License](LICENSE).
   <br><br>
   <strong>Built by Bunny-sysd</strong>
   <br>
-  <sub>If Mutagen helped you, consider giving it a ⭐</sub>
+  <sub>If Mutagen helped you, consider giving it a star</sub>
 </div>

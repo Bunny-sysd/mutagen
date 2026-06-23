@@ -11,7 +11,7 @@ We actively monitor and support security fixes for the following versions:
 
 ---
 
-## 🔒 Reporting a Vulnerability
+## Reporting a Vulnerability
 
 As a security-oriented framework, the security of Mutagen and the safety of the systems running it are of paramount importance. 
 
@@ -25,7 +25,7 @@ Instead, report the issue responsibly by following these steps:
 
 ---
 
-## ⚡ Our Response Timeline
+## Our Response Timeline
 
 Upon receiving a valid vulnerability report, we will:
 * Acknowledge receipt of the report within **48 hours**.

@@ -4,7 +4,7 @@ This directory contains test-bed targets for verifying Mutagen fuzzer capabiliti
 
 ---
 
-## 🎯 Target Index
+## Target Index
 
 | File | Vulnerability / Challenge Type | Delivery Mode |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ This directory contains test-bed targets for verifying Mutagen fuzzer capabiliti
 
 ---
 
-## 🛠 Compilation and Usage
+## Compilation and Usage
 
 When testing a target directly, Mutagen automatically compiles it using local compilers (GCC/MinGW, Rust, Go, or .NET) or isolates it inside Docker sandbox mode if `--sandbox docker` is specified.
 

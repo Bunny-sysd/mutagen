@@ -25,7 +25,7 @@ This file tracks completed development milestones and acts as a log for upcoming
 
 ---
 
-## 🔮 Future Roadmap (Next Upgrades)
+## Future Roadmap (Next Upgrades)
 
 ### Idea 4: Real-time Interactive Web Dashboard
 - **Goal**: Create a local dashboard showing real-time statistics, control flow graphs, and side-by-side patch diff editors.

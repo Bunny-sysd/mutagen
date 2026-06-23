@@ -4,7 +4,7 @@ This document lists all available command-line arguments, options, and environme
 
 ---
 
-## 🚀 Basic Command Format
+## Basic Command Format
 
 ```bash
 python mutagen.py -t <target_file> [options]
@@ -17,7 +17,7 @@ python run_all.py
 
 ---
 
-## 🛠 Command Line Options Reference
+## Command Line Options Reference
 
 | Argument | Shorthand | Type | Default | Description |
 | --- | --- | --- | --- | --- |
@@ -41,7 +41,7 @@ python run_all.py
 
 ---
 
-## 💡 Practical Examples
+## Practical Examples
 
 ### 1. Fuzz a C target with coverage-guided feedback and Gemini
 ```bash

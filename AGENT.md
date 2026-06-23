@@ -33,7 +33,7 @@ When planning updates or debugging errors, cross-reference these core skills:
 
 ---
 
-## 📂 Key Architecture Map
+## Key Architecture Map
 - **CLI Routing**: [cli.py](file:///c:/mutagen/mutagen/cli.py)
 - **Core Fuzzer Loop**: [core.py](file:///c:/mutagen/mutagen/core.py)
 - **Instrumentation & Coverage Engine**: [instrumenter.py](file:///c:/mutagen/mutagen/instrumenter.py) & [executor.py](file:///c:/mutagen/mutagen/executor.py)
