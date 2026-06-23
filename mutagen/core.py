@@ -246,7 +246,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         " |_|  |_|\\___/  |_/_/   \\_\\____|_____|_| \\_|",
         "",
         " AI-Powered Zero-Day Fuzzer v2.0",
-        " by Aaron Alva",
+        " by Bunny-sysd",
     ]
     banner = Text()
     for line in banner_lines[:5]:

@@ -369,7 +369,7 @@ This project is licensed under the [MIT License](LICENSE).
   <br>
   <em>"Evolution through mutation."</em>
   <br><br>
-  <strong>Built by Aaron Alva</strong>
+  <strong>Built by Bunny-sysd</strong>
   <br>
   <sub>If Mutagen helped you, consider giving it a ⭐</sub>
 </div>

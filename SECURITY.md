@@ -19,8 +19,9 @@ If you discover a security vulnerability in Mutagen (e.g., sandbox escapes, cred
 
 Instead, report the issue responsibly by following these steps:
 
-1. **Email the Maintainers**: Send a detailed description of the vulnerability, reproduction steps, and a proof of concept (PoC) to the security contact email at: `security@bunny-sysd.com` (or open a private security advisory directly via GitHub).
+1. **Open a Private Security Advisory**: Please report the vulnerability privately by opening a Private Security Advisory directly on the GitHub repository page (navigate to the **Security** tab -> **Advisories** -> click **Report a vulnerability**). This keeps the details secure and lets us collaborate on a fix privately.
 2. **Responsible Disclosure**: We request that you give us a reasonable period of time to review, patch, and release a fix for the vulnerability before disclosing it publicly to the community.
+
 
 ---
 

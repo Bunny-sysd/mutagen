@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "Aaron Alva" },
+    { name = "Bunny-sysd" },
 ]
 keywords = [
     "fuzzer", "security", "vulnerability-scanner", "llm", "ai-security",
