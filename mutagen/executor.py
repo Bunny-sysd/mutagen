@@ -16,7 +16,7 @@ def _check_docker_functional() -> bool:
         try:
             from rich.console import Console
             console = Console(force_terminal=True, force_jupyter=False)
-            console.print("[yellow]⚠ Warning: Docker sandbox requested but Docker is not installed or daemon is offline.[/yellow]")
+            console.print("[yellow][!] Warning: Docker sandbox requested but Docker is not installed or daemon is offline.[/yellow]")
             console.print("[yellow]  Falling back to host direct execution.[/yellow]")
         except Exception:
             pass

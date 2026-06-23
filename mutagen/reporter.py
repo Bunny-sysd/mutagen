@@ -262,7 +262,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
 
         capability_panel_html = f"""
         <div class="table-container" style="margin-top: 2rem;">
-          <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; margin: 1.5rem 0 1rem 0; color: #fbbf24;">⚡ Threat Capability Matrix</h2>
+          <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; margin: 1.5rem 0 1rem 0; color: #fbbf24;"> Threat Capability Matrix</h2>
           <table>
             <thead><tr><th style="width: 50px;">#</th><th style="width: 120px;">Threat Level</th><th style="width: 220px;">Identified Capability</th><th>Behavioral Details</th></tr></thead>
             <tbody>{capability_rows}</tbody>
@@ -271,7 +271,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
 
         ioc_panel_html = f"""
         <div class="table-container" style="margin-top: 2rem;">
-          <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; margin: 1.5rem 0 1rem 0; color: #ff6b6b;">🔬 Extracted Indicators of Compromise (IoCs)</h2>
+          <h2 style="font-family: 'Outfit', sans-serif; font-size: 1.5rem; margin: 1.5rem 0 1rem 0; color: #ff6b6b;"> Extracted Indicators of Compromise (IoCs)</h2>
           <table>
             <thead><tr><th style="width: 50px;">#</th><th style="width: 150px;">Indicator Type</th><th style="width: 250px;">IOC Value</th><th>Description / Context</th></tr></thead>
             <tbody>{ioc_rows}</tbody>
@@ -292,9 +292,9 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     raw_decompiled_tab_btn = ""
 
     if clean_source_code and binary_mode:
-        deobfuscated_tab_btn = '<button class="tab-btn" onclick="showTab(\'deobfuscated-tab\')">✨ Deobfuscated Code</button>'
+        deobfuscated_tab_btn = '<button class="tab-btn" onclick="showTab(\'deobfuscated-tab\')"> Deobfuscated Code</button>'
     if raw_decompiled_code and binary_mode:
-        raw_decompiled_tab_btn = '<button class="tab-btn" onclick="showTab(\'raw-decompiled-tab\')">🔍 Raw Decompiled</button>'
+        raw_decompiled_tab_btn = '<button class="tab-btn" onclick="showTab(\'raw-decompiled-tab\')"> Raw Decompiled</button>'
 
     if patch_code or binary_mode:
         patch_label = "Remediation Notes" if binary_mode else "Patched Code"

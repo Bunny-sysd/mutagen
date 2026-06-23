@@ -140,7 +140,7 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
                 f.write(instrumented_code)
             compile_source_path = temp_instrumented
         except Exception as e:
-            console.print(f"[yellow]  ⚠ Warning: Source-level instrumentation failed: {e}. Falling back to standard compilation.[/yellow]")
+            console.print(f"[yellow]  [!] Warning: Source-level instrumentation failed: {e}. Falling back to standard compilation.[/yellow]")
             compile_source_path = source_path
             temp_instrumented = None
 

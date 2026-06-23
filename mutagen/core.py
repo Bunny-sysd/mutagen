@@ -215,9 +215,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             if res.returncode == 0:
                 console.print(f"[green]>> Successfully pulled/verified image '{image}'[/green]")
             else:
-                console.print(f"[yellow]⚠ Warning: docker pull returned code {res.returncode}: {res.stderr.strip()}[/yellow]")
+                console.print(f"[yellow][!] Warning: docker pull returned code {res.returncode}: {res.stderr.strip()}[/yellow]")
         except Exception as e:
-            console.print(f"[yellow]⚠ Warning: Failed to pull Docker image '{image}': {e}[/yellow]")
+            console.print(f"[yellow][!] Warning: Failed to pull Docker image '{image}': {e}[/yellow]")
 
     # Detect language dynamically
     ext = os.path.splitext(source_path)[1].lower()
@@ -337,7 +337,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 source_code = deobfuscated_code
                 console.print("[green]>> Symbol recovery successful! Replaced generic variable/function stubs.[/green]")
             else:
-                console.print("[yellow]⚠ AI deobfuscation returned empty code, falling back to raw pseudo-C.[/yellow]")
+                console.print("[yellow][!] AI deobfuscation returned empty code, falling back to raw pseudo-C.[/yellow]")
         console.print()
     else:
         # --- STEP 1: READ THE TARGET SOURCE CODE -----------------------------
@@ -365,7 +365,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         payloads = engine.analyze_code(source_code, max_payloads, delivery_mode, debug, profile=profile)
 
     if not payloads:
-        console.print("[yellow]⚠ AI returned no payloads (possible refusal, rate-limit, or network error).[/yellow]")
+        console.print("[yellow][!] AI returned no payloads (possible refusal, rate-limit, or network error).[/yellow]")
         console.print("[cyan]↳ Activating traditional mutation fallback engine...[/cyan]")
         payloads = generate_fallback_payloads(max_payloads=max_payloads, delivery_mode=delivery_mode)
         if not payloads:

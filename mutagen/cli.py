@@ -118,7 +118,7 @@ def main():
                     is_source = is_supported_language(os.path.splitext(path)[1])
                     is_binary = is_binary_target(path)
                     if is_binary and os.path.exists(abs_path):
-                        console.print(f"[yellow]⚠ CI/CD Safety: Ignoring binary target '{path}' to prevent execution of untrusted pre-compiled code.[/yellow]")
+                        console.print(f"[yellow][!] CI/CD Safety: Ignoring binary target '{path}' to prevent execution of untrusted pre-compiled code.[/yellow]")
                         continue
                     if is_source and os.path.exists(abs_path):
                         if abs_path not in c_files:
@@ -127,7 +127,7 @@ def main():
                 pass
 
         if not c_files:
-            console.print("[bold green]✔ CI/CD Scan: No target files modified. Nothing to fuzz.[/bold green]")
+            console.print("[bold green][+] CI/CD Scan: No target files modified. Nothing to fuzz.[/bold green]")
             sys.exit(0)
 
         console.print(f"[bold cyan]CI/CD Scan: Found {len(c_files)} modified target file(s) to fuzz.[/bold cyan]")
@@ -185,7 +185,7 @@ def main():
     for target in targets:
         # --- BINARY TARGET: Route through decompilation pipeline ---
         if is_binary_target(target):
-            console.print(f"[bold magenta]⚡ Binary Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
+            console.print(f"[bold magenta] Binary Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
             console.print("[dim]  Mode: Binary Decompilation Analysis[/dim]")
             crashes_found = run_fuzzer(
                 source_path=target,
@@ -302,7 +302,7 @@ def main():
             compiler_to_use = gcc_path
             console.print(f"[dim]Using GCC C/C++ compiler: {compiler_to_use}[/dim]")
 
-        console.print(f"[bold magenta]⚡ Fuzzing Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
+        console.print(f"[bold magenta] Fuzzing Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
         crashes_found = run_fuzzer(
             source_path=target,
             api_key=api_key,
@@ -327,7 +327,7 @@ def main():
         console.print(f"[bold red]X CI/CD Scan Failed: Found {total_crashes} unique vulnerability crash(es)![/bold red]")
         sys.exit(1)
     elif args.ci:
-        console.print("[bold green]✔ CI/CD Scan Passed: No vulnerabilities found in modified code.[/bold green]")
+        console.print("[bold green][+] CI/CD Scan Passed: No vulnerabilities found in modified code.[/bold green]")
 
 if __name__ == "__main__":
     main()

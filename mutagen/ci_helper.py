@@ -30,13 +30,13 @@ def main():
             # Style severity bold/color using markdown if needed, bold is standard
             severity_str = f"**{severity}**"
             if severity == "CRITICAL":
-                severity_str = "🔴 **CRITICAL**"
+                severity_str = "[!] **CRITICAL**"
             elif severity == "HIGH":
                 severity_str = "🟠 **HIGH**"
             elif severity == "MEDIUM":
                 severity_str = "🟡 **MEDIUM**"
             elif severity == "LOW":
-                severity_str = "🟢 **LOW**"
+                severity_str = "[+] **LOW**"
 
             vuln_type = c.get("vuln_type", "unknown")
             cwe = c.get("cwe", "N/A")
