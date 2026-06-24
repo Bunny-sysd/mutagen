@@ -51,3 +51,35 @@ def test_run_fuzzer_webhook_propagation(mock_post):
         args, kwargs = mock_post.call_args
         assert args[0] == "http://mock-webhook.local"
 
+
+@patch("requests.post")
+def test_webhook_signature_calculation(mock_post):
+    mock_post.return_value.status_code = 200
+    
+    import hmac
+    import hashlib
+    import json
+    
+    secret = "my_super_webhook_secret_key"
+    
+    save_crash_report(
+        crashes=[{"args": ["test"], "vuln_type": "buffer_overflow", "cwe": "CWE-120", "severity": "critical", "crash_type": "SIGSEGV", "reason": "Overflow test"}],
+        target_name="test_webhook_sig",
+        total_tested=1,
+        webhook_url="http://example.com/webhook",
+        webhook_secret=secret
+    )
+    
+    assert mock_post.called
+    args, kwargs = mock_post.call_args
+    headers = kwargs["headers"]
+    
+    assert "X-Mutagen-Signature" in headers
+    sent_sig = headers["X-Mutagen-Signature"]
+    
+    payload = kwargs["json"]
+    expected_payload_bytes = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+    expected_sig = hmac.new(secret.encode('utf-8'), expected_payload_bytes, hashlib.sha256).hexdigest()
+    
+    assert sent_sig == expected_sig
+

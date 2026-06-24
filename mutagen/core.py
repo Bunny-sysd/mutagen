@@ -201,7 +201,7 @@ def mutate_input(args: list[str], input_data: str, delivery_mode: str) -> tuple[
         return args, mutate_string(input_data)
 
 
-def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = "", sandbox: str = "none", coverage: bool = False):
+def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = "", sandbox: str = "none", coverage: bool = False, webhook_secret: str = "", webhook_headers: list[str] = None, decompiler: str = "ghidra", decompiler_path: str = ""):
     """Main fuzzer orchestration function."""
     engine = get_engine(provider, api_key, model, debug, console)
 
@@ -270,15 +270,18 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         console.print(f"[cyan]> BINARY TARGET:[/cyan] {source_path}")
 
         try:
-            ghidra_headless = find_ghidra(ghidra_path)
-            console.print(f"[green]>> Ghidra found: {ghidra_headless}[/green]")
+            if decompiler == "ghidra":
+                ghidra_headless = find_ghidra(ghidra_path)
+                console.print(f"[green]>> Ghidra found: {ghidra_headless}[/green]")
+            else:
+                ghidra_headless = ""
         except DecompilationError as e:
             console.print(f"[bold red]X {e}[/bold red]")
             sys.exit(1)
 
         with Progress(
             SpinnerColumn(style="green"),
-            TextColumn("[green]Ghidra decompiling binary..."),
+            TextColumn(f"[green]{decompiler.upper()} decompiling binary..."),
             console=console,
         ) as progress:
             task = progress.add_task("", total=None)
@@ -288,6 +291,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     ghidra_headless=ghidra_headless,
                     all_functions=decompile_all,
                     timeout=300,  # 5 minute timeout for large binaries
+                    decompiler=decompiler,
+                    decompiler_path=decompiler_path,
                 )
             except DecompilationError as e:
                 console.print(f"[bold red]X Decompilation failed![/bold red]\n{e}")
@@ -348,6 +353,27 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         console.print(f"[dim]  Read {len(source_code)} bytes of source code[/dim]")
         console.print()
+
+    # --- DEFENSIVE PROMPT INJECTION SCANNER (SkillSpector-inspired) -------
+    # Scan target code to detect instructions trying to bypass/poison the LLM system prompt.
+    injection_patterns = [
+        "ignore previous instructions",
+        "system prompt",
+        "instead of analyzing",
+        "new instructions",
+        "you must now",
+        "override",
+        "hijack",
+        "forget your task",
+    ]
+    code_lower = source_code.lower()
+    detected_patterns = [p for p in injection_patterns if p in code_lower]
+    if detected_patterns:
+        console.print(f"[bold red][!] DEFENSIVE ALERT: Potential prompt injection / jailbreak payload detected in target code![/bold red]")
+        console.print(f"[red]    Matched indicators: {detected_patterns}[/red]")
+        console.print(f"[red]    Aborting execution to protect LLM engine alignment integrity.[/red]")
+        sys.exit(2)
+
 
     # --- STEP 2: AI ANALYSIS ---------------------------------------------
     console.print(Panel(
@@ -458,7 +484,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             profile=profile, static_only=True,
             raw_decompiled_code=raw_decompiled_code,
             clean_source_code=source_code,
-            webhook_url=webhook_url
+            webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
+            webhook_headers=webhook_headers
         )
 
         summary = Panel(
@@ -654,6 +682,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
     # --- Sequential Phase: agentic retries for non-crashing payloads ---
     for i, original_p, last_result, last_args, last_input in needs_retry:
+        if unique_crashes:
+            console.print("[dim]  Crash already discovered. Skipping remaining payload refinements.[/dim]")
+            break
         retry_attempt = 1
         current_max_retries = 2
         while retry_attempt <= current_max_retries:
@@ -925,6 +956,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 raw_decompiled_code=raw_decompiled_code,
                 clean_source_code=source_code,
                 webhook_url=webhook_url,
+                webhook_secret=webhook_secret,
+                webhook_headers=webhook_headers,
             )
         else:
             # --- SOURCE MODE: Full patch + exploit + verification -----------
@@ -1071,6 +1104,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 language=patch_ext, profile=profile, static_only=False,
                 raw_decompiled_code="", clean_source_code=source_code,
                 webhook_url=webhook_url,
+                webhook_secret=webhook_secret,
+                webhook_headers=webhook_headers,
             )
 
         patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""

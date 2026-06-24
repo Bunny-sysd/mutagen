@@ -361,24 +361,96 @@ def decompile_binary(
     ghidra_headless: str,
     all_functions: bool = False,
     timeout: int = 120,
+    decompiler: str = "ghidra",
+    decompiler_path: str = ""
 ) -> DecompilationResult:
     """
-    Decompile a binary using Ghidra's headless analyzer.
-
-    Args:
-        binary_path: Path to the compiled binary (.exe, .elf, etc.)
-        ghidra_headless: Path to the analyzeHeadless script
-        all_functions: If True, decompile all functions. Otherwise, main+callees only.
-        timeout: Maximum time in seconds for Ghidra to run.
-
-    Returns:
-        DecompilationResult with pseudo-C source code and metadata.
-
-    Raises:
-        DecompilationError: If decompilation fails.
+    Decompile a binary using a pluggable headless decompiler (Ghidra, Radare2, Binary Ninja).
     """
     if not os.path.isfile(binary_path):
         raise DecompilationError(f"Binary not found: {binary_path}")
+
+    if decompiler == "radare2":
+        # Radare2 logic
+        r2_bin = decompiler_path or ghidra_headless or shutil.which("r2") or shutil.which("radare2")
+        if not r2_bin:
+            raise DecompilationError("Radare2 executable not found on system PATH.")
+        
+        # Run r2dec command
+        cmd = [r2_bin, "-q", "-c", "aaa; pdd", binary_path]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            pseudo_source = res.stdout or ""
+            
+            # Check for missing r2dec plugin or empty output
+            if not pseudo_source.strip() or "r2dec" in res.stderr.lower() or "not found" in pseudo_source.lower():
+                # Fall back to printing disassembly of main function
+                cmd_fallback = [r2_bin, "-q", "-c", "aaa; pdf @ main", binary_path]
+                res_fallback = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=timeout)
+                pseudo_source = res_fallback.stdout or ""
+                if not pseudo_source.strip():
+                    raise DecompilationError(f"Radare2 failed to produce decompiled pseudocode. Stderr: {res.stderr}")
+            
+            # Count mock functions
+            func_count = 0
+            if "Function" in pseudo_source or "sym." in pseudo_source:
+                func_count = pseudo_source.count("sym.") or 1
+            else:
+                func_count = 1
+                
+            return DecompilationResult(
+                pseudo_source=pseudo_source,
+                functions_found=func_count,
+                architecture="unknown (r2)",
+                binary_format="unknown (r2)",
+                binary_path=binary_path,
+                decompiler_used="radare2",
+            )
+        except Exception as e:
+            raise DecompilationError(f"Radare2 decompilation failed: {e}")
+
+    elif decompiler == "binja":
+        # Binary Ninja logic
+        try:
+            import binaryninja
+            with binaryninja.open_view(binary_path) as bv:
+                lines = []
+                lines.append("// ============================================")
+                lines.append("// MUTAGEN BINARY NINJA DECOMPILED OUTPUT")
+                lines.append(f"// Binary: {binary_path}")
+                lines.append(f"// Format: {bv.view_type}")
+                lines.append(f"// Architecture: {bv.arch.name}")
+                lines.append("// ============================================")
+                lines.append("")
+                
+                func_count = len(bv.functions)
+                for func in bv.functions:
+                    lines.append(f"// --- Function: {func.name} @ {hex(func.start)} ---")
+                    try:
+                        hlil = func.hlil
+                        if hlil:
+                            for block in hlil:
+                                for instruction in block:
+                                    lines.append(str(instruction))
+                    except Exception:
+                        lines.append(f"// (HLIL decompilation failed for {func.name})")
+                    lines.append("")
+                
+                return DecompilationResult(
+                    pseudo_source="\n".join(lines),
+                    functions_found=func_count,
+                    architecture=bv.arch.name,
+                    binary_format=bv.view_type,
+                    binary_path=binary_path,
+                    decompiler_used="binja",
+                )
+        except ImportError:
+            raise DecompilationError(
+                "Binary Ninja Python library ('binaryninja') is not installed.\n"
+                "Please run: pip install binaryninja (or configure PYTHONPATH for your installation)."
+            )
+        except Exception as e:
+            raise DecompilationError(f"Binary Ninja decompilation failed: {e}")
 
     # Create temp directory for Ghidra project and output
     with tempfile.TemporaryDirectory(prefix="mutagen_ghidra_") as tmpdir:

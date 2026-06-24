@@ -92,37 +92,32 @@ CRITICAL CONTEXT: This is DECOMPILED pseudo-C code extracted from a compiled bin
             focus_description = "buffer overflows, format string bugs, integer overflows, use-after-free, off-by-one errors, double-free, heap overflows, command injection, and panics/safety violations."
             vuln_types_example = '"buffer_overflow", "format_string", "integer_overflow", "use_after_free"'
 
-        prompt = f"""You are an expert defensive security researcher conducting a code audit.
-{decompile_context}Your job is to analyze the following {self.lang_name} source code for potential vulnerabilities and security risks, focusing on: {focus_description}
+        prompt = f"""You are an expert defensive security auditor.
+{decompile_context}Analyze this {self.lang_name} code for potential vulnerabilities & security risks, guided by the MITRE ATT&CK and CWE frameworks, focusing on: {focus_description}
 
-The target program receives input via: {delivery_mode}.
+Input delivery mode: {delivery_mode}.
 
-First, analyze the source code step by step using a Chain of Thought process to understand
-the control flow, data flow, and memory management. Identify where untrusted inputs
-are used in dangerous operations or suspicious/unauthorized behaviors.
-
-For each security risk or vulnerability you find, generate a specific test payload or indicator scenario.
+Perform a token-efficient data & control flow audit to identify potential vulnerability/triage trigger inputs.
 
 SOURCE CODE:
 ```{self.lang_ext}
 {source_code}
 ```
 
-IMPORTANT RULES:
+RULES:
 1. Return a JSON array of payloads matching the requested schema.
-2. Each element must have these fields:
-   - "args": an array of strings, one per command-line argument (used if delivery mode is 'args')
-   - "input_data": a string containing the raw input to feed via stdin or network (used if delivery mode is 'stdin' or 'tcp')
-   - "vuln_type": the vulnerability or capability type (e.g. {vuln_types_example})
-   - "reason": brief explanation of why this triggers the bug or capability, containing your chain of thought logic
-   - "severity": "critical", "high", "medium", or "low"
-   - "cwe": the CWE ID if known (e.g. "CWE-120")
-   - "data_flow": an array of strings tracing execution flow from entry-point input (Source) to the vulnerability function/sink
-   - "confidence_score": an integer from 1 to 10 assessing vulnerability trigger confidence
-   - "mitigations_detected": array of strings listing security checks/canaries/filters detected in the code path
-3. For long repeated strings, write them out literally (e.g. "AAAAAAAAAA" not "A"*10). Limit any repeated strings to a maximum of 1000 characters to prevent parsing truncation.
-4. Generate up to {max_payloads} diverse payloads ranging from safe inputs to risk-inducing.
-5. Study the program entry point (like main() or fn main()) to see exactly how the program reads its input."""
+2. Fields for each element:
+   - "args": array of command-line argument strings (for 'args' mode). Do not include shell pipes ("|"), redirections (">", "<"), or echo command wrappers.
+   - "input_data": raw input string (for 'stdin' or 'tcp' mode).
+   - "vuln_type": vulnerability/capability name (e.g. {vuln_types_example}).
+   - "reason": extremely concise summary (max 2 sentences) mapping the exploit logic directly to MITRE ATT&CK techniques/tactics.
+   - "severity": "critical", "high", "medium", or "low".
+   - "cwe": CWE ID if known (e.g., "CWE-120").
+   - "data_flow": array of execution step strings tracing flow from input (Source) to vulnerability/trigger (Sink).
+   - "confidence_score": integer (1-10) assessing likelihood of trigger success.
+   - "mitigations_detected": array of detected input checks/filters.
+3. No repeating character math (use literal strings, max 1000 chars).
+4. Generate up to {max_payloads} diverse payloads (safe to risk-inducing)."""
 
         from mutagen.models import FuzzPayloadList
 

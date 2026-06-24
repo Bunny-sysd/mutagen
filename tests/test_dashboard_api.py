@@ -24,7 +24,8 @@ def test_dashboard_api_rbac():
         "crashes": [{"args": ["test"], "vuln_type": "buffer_overflow"}],
         "total_tested": 10,
         "patch_code": "void secure() {}",
-        "exploit_code": "import sys"
+        "exploit_code": "import sys",
+        "original_code": "void vuln() {}"
     }
     
     headers_dev = {"Authorization": f"Bearer {dev_token}"}
@@ -39,6 +40,7 @@ def test_dashboard_api_rbac():
     scans = response.json()
     assert len(scans) >= 1
     assert all(s["username"] == "dev_user" for s in scans)
+    assert scans[0]["original_code"] == "void vuln() {}"
     
     # CISO gets all scans
     headers_ciso = {"Authorization": f"Bearer {ciso_token}"}
@@ -50,3 +52,57 @@ def test_dashboard_api_rbac():
     # Unauthorized request (no token)
     response = client.get("/api/scans")
     assert response.status_code == 401
+
+
+def test_dashboard_checklist_rbac_and_flow():
+    from fastapi.testclient import TestClient
+    from mutagen.dashboard.server import app
+    
+    client = TestClient(app)
+    
+    dev_token = generate_jwt(username="dev_user", role="developer")
+    ciso_token = generate_jwt(username="ciso_user", role="ciso")
+    
+    headers_dev = {"Authorization": f"Bearer {dev_token}"}
+    headers_ciso = {"Authorization": f"Bearer {ciso_token}"}
+    
+    # 1. Test GET /api/checklist
+    response = client.get("/api/checklist", headers=headers_dev)
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) == 7
+    assert items[0]["id"] == "scope-def"
+    
+    response = client.get("/api/checklist", headers=headers_ciso)
+    assert response.status_code == 200
+    
+    # 2. Test POST /api/checklist/{item_id}
+    # Developer should NOT be allowed to update
+    response = client.post("/api/checklist/env-prep", json={"completed": True}, headers=headers_dev)
+    assert response.status_code == 403
+    
+    # CISO should be allowed to update
+    response = client.post("/api/checklist/env-prep", json={"completed": True}, headers=headers_ciso)
+    assert response.status_code == 200
+    assert response.json()["item"]["completed"] is True
+
+    # 3. Test non-existent item ID
+    response = client.post("/api/checklist/non-existent", json={"completed": True}, headers=headers_ciso)
+    assert response.status_code == 404
+
+
+def test_production_token_endpoint_protection(monkeypatch):
+    # Dynamically inject MUTAGEN_ENV environment variable
+    monkeypatch.setenv("MUTAGEN_ENV", "production")
+    
+    # Also patch server module variables so it registers immediately
+    import mutagen.dashboard.server
+    monkeypatch.setattr(mutagen.dashboard.server, "MUTAGEN_ENV", "production")
+    
+    from fastapi.testclient import TestClient
+    from mutagen.dashboard.server import app
+    
+    client = TestClient(app)
+    response = client.get("/api/token?username=admin_user&role=admin")
+    assert response.status_code == 403
+    assert "disabled in production mode" in response.json()["detail"]

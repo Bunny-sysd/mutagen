@@ -60,7 +60,7 @@ VULN_CAPABILITIES = {
     }
 }
 
-def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = "", webhook_url: str = ""):
+def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = "", webhook_url: str = "", webhook_secret: str = "", webhook_headers: list[str] = None):
     """Save all crash-causing payloads to a JSON report file and generate a premium HTML dashboard."""
     os.makedirs("crashes", exist_ok=True)
 
@@ -587,8 +587,23 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     # Fire webhook if configured
     if webhook_url:
         import requests
+        headers = {"Content-Type": "application/json"}
+        
+        if webhook_headers:
+            for header in webhook_headers:
+                if ":" in header:
+                    key, val = header.split(":", 1)
+                    headers[key.strip()] = val.strip()
+        
+        if webhook_secret:
+            import hmac
+            import hashlib
+            payload_bytes = json.dumps(report, separators=(',', ':')).encode('utf-8')
+            signature = hmac.new(webhook_secret.encode('utf-8'), payload_bytes, hashlib.sha256).hexdigest()
+            headers["X-Mutagen-Signature"] = signature
+            
         try:
-            requests.post(webhook_url, json=report, headers={"Content-Type": "application/json"}, timeout=10)
+            requests.post(webhook_url, json=report, headers=headers, timeout=10)
         except Exception:
             pass
 

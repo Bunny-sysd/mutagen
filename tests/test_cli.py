@@ -150,3 +150,33 @@ def test_cli_ci_mode_ignores_binaries(mock_run_fuzzer, mock_load_env):
             assert not called_kwargs["source_path"].endswith("target.exe")
 
 
+@patch("mutagen.cli.load_env")
+@patch("mutagen.cli.run_fuzzer")
+def test_cli_secure_boundary_validation(mock_run_fuzzer, mock_load_env):
+    """Test that target files outside the workspace are blocked by the security gate."""
+    # 1. Outside target path
+    test_args = ["mutagen", "--target", "../outside_target.c"]
+    
+    with patch("sys.argv", test_args), \
+         patch("os.path.abspath", side_effect=lambda p: "C:\\outside_target.c" if "outside_target" in p else "C:\\mutagen"), \
+         patch("os.path.commonpath", return_value="C:\\"), \
+         patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"}, clear=True):
+         
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+        assert not mock_run_fuzzer.called
+
+    # 2. Inside target path
+    test_args_inside = ["mutagen", "--target", "targets/valid_target.c"]
+    with patch("sys.argv", test_args_inside), \
+         patch("os.path.abspath", side_effect=lambda p: "C:\\mutagen\\targets\\valid_target.c" if "valid_target" in p else "C:\\mutagen"), \
+         patch("os.path.commonpath", return_value="C:\\mutagen"), \
+         patch("os.path.exists", return_value=True), \
+         patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"}, clear=True):
+         
+        main()
+        assert mock_run_fuzzer.called
+
+
+

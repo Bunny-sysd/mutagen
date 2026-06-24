@@ -1,0 +1,1305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mutagen Dashboard — AI Zero-Day Fuzzer</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #09090b;
+            --card-bg: rgba(20, 20, 25, 0.6);
+            --border: rgba(255, 255, 255, 0.08);
+            --text: #f4f4f5;
+            --text-muted: #a1a1aa;
+            --primary: #00ff88;
+            --primary-glow: rgba(0, 255, 136, 0.15);
+            --accent: #00e5ff;
+            --accent-glow: rgba(0, 229, 255, 0.15);
+            --danger: #ef4444;
+            --danger-glow: rgba(239, 68, 68, 0.15);
+            --warn: #f59e0b;
+            --font-sans: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(0, 255, 136, 0.03) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(0, 229, 255, 0.03) 0px, transparent 50%);
+            color: var(--text);
+            font-family: var(--font-sans);
+            min-height: 100vh;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            border-bottom: 1px solid var(--border);
+            background: rgba(9, 9, 11, 0.8);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.25rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            color: var(--primary);
+            text-shadow: 0 0 10px var(--primary-glow);
+        }
+
+        .logo span {
+            color: var(--text);
+        }
+
+        .auth-bar {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .role-badge {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            padding: 0.35rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .role-badge.developer { color: var(--accent); border-color: rgba(0, 229, 255, 0.3); }
+        .role-badge.ciso { color: var(--warn); border-color: rgba(245, 158, 11, 0.3); }
+        .role-badge.admin { color: var(--primary); border-color: rgba(0, 255, 136, 0.3); }
+
+        .btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: var(--font-sans);
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn:hover {
+            border-color: var(--primary);
+            box-shadow: 0 0 10px var(--primary-glow);
+            color: var(--primary);
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: #000;
+            border: none;
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: #00d470;
+            color: #000;
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+        }
+
+        main {
+            flex: 1;
+            max-width: 1400px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            backdrop-filter: blur(8px);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: var(--border);
+        }
+
+        .stat-card.crashes::before { background: var(--danger); }
+        .stat-card.tested::before { background: var(--accent); }
+        .stat-card.rate::before { background: var(--warn); }
+        .stat-card.scans::before { background: var(--primary); }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .stat-value {
+            font-size: 2.25rem;
+            font-weight: 700;
+            font-family: var(--font-mono);
+        }
+
+        /* Two-Column Layout */
+        .dashboard-layout {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 2rem;
+            align-items: start;
+        }
+
+        @media (max-width: 1024px) {
+            .dashboard-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Left Column: Scan list */
+        .panel {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            backdrop-filter: blur(8px);
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .panel-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .scan-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .scan-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .scan-item:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .scan-item.active {
+            border-color: var(--primary);
+            background: rgba(0, 255, 136, 0.03);
+            box-shadow: inset 0 0 10px rgba(0, 255, 136, 0.02);
+        }
+
+        .scan-target {
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .scan-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* Right Column: Code/Details View */
+        .detail-panel {
+            min-height: 600px;
+        }
+
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .detail-title h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+
+        .detail-title p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .crashes-section {
+            margin-bottom: 1.5rem;
+        }
+
+        .crashes-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .crash-card {
+            background: rgba(239, 68, 68, 0.03);
+            border: 1px solid rgba(239, 68, 68, 0.15);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .crash-type {
+            font-weight: 600;
+            color: var(--danger);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .crash-payload {
+            font-family: var(--font-mono);
+            background: rgba(0, 0, 0, 0.3);
+            padding: 0.75rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+
+        /* Side-by-side patch diff */
+        .diff-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        @media (max-width: 768px) {
+            .diff-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .diff-box {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            background: #09090b;
+        }
+
+        .diff-header {
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid var(--border);
+            padding: 0.6rem 1rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .diff-code {
+            padding: 0.75rem 0;
+            background: #0d0d11;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            line-height: 1.6;
+            overflow: auto;
+            max-height: 450px;
+            min-height: 250px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .diff-line {
+            display: flex;
+            align-items: center;
+            padding: 0 1rem;
+            white-space: pre;
+            width: 100%;
+        }
+
+        .diff-line-num {
+            display: inline-block;
+            width: 2.5rem;
+            color: rgba(255, 255, 255, 0.2);
+            text-align: right;
+            padding-right: 1rem;
+            user-select: none;
+            font-size: 0.75rem;
+        }
+
+        .diff-del {
+            background: rgba(239, 68, 68, 0.12);
+            color: #fca5a5;
+        }
+
+        .diff-add {
+            background: rgba(0, 255, 136, 0.12);
+            color: #a7f3d0;
+        }
+
+        /* Mock Console Overlay */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease;
+        }
+
+        .modal.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-card {
+            background: #0c0c0e;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            width: 100%;
+            max-width: 500px;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .form-group label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .form-control {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            padding: 0.6rem 0.8rem;
+            font-family: var(--font-sans);
+            font-size: 0.9rem;
+            width: 100%;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary);
+        }
+
+        select.form-control {
+            color: var(--text);
+            background-color: #0c0c0e;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 400px;
+            color: var(--text-muted);
+            text-align: center;
+            gap: 1rem;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            color: rgba(255, 255, 255, 0.05);
+        }
+
+        /* Tab Navigation */
+        .tabs-nav {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 0.5rem 1rem;
+            transition: all 0.2s ease;
+            border-bottom: 2px solid transparent;
+            font-family: var(--font-sans);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .tab-btn:hover {
+            color: var(--text);
+        }
+        .tab-btn.active {
+            color: var(--primary);
+            border-bottom: 2px solid var(--primary);
+            text-shadow: 0 0 8px var(--primary-glow);
+        }
+        .main-tab-content {
+            display: none;
+        }
+        .main-tab-content.active {
+            display: block;
+        }
+
+        /* Checklist Panel */
+        .checklist-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .checklist-progress-container {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 2rem;
+            backdrop-filter: blur(8px);
+        }
+        .checklist-progress-bar-bg {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.05);
+            height: 10px;
+            border-radius: 9999px;
+            overflow: hidden;
+            position: relative;
+        }
+        .checklist-progress-bar-fill {
+            background: var(--primary);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+            box-shadow: 0 0 10px var(--primary-glow);
+        }
+        .checklist-progress-text {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+        .checklist-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+        }
+        .checklist-category-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+            backdrop-filter: blur(8px);
+        }
+        .checklist-category-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+        .checklist-item-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            cursor: pointer;
+            padding: 0.25rem 0;
+        }
+        .checklist-checkbox {
+            margin-top: 0.2rem;
+            width: 1.1rem;
+            height: 1.1rem;
+            accent-color: var(--primary);
+            cursor: pointer;
+        }
+        .checklist-checkbox[disabled] {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        .checklist-item-text {
+            font-size: 0.9rem;
+            line-height: 1.4;
+            color: var(--text);
+            transition: color 0.2s ease;
+        }
+        .checklist-item-row.completed .checklist-item-text {
+            color: var(--text-muted);
+            text-decoration: line-through;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-container">
+            <div class="logo">
+                🧬 Mutagen <span>Dashboard</span>
+            </div>
+            <div class="auth-bar">
+                <span id="role-display" class="role-badge developer">Developer</span>
+                <span id="username-display" style="font-size: 0.85rem; font-weight: 500;">dev_user</span>
+                <button class="btn" id="change-role-btn">Switch Role</button>
+                <button class="btn btn-primary" id="mock-scan-btn">Simulate Scan</button>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div class="stats-grid">
+            <div class="stat-card scans">
+                <div class="stat-label">Total Scans</div>
+                <div id="stat-scans" class="stat-value">0</div>
+            </div>
+            <div class="stat-card tested">
+                <div class="stat-label">Payloads Injected</div>
+                <div id="stat-tested" class="stat-value">0</div>
+            </div>
+            <div class="stat-card crashes">
+                <div class="stat-label">Vulnerabilities Found</div>
+                <div id="stat-crashes" class="stat-value">0</div>
+            </div>
+            <div class="stat-card rate">
+                <div class="stat-label">Exploit Success Rate</div>
+                <div id="stat-rate" class="stat-value">0%</div>
+            </div>
+        </div>
+
+        <!-- Navigation Tab Bar -->
+        <div class="tabs-nav">
+            <button class="tab-btn active" id="tab-btn-targets">🧬 Fuzzing Targets</button>
+            <button class="tab-btn" id="tab-btn-checklist">📋 Pentest Checklist</button>
+        </div>
+
+        <div id="targets-tab" class="main-tab-content active">
+            <div class="dashboard-layout">
+                <div class="panel">
+                <div class="panel-title">
+                    <span>Recent Targets</span>
+                    <button class="btn" id="refresh-btn" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Refresh</button>
+                </div>
+                <div class="scan-list" id="scans-container">
+                    <!-- Scan items populated dynamically -->
+                </div>
+            </div>
+
+            <div class="panel detail-panel" id="detail-container">
+                <div class="empty-state" id="empty-state">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    <p>Select a target scan on the left to review vulnerability details and AI patches.</p>
+                </div>
+
+                <div id="detail-content" style="display: none;">
+                    <div class="detail-header">
+                        <div class="detail-title">
+                            <h2 id="detail-target">target.c</h2>
+                            <p>Submitted by <span id="detail-owner" style="font-weight: 600;">dev_user</span> (<span id="detail-role">developer</span>)</p>
+                        </div>
+                        <div id="detail-stats" style="text-align: right;">
+                            <div style="font-size: 1.25rem; font-weight: 700; color: var(--danger);" id="detail-crash-count">0 Crashes</div>
+                            <div style="font-size: 0.8rem; color: var(--text-muted);" id="detail-tested-count">Tested 0 payloads</div>
+                        </div>
+                    </div>
+
+                    <div class="crashes-section">
+                        <h3 style="margin-bottom: 0.75rem; font-size: 1rem; font-weight: 600;">Crashing Vulnerability Vectors</h3>
+                        <div class="crashes-list" id="detail-crashes-list">
+                            <!-- Crashes populated dynamically -->
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 1.5rem;">
+                        <h3 style="margin-bottom: 0.75rem; font-size: 1rem; font-weight: 600;">AI Remediation & Exploit PoC</h3>
+                        <div class="tabs-nav" style="margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; display: flex; gap: 1rem;">
+                            <button class="tab-btn active" id="detail-tab-btn-diff" style="font-size: 0.85rem; padding: 0.4rem 0.8rem;">🔍 Code Comparison (Diff)</button>
+                            <button class="tab-btn" id="detail-tab-btn-exploit" style="font-size: 0.85rem; padding: 0.4rem 0.8rem;">🐍 Proof of Concept Exploit</button>
+                        </div>
+
+                        <div id="detail-tab-diff" class="detail-tab-content active">
+                            <div class="diff-container">
+                                <div class="diff-box">
+                                    <div class="diff-header">
+                                        <span>Original Source Code</span>
+                                        <span style="color: var(--danger);">Vulnerable</span>
+                                    </div>
+                                    <div class="diff-code" id="detail-diff-original"></div>
+                                </div>
+                                <div class="diff-box">
+                                    <div class="diff-header">
+                                        <span>AI Secure Patch</span>
+                                        <span style="color: var(--primary);">Mitigated</span>
+                                    </div>
+                                    <div class="diff-code" id="detail-diff-patched"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="detail-tab-exploit" class="detail-tab-content" style="display: none;">
+                            <div class="diff-box">
+                                <div class="diff-header">
+                                    <span>Proof of Concept Exploit</span>
+                                    <span style="color: var(--accent);">Python PoC</span>
+                                </div>
+                                <div class="diff-code" id="detail-exploit"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div> <!-- End of targets-tab -->
+
+        <div id="checklist-tab" class="main-tab-content">
+            <div class="checklist-container">
+                <div class="checklist-progress-container">
+                    <div style="display:flex; flex-direction:column; gap:0.25rem;">
+                        <span class="stat-label">Overall Readiness Progress</span>
+                        <h3 id="checklist-progress-ratio" style="font-size:1.5rem; font-weight:700;">0/7 completed</h3>
+                    </div>
+                    <div class="checklist-progress-bar-bg">
+                        <div class="checklist-progress-bar-fill" id="checklist-progress-fill"></div>
+                    </div>
+                    <div class="checklist-progress-text" id="checklist-progress-pct">0%</div>
+                </div>
+
+                <div class="checklist-grid" id="checklist-grid-container">
+                    <!-- Category groups populated dynamically -->
+                </div>
+            </div>
+        </div> <!-- End of checklist-tab -->
+    </main>
+
+    <!-- Switch Role Modal -->
+    <div class="modal" id="role-modal">
+        <div class="modal-card">
+            <h3 style="font-size: 1.25rem; font-weight: 700;">Switch User Identity</h3>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: -0.75rem;">Simulate how role-based access control filters scans dynamically.</p>
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" class="form-control" id="modal-username" value="dev_user">
+            </div>
+            <div class="form-group">
+                <label>RBAC Role</label>
+                <select class="form-control" id="modal-role">
+                    <option value="developer">Developer (Views only their own scans)</option>
+                    <option value="ciso">CISO (Views all scans)</option>
+                    <option value="admin">Administrator (Views all scans + full access)</option>
+                </select>
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 0.5rem;">
+                <button class="btn" id="modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="modal-save">Switch Identity</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Simulate Scan Modal -->
+    <div class="modal" id="scan-modal">
+        <div class="modal-card">
+            <h3 style="font-size: 1.25rem; font-weight: 700;">Simulate Fuzzing Scan</h3>
+            <div class="form-group">
+                <label>Target File Name</label>
+                <input type="text" class="form-control" id="scan-target" value="targets/01_buffer_overflow.c">
+            </div>
+            <div class="form-group">
+                <label>Vulnerability Type</label>
+                <select class="form-control" id="scan-vuln-type">
+                    <option value="buffer_overflow">Buffer Overflow (CWE-120)</option>
+                    <option value="format_string">Format String Injection (CWE-134)</option>
+                    <option value="integer_overflow">Integer Overflow (CWE-190)</option>
+                    <option value="use_after_free">Use After Free (CWE-416)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Crashing Args / Payload</label>
+                <input type="text" class="form-control" id="scan-args" value="A * 260">
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 1rem; margin-top: 0.5rem;">
+                <button class="btn" id="scan-cancel">Cancel</button>
+                <button class="btn btn-primary" id="scan-submit">Trigger Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // HTML entity escape helper to prevent DOM XSS
+        function escapeHTML(str) {
+            if (!str) return '';
+            return str.toString()
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        // Custom API Error Class
+        class ApiError extends Error {
+            constructor(message, status, payload = null) {
+                super(message);
+                this.name = "ApiError";
+                this.status = status;
+                this.payload = payload;
+            }
+        }
+
+        // Generic API Client with error normalization
+        const apiClient = async (url, options = {}) => {
+            const defaultHeaders = { "Content-Type": "application/json" };
+            const headers = options.headers 
+                ? { ...defaultHeaders, ...options.headers }
+                : defaultHeaders;
+
+            const res = await fetch(url, { ...options, headers });
+
+            if (!res.ok) {
+                let payload = null;
+                try {
+                    payload = await res.json();
+                } catch (_) {}
+
+                throw new ApiError(
+                    payload?.detail || payload?.message || "Request failed",
+                    res.status,
+                    payload
+                );
+            }
+
+            if (res.status === 204) return null;
+            const text = await res.text();
+            return text ? JSON.parse(text) : null;
+        };
+
+        // In-memory application state
+        let currentToken = '';
+        let currentUser = { username: 'dev_user', role: 'developer' };
+        
+        // Active AbortControllers to prevent race conditions on dynamic fetches
+        const activeControllers = {
+            scans: null,
+            token: null
+        };
+
+        // DOM elements
+        const roleDisplay = document.getElementById('role-display');
+        const usernameDisplay = document.getElementById('username-display');
+        const changeRoleBtn = document.getElementById('change-role-btn');
+        const mockScanBtn = document.getElementById('mock-scan-btn');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const scansContainer = document.getElementById('scans-container');
+        
+        const emptyState = document.getElementById('empty-state');
+        const detailContent = document.getElementById('detail-content');
+        const detailTarget = document.getElementById('detail-target');
+        const detailOwner = document.getElementById('detail-owner');
+        const detailRole = document.getElementById('detail-role');
+        const detailCrashCount = document.getElementById('detail-crash-count');
+        const detailTestedCount = document.getElementById('detail-tested-count');
+        const detailCrashesList = document.getElementById('detail-crashes-list');
+        const detailDiffOriginal = document.getElementById('detail-diff-original');
+        const detailDiffPatched = document.getElementById('detail-diff-patched');
+        const detailTabBtnDiff = document.getElementById('detail-tab-btn-diff');
+        const detailTabBtnExploit = document.getElementById('detail-tab-btn-exploit');
+        const detailTabDiff = document.getElementById('detail-tab-diff');
+        const detailTabExploit = document.getElementById('detail-tab-exploit');
+        const detailExploit = document.getElementById('detail-exploit');
+
+        const roleModal = document.getElementById('role-modal');
+        const modalUsername = document.getElementById('modal-username');
+        const modalRole = document.getElementById('modal-role');
+        const modalCancel = document.getElementById('modal-cancel');
+        const modalSave = document.getElementById('modal-save');
+
+        const scanModal = document.getElementById('scan-modal');
+        const scanTarget = document.getElementById('scan-target');
+        const scanVulnType = document.getElementById('scan-vuln-type');
+        const scanArgs = document.getElementById('scan-args');
+        const scanCancel = document.getElementById('scan-cancel');
+        const scanSubmit = document.getElementById('scan-submit');
+
+        // Stats elements
+        const statScans = document.getElementById('stat-scans');
+        const statTested = document.getElementById('stat-tested');
+        const statCrashes = document.getElementById('stat-crashes');
+        const statRate = document.getElementById('stat-rate');
+
+        // Global error reporting toast banner
+        function showError(message) {
+            let banner = document.getElementById('error-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'error-banner';
+                banner.style.cssText = "background:rgba(239,68,68,0.1); border:1px solid var(--danger); border-radius:8px; padding:1rem; color:var(--danger); font-size:0.9rem; margin-bottom:1.5rem; display:none; font-weight:500;";
+                const main = document.querySelector('main');
+                main.insertBefore(banner, main.firstChild);
+            }
+            banner.textContent = `Error: ${message}`;
+            banner.style.display = 'block';
+            setTimeout(() => {
+                banner.style.display = 'none';
+            }, 5000);
+        }
+
+        // Helper to sign mock JWT locally, using AbortController for race safety
+        async function fetchToken(username, role) {
+            // Cancel any in-flight token request
+            activeControllers.token?.abort();
+            activeControllers.token = new AbortController();
+
+            try {
+                const data = await apiClient(`/api/token?username=${username}&role=${role}`, {
+                    signal: activeControllers.token.signal
+                });
+                return data.token;
+            } catch (err) {
+                if (err.name === 'AbortError') return '';
+                showError(`Failed to fetch JWT token: ${err.message}`);
+                return '';
+            }
+        }
+
+        async function initAuth() {
+            currentToken = await fetchToken(currentUser.username, currentUser.role);
+            roleDisplay.className = `role-badge ${currentUser.role}`;
+            roleDisplay.textContent = currentUser.role;
+            usernameDisplay.textContent = currentUser.username;
+            
+            if (document.getElementById('checklist-tab').classList.contains('active')) {
+                loadChecklist();
+            } else {
+                loadScans();
+            }
+        }
+
+        // Load scans with AbortController to handle race condition on rapid clicks/switches
+        async function loadScans() {
+            activeControllers.scans?.abort();
+            activeControllers.scans = new AbortController();
+
+            try {
+                scansContainer.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem; padding: 1rem; text-align: center;">Loading scans...</div>`;
+                
+                const scans = await apiClient('/api/scans', {
+                    headers: { 'Authorization': `Bearer ${currentToken}` },
+                    signal: activeControllers.scans.signal
+                });
+
+                renderScans(scans);
+                updateStats(scans);
+            } catch (err) {
+                if (err.name === 'AbortError') return;
+                
+                if (err.status === 401 || err.status === 403) {
+                    scansContainer.innerHTML = `<div style="color: var(--danger); font-size: 0.85rem; padding: 1rem; text-align: center;">RBAC Authentication Failed.</div>`;
+                } else {
+                    scansContainer.innerHTML = `<div style="color: var(--danger); font-size: 0.85rem; padding: 1rem; text-align: center;">Error loading data.</div>`;
+                    showError(err.message);
+                }
+            }
+        }
+
+        function renderScans(scans) {
+            scansContainer.innerHTML = '';
+            if (!scans || scans.length === 0) {
+                scansContainer.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem; padding: 1rem; text-align: center;">No scans recorded.</div>`;
+                return;
+            }
+            scans.forEach(scan => {
+                const item = document.createElement('div');
+                item.className = 'scan-item';
+                item.innerHTML = `
+                    <div class="scan-target">${escapeHTML(scan.target)}</div>
+                    <div class="scan-meta">
+                        <span>${scan.crashes.length} crash(es)</span>
+                        <span>${escapeHTML(scan.username)}</span>
+                    </div>
+                `;
+                item.addEventListener('click', () => selectScan(scan, item));
+                scansContainer.appendChild(item);
+            });
+        }
+
+        function selectScan(scan, element) {
+            document.querySelectorAll('.scan-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+
+            emptyState.style.display = 'none';
+            detailContent.style.display = 'block';
+
+            detailTarget.textContent = scan.target;
+            detailOwner.textContent = scan.username;
+            detailRole.textContent = scan.role || 'developer';
+            detailCrashCount.textContent = `${scan.crashes.length} Crashes`;
+            detailTestedCount.textContent = `Tested ${scan.total_tested} payloads`;
+
+            detailCrashesList.innerHTML = '';
+            scan.crashes.forEach(crash => {
+                const card = document.createElement('div');
+                card.className = 'crash-card';
+                card.innerHTML = `
+                    <div class="crash-type">⚠️ ${escapeHTML(crash.vuln_type.toUpperCase())}</div>
+                    <div class="crash-payload">Payload args: ${escapeHTML(JSON.stringify(crash.args))}</div>
+                `;
+                detailCrashesList.appendChild(card);
+            });
+
+            detailExploit.textContent = scan.exploit_code || '# No Python PoC exploit generated.';
+
+            // Render side-by-side diff
+            renderCodeDiff(scan.original_code || '', scan.patch_code || '');
+        }
+
+        // Simple line-based diff rendering engine
+        function renderCodeDiff(original, patched) {
+            detailDiffOriginal.innerHTML = '';
+            detailDiffPatched.innerHTML = '';
+
+            const origLines = original ? original.split('\n') : [];
+            const patchLines = patched ? patched.split('\n') : [];
+
+            // A basic side-by-side diff renderer for display
+            // Matches lines that exist in one but not the other to apply add/del highlights
+            const maxLines = Math.max(origLines.length, patchLines.length);
+
+            for (let i = 0; i < maxLines; i++) {
+                const oLine = origLines[i] !== undefined ? origLines[i] : null;
+                const pLine = patchLines[i] !== undefined ? patchLines[i] : null;
+
+                const origEl = document.createElement('div');
+                origEl.className = 'diff-line';
+                
+                const patchEl = document.createElement('div');
+                patchEl.className = 'diff-line';
+
+                if (oLine !== null) {
+                    origEl.innerHTML = `<span class="diff-line-num">${i + 1}</span><span>${escapeHTML(oLine)}</span>`;
+                    // Heuristic: check if this line is changed / deleted
+                    if (pLine !== null && oLine !== pLine) {
+                        origEl.classList.add('diff-del');
+                    } else if (pLine === null) {
+                        origEl.classList.add('diff-del');
+                    }
+                } else {
+                    origEl.innerHTML = `<span class="diff-line-num"></span><span></span>`;
+                }
+
+                if (pLine !== null) {
+                    patchEl.innerHTML = `<span class="diff-line-num">${i + 1}</span><span>${escapeHTML(pLine)}</span>`;
+                    // Heuristic: check if this line is changed / added
+                    if (oLine !== null && oLine !== pLine) {
+                        patchEl.classList.add('diff-add');
+                    } else if (oLine === null) {
+                        patchEl.classList.add('diff-add');
+                    }
+                } else {
+                    patchEl.innerHTML = `<span class="diff-line-num"></span><span></span>`;
+                }
+
+                detailDiffOriginal.appendChild(origEl);
+                detailDiffPatched.appendChild(patchEl);
+            }
+        }
+
+        function updateStats(scans) {
+            let totalTested = 0;
+            let totalCrashes = 0;
+            if (scans && scans.length) {
+                scans.forEach(s => {
+                    totalTested += s.total_tested;
+                    totalCrashes += s.crashes.length;
+                });
+            }
+            statScans.textContent = scans ? scans.length : 0;
+            statTested.textContent = totalTested;
+            statCrashes.textContent = totalCrashes;
+            statRate.textContent = totalTested ? `${((totalCrashes / totalTested) * 100).toFixed(1)}%` : '0%';
+        }
+
+        // Event Listeners
+        changeRoleBtn.addEventListener('click', () => {
+            modalUsername.value = currentUser.username;
+            modalRole.value = currentUser.role;
+            roleModal.classList.add('open');
+        });
+
+        modalCancel.addEventListener('click', () => roleModal.classList.remove('open'));
+        
+        modalSave.addEventListener('click', async () => {
+            currentUser.username = modalUsername.value;
+            currentUser.role = modalRole.value;
+            roleModal.classList.remove('open');
+            await initAuth();
+        });
+
+        mockScanBtn.addEventListener('click', () => scanModal.classList.add('open'));
+        scanCancel.addEventListener('click', () => scanModal.classList.remove('open'));
+
+        scanSubmit.addEventListener('click', async () => {
+            const target = scanTarget.value;
+            const vulnType = scanVulnType.value;
+            const args = [scanArgs.value];
+
+            const report = {
+                target: target,
+                crashes: [{ args: args, vuln_type: vulnType }],
+                total_tested: 12,
+                patch_code: `// Secure fix for ${vulnType}\nvoid vulnerability_fn(char *src) {\n    // FIXED: bounds checking added\n    if (strlen(src) >= 16) return;\n    strcpy(dest, src);\n}`,
+                exploit_code: `# Standalone PoC for ${vulnType}\nimport sys\n# exploit payload code...`,
+                original_code: `// Vulnerable code for ${vulnType}\nvoid vulnerability_fn(char *src) {\n    // TODO: bounds checking\n    strcpy(dest, src);\n}`
+            };
+
+            try {
+                await apiClient('/api/scans', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${currentToken}` },
+                    body: JSON.stringify(report)
+                });
+                scanModal.classList.remove('open');
+                loadScans();
+            } catch (err) {
+                showError(`Failed to submit scan: ${err.message}`);
+            }
+        });
+
+        refreshBtn.addEventListener('click', loadScans);
+
+        // Tab switching logic
+        function switchMainTab(tabId) {
+            document.querySelectorAll('.main-tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById(tabId).classList.add('active');
+            if (tabId === 'targets-tab') {
+                document.getElementById('tab-btn-targets').classList.add('active');
+                loadScans();
+            } else if (tabId === 'checklist-tab') {
+                document.getElementById('tab-btn-checklist').classList.add('active');
+                loadChecklist();
+            }
+        }
+
+        // Global checklist container elements
+        const checklistGridContainer = document.getElementById('checklist-grid-container');
+        const checklistProgressRatio = document.getElementById('checklist-progress-ratio');
+        const checklistProgressFill = document.getElementById('checklist-progress-fill');
+        const checklistProgressPct = document.getElementById('checklist-progress-pct');
+
+        // Add event listeners for tab buttons
+        document.getElementById('tab-btn-targets').addEventListener('click', () => switchMainTab('targets-tab'));
+        document.getElementById('tab-btn-checklist').addEventListener('click', () => switchMainTab('checklist-tab'));
+
+        // Checklist API integration
+        async function loadChecklist() {
+            try {
+                const items = await apiClient('/api/checklist', {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                renderChecklist(items);
+            } catch (err) {
+                showError(`Failed to load checklist: ${err.message}`);
+            }
+        }
+
+        function renderChecklist(items) {
+            checklistGridContainer.innerHTML = '';
+            if (!items || items.length === 0) {
+                checklistGridContainer.innerHTML = `<div style="color: var(--text-muted); font-size: 0.85rem; padding: 1rem; text-align: center;">No checklist items found.</div>`;
+                return;
+            }
+
+            // Group items by category
+            const categories = {};
+            items.forEach(item => {
+                if (!categories[item.category]) {
+                    categories[item.category] = [];
+                }
+                categories[item.category].push(item);
+            });
+
+            // Calculate progress stats
+            const total = items.length;
+            const completed = items.filter(i => i.completed).length;
+            const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+            checklistProgressRatio.textContent = `${completed}/${total} completed`;
+            checklistProgressFill.style.width = `${pct}%`;
+            checklistProgressPct.textContent = `${pct}%`;
+
+            // Draw category cards
+            Object.keys(categories).forEach(cat => {
+                const card = document.createElement('div');
+                card.className = 'checklist-category-card';
+                
+                const title = document.createElement('div');
+                title.className = 'checklist-category-title';
+                title.textContent = cat;
+                card.appendChild(title);
+
+                categories[cat].forEach(item => {
+                    const row = document.createElement('div');
+                    row.className = `checklist-item-row ${item.completed ? 'completed' : ''}`;
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.className = 'checklist-checkbox';
+                    checkbox.checked = item.completed;
+                    
+                    // Only CISO and Admin can toggle checklist checkboxes
+                    const isAuthorized = (currentUser.role === 'ciso' || currentUser.role === 'admin');
+                    if (!isAuthorized) {
+                        checkbox.disabled = true;
+                    }
+
+                    checkbox.addEventListener('change', async (e) => {
+                        e.stopPropagation();
+                        await toggleChecklistItem(item.id, checkbox.checked);
+                    });
+
+                    // Row click toggles if authorized
+                    row.addEventListener('click', async () => {
+                        if (isAuthorized) {
+                            checkbox.checked = !checkbox.checked;
+                            await toggleChecklistItem(item.id, checkbox.checked);
+                        }
+                    });
+
+                    const textSpan = document.createElement('span');
+                    textSpan.className = 'checklist-item-text';
+                    textSpan.textContent = item.task;
+
+                    row.appendChild(checkbox);
+                    row.appendChild(textSpan);
+                    card.appendChild(row);
+                });
+
+                checklistGridContainer.appendChild(card);
+            });
+        }
+
+        async function toggleChecklistItem(itemId, completed) {
+            try {
+                await apiClient(`/api/checklist/${itemId}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${currentToken}` },
+                    body: JSON.stringify({ completed: completed })
+                });
+                loadChecklist();
+            } catch (err) {
+                showError(`Failed to update checklist item: ${err.message}`);
+                loadChecklist(); // reload to revert state
+            }
+        }
+
+        // Detail Tab switching logic
+        detailTabBtnDiff.addEventListener('click', () => {
+            detailTabBtnDiff.classList.add('active');
+            detailTabBtnExploit.classList.remove('active');
+            detailTabDiff.style.display = 'block';
+            detailTabExploit.style.display = 'none';
+        });
+
+        detailTabBtnExploit.addEventListener('click', () => {
+            detailTabBtnExploit.classList.add('active');
+            detailTabBtnDiff.classList.remove('active');
+            detailTabDiff.style.display = 'none';
+            detailTabExploit.style.display = 'block';
+        });
+
+        // Bootstrap application
+        initAuth();
+    </script>
+</body>
+</html>

@@ -31,6 +31,23 @@ When planning updates or debugging errors, cross-reference these core skills:
 - **Skill Reference**: [api-patterns](file:///C:/Users/admin/.gemini/config/skills/api-patterns/SKILL.md) / [simplify-code](file:///C:/Users/admin/.gemini/config/skills/simplify-code/SKILL.md)
 - **Application**: When updating webhook dispatchers in [reporter.py](file:///c:/mutagen/mutagen/reporter.py), enforce authentication validation headers (`--webhook-header`) and SHA-256 HMAC payload signatures.
 
+### 5. Secure Path Boundary Check Policy
+- **Skill Reference**: [security-auditor](file:///C:/Users/admin/.gemini/config/skills/security-auditor/SKILL.md) / [api-security-best-practices](file:///C:/Users/admin/.gemini/config/skills/api-security-best-practices/SKILL.md)
+- **Application**: When checking path containment (e.g. limiting files strictly inside a workspace or sandbox directory), **never** use insecure prefix-based comparisons like `startswith()`. Always use segment-aware logic via `os.path.commonpath`. On Windows, normalize path casing to ensure case-insensitivity:
+  ```python
+  import os
+  abs_target = os.path.abspath(target_file)
+  workspace = os.path.abspath(workspace_dir)
+  try:
+      common = os.path.commonpath([workspace, abs_target])
+      if os.name == 'nt':
+          is_inside = (common.lower() == workspace.lower())
+      else:
+          is_inside = (common == workspace)
+  except ValueError:
+      is_inside = False
+  ```
+
 ---
 
 ## Key Architecture Map

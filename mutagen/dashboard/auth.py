@@ -5,7 +5,11 @@ import json
 import os
 import time
 
-SECRET_KEY = os.environ.get("MUTAGEN_JWT_SECRET", "mutagen_dashboard_super_secret_key_12345")
+import secrets
+
+SECRET_KEY = os.environ.get("MUTAGEN_JWT_SECRET")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_hex(32)
 
 def base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode('utf-8')

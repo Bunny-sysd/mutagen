@@ -70,12 +70,16 @@ def main():
     parser.add_argument("--delivery", default="args", help="Delivery mode: args, stdin, tcp:<port> (default: args)")
     parser.add_argument("--max-patch-retries", type=int, default=3, help="Maximum number of correction iterations for patch generation (default: 3)")
     parser.add_argument("--decompile-all", action="store_true", help="When targeting a binary, decompile ALL functions (slower but comprehensive)")
+    parser.add_argument("--decompiler", default="ghidra", choices=["ghidra", "radare2", "binja"], help="Headless decompiler engine to use (default: ghidra)")
+    parser.add_argument("--decompiler-path", default="", help="Override path to decompiler executable/directory")
     parser.add_argument("--ghidra-path", default=os.environ.get("GHIDRA_INSTALL_DIR", ""), help="Path to Ghidra installation directory (overrides auto-detection)")
     parser.add_argument("--profile", default="legacy-audit", choices=["legacy-audit", "supply-chain", "malware-triage"], help="Security profile for analysis (default: legacy-audit)")
     parser.add_argument("--static-only", action="store_true", help="Enable static-only analysis, skipping dynamic fuzzer execution")
     parser.add_argument("--webhook-url", default="", help="Custom automation webhook endpoint to post scanning payloads to (e.g. n8n, Jira, Slack)")
     parser.add_argument("--sandbox", default="none", choices=["none", "docker"], help="Isolation sandbox engine to execute target binaries in (default: none)")
     parser.add_argument("--coverage", action="store_true", help="Enable coverage-guided hybrid fuzzing (default: False)")
+    parser.add_argument("--webhook-secret", default=os.environ.get("MUTAGEN_WEBHOOK_SECRET", ""), help="Shared secret key to sign webhook payloads using HMAC-SHA256")
+    parser.add_argument("--webhook-header", action="append", default=[], help="Custom header to send with the webhook request (format: Name: Value)")
 
     args = parser.parse_args()
 
@@ -85,6 +89,12 @@ def main():
 
     if not args.target and not args.ci:
         parser.error("one of the arguments -t/--target or --ci is required")
+
+    # Global Security Policy Enforcement: Outgoing webhook integrations MUST be cryptographically signed.
+    if args.webhook_url and not args.webhook_secret:
+        console.print("[red]X Security Error: Outgoing webhook requests must be cryptographically signed under global security policy.[/red]")
+        console.print("[red]  Please provide a secret key using --webhook-secret or set the MUTAGEN_WEBHOOK_SECRET environment variable.[/red]")
+        sys.exit(1)
 
     workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     targets = []
@@ -138,7 +148,20 @@ def main():
     else:
         target_file = args.target
         abs_target_file = os.path.abspath(target_file)
-        if not abs_target_file.startswith(workspace_dir):
+        
+        # Secure boundary check: ensure target_file is strictly inside the workspace directory.
+        # string.startswith can be bypassed (e.g. workspace_dir = 'C:\mutagen', target = 'C:\mutagen_evil\file.c')
+        try:
+            # Resolve common path. On Windows, paths can be mixed-case, so lower them for comparison.
+            common = os.path.commonpath([workspace_dir, abs_target_file])
+            if os.name == 'nt':
+                is_inside = (common.lower() == workspace_dir.lower())
+            else:
+                is_inside = (common == workspace_dir)
+        except ValueError:
+            is_inside = False
+
+        if not is_inside:
             console.print(f"[red]X Security Error: Target file must be inside the Mutagen workspace: {workspace_dir}[/red]")
             sys.exit(1)
 
@@ -206,6 +229,10 @@ def main():
                 webhook_url=args.webhook_url,
                 sandbox=args.sandbox,
                 coverage=args.coverage,
+                webhook_secret=args.webhook_secret,
+                webhook_headers=args.webhook_header,
+                decompiler=args.decompiler,
+                decompiler_path=args.decompiler_path,
             )
             total_crashes += (crashes_found or 0)
             console.print()
@@ -319,6 +346,10 @@ def main():
             webhook_url=args.webhook_url,
             sandbox=args.sandbox,
             coverage=args.coverage,
+            webhook_secret=args.webhook_secret,
+            webhook_headers=args.webhook_header,
+            decompiler=args.decompiler,
+            decompiler_path=args.decompiler_path,
         )
         total_crashes += (crashes_found or 0)
         console.print()
