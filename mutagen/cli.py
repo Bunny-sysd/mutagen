@@ -12,7 +12,7 @@ from mutagen.decompiler import is_binary_target
 
 def is_supported_language(ext: str) -> bool:
     """Returns True if the file extension is a supported source code language."""
-    return ext.lower() in (".c", ".cpp", ".rs", ".go", ".java", ".cs")
+    return ext.lower() in (".c", ".cpp", ".rs", ".go", ".java", ".cs", ".sol", ".html", ".htm", ".js", ".ts", ".css")
 
 
 
@@ -67,7 +67,7 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Enable debug logging to mutagen_debug.log")
     parser.add_argument("--provider", default=os.environ.get("MUTAGEN_PROVIDER", "gemini"), choices=["gemini", "openai", "ollama", "claude"], help="LLM Provider (default: gemini)")
     parser.add_argument("--model", default=os.environ.get("MUTAGEN_MODEL", ""), help="Specific model to use")
-    parser.add_argument("--delivery", default="args", help="Delivery mode: args, stdin, tcp:<port> (default: args)")
+    parser.add_argument("--delivery", default="args", help="Delivery mode: args, stdin, tcp:<port> (stateless), session:stdin, session:tcp:<port> (persistent session) (default: args)")
     parser.add_argument("--max-patch-retries", type=int, default=3, help="Maximum number of correction iterations for patch generation (default: 3)")
     parser.add_argument("--decompile-all", action="store_true", help="When targeting a binary, decompile ALL functions (slower but comprehensive)")
     parser.add_argument("--decompiler", default="ghidra", choices=["ghidra", "radare2", "binja"], help="Headless decompiler engine to use (default: ghidra)")
@@ -80,6 +80,11 @@ def main():
     parser.add_argument("--coverage", action="store_true", help="Enable coverage-guided hybrid fuzzing (default: False)")
     parser.add_argument("--webhook-secret", default=os.environ.get("MUTAGEN_WEBHOOK_SECRET", ""), help="Shared secret key to sign webhook payloads using HMAC-SHA256")
     parser.add_argument("--webhook-header", action="append", default=[], help="Custom header to send with the webhook request (format: Name: Value)")
+    parser.add_argument("--mode", default="pipeline", choices=["pipeline", "agents"], help="Execution mode: pipeline, agents (default: pipeline)")
+    # --- Defects4C benchmark settings ---
+    parser.add_argument("--defects4c", default="", help="Base URL of Defects4C Bug Helper REST API service (e.g. http://localhost:8000)")
+    parser.add_argument("--defects4c-bug-id", default="", help="Defects4C bug ID (e.g. libxml2@a1b2c3d4)")
+    parser.add_argument("--defects4c-mount-dir", default="", help="Shared directory mount where Defects4C repositories are placed")
 
     args = parser.parse_args()
 
@@ -87,8 +92,15 @@ def main():
     if args.profile == "malware-triage":
         args.static_only = True
 
-    if not args.target and not args.ci:
-        parser.error("one of the arguments -t/--target or --ci is required")
+    # If Defects4C mode is active, --target or --ci are not strictly required
+    if not args.defects4c and not args.target and not args.ci:
+        parser.error("one of the arguments -t/--target, --ci or --defects4c is required")
+
+    if args.defects4c:
+        if not args.defects4c_bug_id:
+            parser.error("--defects4c-bug-id is required when using --defects4c")
+        if not args.defects4c_mount_dir:
+            parser.error("--defects4c-mount-dir is required when using --defects4c")
 
     # Global Security Policy Enforcement: Outgoing webhook integrations MUST be cryptographically signed.
     if args.webhook_url and not args.webhook_secret:
@@ -145,6 +157,9 @@ def main():
             console.print(f"  ↳ [dim]{os.path.relpath(f, workspace_dir)}[/dim]")
         console.print()
         targets = c_files
+    elif args.defects4c:
+        # In Defects4C mode, target path will be determined dynamically by reproducing the bug
+        targets = []
     else:
         target_file = args.target
         abs_target_file = os.path.abspath(target_file)
@@ -205,135 +220,13 @@ def main():
 
     # --- GO! -------------------------------------------------------------
     total_crashes = 0
-    for target in targets:
-        # --- BINARY TARGET: Route through decompilation pipeline ---
-        if is_binary_target(target):
-            console.print(f"[bold magenta] Binary Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
-            console.print("[dim]  Mode: Binary Decompilation Analysis[/dim]")
-            crashes_found = run_fuzzer(
-                source_path=target,
-                api_key=api_key,
-                gcc_path="",  # No compiler needed for binaries
-                max_payloads=args.max_payloads,
-                timeout=args.timeout,
-                debug=args.debug,
-                provider=args.provider,
-                model=args.model,
-                delivery_mode=args.delivery,
-                max_patch_retries=args.max_patch_retries,
-                binary_mode=True,
-                decompile_all=args.decompile_all,
-                ghidra_path=args.ghidra_path,
-                profile=args.profile,
-                static_only=args.static_only,
-                webhook_url=args.webhook_url,
-                sandbox=args.sandbox,
-                coverage=args.coverage,
-                webhook_secret=args.webhook_secret,
-                webhook_headers=args.webhook_header,
-                decompiler=args.decompiler,
-                decompiler_path=args.decompiler_path,
-            )
-            total_crashes += (crashes_found or 0)
-            console.print()
-            continue
 
-        # --- SOURCE TARGET: Resolve appropriate compiler ---
-        if target.endswith(".rs"):
-            rustc_path = None
-            rustc_candidates = [
-                os.environ.get("RUSTC_PATH", "rustc"),
-                os.path.join(os.path.expanduser("~"), ".cargo", "bin", "rustc.exe"),
-                os.path.join(os.path.expanduser("~"), ".cargo", "bin", "rustc"),
-                os.path.expanduser("~/.cargo/bin/rustc")
-            ]
-            for candidate in rustc_candidates:
-                if candidate == "rustc" or os.path.exists(candidate):
-                    rustc_path = candidate
-                    break
-            if not rustc_path:
-                if "pytest" in sys.modules:
-                    rustc_path = "rustc"
-                else:
-                    console.print("[red]X rustc not found. Please install the Rust toolchain from https://rustup.rs/[/red]")
-                    sys.exit(1)
-            compiler_to_use = rustc_path
-            console.print(f"[dim]Using Rust compiler: {compiler_to_use}[/dim]")
-        elif target.endswith(".go"):
-            go_path = None
-            go_candidates = [
-                os.environ.get("GO_PATH", "go"),
-                r"C:\Program Files\Go\bin\go.exe",
-                "/usr/local/go/bin/go"
-            ]
-            for candidate in go_candidates:
-                if candidate == "go" or os.path.exists(candidate):
-                    go_path = candidate
-                    break
-            if not go_path:
-                if "pytest" in sys.modules:
-                    go_path = "go"
-                else:
-                    console.print("[red]X go compiler not found. Please install Go.[/red]")
-                    sys.exit(1)
-            compiler_to_use = go_path
-            console.print(f"[dim]Using Go compiler: {compiler_to_use}[/dim]")
-        elif target.endswith(".java"):
-            javac_path = None
-            import glob
-            javac_candidates = [
-                os.environ.get("JAVAC_PATH", "javac"),
-                "/usr/bin/javac"
-            ]
-            jdk_paths = glob.glob(r"C:\Program Files\Java\jdk-*\bin\javac.exe")
-            if jdk_paths:
-                javac_candidates.extend(jdk_paths)
-            for candidate in javac_candidates:
-                if candidate == "javac" or os.path.exists(candidate):
-                    javac_path = candidate
-                    break
-            if not javac_path:
-                if "pytest" in sys.modules:
-                    javac_path = "javac"
-                else:
-                    console.print("[red]X javac not found. Please install JDK.[/red]")
-                    sys.exit(1)
-            compiler_to_use = javac_path
-            console.print(f"[dim]Using Java compiler: {compiler_to_use}[/dim]")
-        elif target.endswith(".cs"):
-            csc_path = None
-            import glob
-            csc_candidates = [
-                os.environ.get("CSC_PATH", "csc"),
-                "/usr/bin/csc"
-            ]
-            net_framework_cscs = glob.glob(r"C:\Windows\Microsoft.NET\Framework*\v*\csc.exe")
-            if net_framework_cscs:
-                csc_candidates.extend(net_framework_cscs)
-            for candidate in csc_candidates:
-                if candidate == "csc" or os.path.exists(candidate):
-                    csc_path = candidate
-                    break
-            if not csc_path:
-                if "pytest" in sys.modules:
-                    csc_path = "csc"
-                else:
-                    console.print("[red]X csc not found. Please install .NET or build tools.[/red]")
-                    sys.exit(1)
-            compiler_to_use = csc_path
-            console.print(f"[dim]Using C# compiler: {compiler_to_use}[/dim]")
-        else:
-            if not gcc_path:
-                console.print("[red]X GCC not found. Install MSYS2 or MinGW.[/red]")
-                sys.exit(1)
-            compiler_to_use = gcc_path
-            console.print(f"[dim]Using GCC C/C++ compiler: {compiler_to_use}[/dim]")
-
-        console.print(f"[bold magenta] Fuzzing Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
+    if args.defects4c:
+        console.print(f"[bold magenta] Defects4C Target Bug: {args.defects4c_bug_id}[/bold magenta]")
         crashes_found = run_fuzzer(
-            source_path=target,
+            source_path=args.defects4c_bug_id,  # Passes bug_id in place of source_path
             api_key=api_key,
-            gcc_path=compiler_to_use,
+            gcc_path="",  # Compilation done via Defects4C REST service
             max_payloads=args.max_payloads,
             timeout=args.timeout,
             debug=args.debug,
@@ -350,9 +243,161 @@ def main():
             webhook_headers=args.webhook_header,
             decompiler=args.decompiler,
             decompiler_path=args.decompiler_path,
+            # Defects4C specific params
+            defects4c_url=args.defects4c,
+            defects4c_mount_dir=args.defects4c_mount_dir,
         )
         total_crashes += (crashes_found or 0)
-        console.print()
+    else:
+        for target in targets:
+            # --- BINARY TARGET: Route through decompilation pipeline ---
+            if is_binary_target(target):
+                console.print(f"[bold magenta] Binary Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
+                console.print("[dim]  Mode: Binary Decompilation Analysis[/dim]")
+                crashes_found = run_fuzzer(
+                    source_path=target,
+                    api_key=api_key,
+                    gcc_path="",  # No compiler needed for binaries
+                    max_payloads=args.max_payloads,
+                    timeout=args.timeout,
+                    debug=args.debug,
+                    provider=args.provider,
+                    model=args.model,
+                    delivery_mode=args.delivery,
+                    max_patch_retries=args.max_patch_retries,
+                    binary_mode=True,
+                    decompile_all=args.decompile_all,
+                    ghidra_path=args.ghidra_path,
+                    profile=args.profile,
+                    static_only=args.static_only,
+                    webhook_url=args.webhook_url,
+                    sandbox=args.sandbox,
+                    coverage=args.coverage,
+                    webhook_secret=args.webhook_secret,
+                    webhook_headers=args.webhook_header,
+                    decompiler=args.decompiler,
+                    decompiler_path=args.decompiler_path,
+                )
+                total_crashes += (crashes_found or 0)
+                console.print()
+                continue
+
+            # --- SOURCE TARGET: Route compiler matching and fuzz ---
+            if target.endswith(".rs"):
+                rustc_path = None
+                rustc_candidates = [
+                    os.environ.get("RUSTC_PATH", "rustc"),
+                    os.path.join(os.path.expanduser("~"), ".cargo", "bin", "rustc.exe"),
+                    os.path.join(os.path.expanduser("~"), ".cargo", "bin", "rustc"),
+                    os.path.expanduser("~/.cargo/bin/rustc")
+                ]
+                for candidate in rustc_candidates:
+                    if candidate == "rustc" or os.path.exists(candidate):
+                        rustc_path = candidate
+                        break
+                if not rustc_path:
+                    if "pytest" in sys.modules:
+                        rustc_path = "rustc"
+                    else:
+                        console.print("[red]X rustc not found. Please install the Rust toolchain from https://rustup.rs/[/red]")
+                        sys.exit(1)
+                compiler_to_use = rustc_path
+                console.print(f"[dim]Using Rust compiler: {compiler_to_use}[/dim]")
+            elif target.endswith(".go"):
+                go_path = None
+                go_candidates = [
+                    os.environ.get("GO_PATH", "go"),
+                    r"C:\Program Files\Go\bin\go.exe",
+                    "/usr/local/go/bin/go"
+                ]
+                for candidate in go_candidates:
+                    if candidate == "go" or os.path.exists(candidate):
+                        go_path = candidate
+                        break
+                if not go_path:
+                    if "pytest" in sys.modules:
+                        go_path = "go"
+                    else:
+                        console.print("[red]X go compiler not found. Please install Go.[/red]")
+                        sys.exit(1)
+                compiler_to_use = go_path
+                console.print(f"[dim]Using Go compiler: {compiler_to_use}[/dim]")
+            elif target.endswith(".java"):
+                javac_path = None
+                import glob
+                javac_candidates = [
+                    os.environ.get("JAVAC_PATH", "javac"),
+                    "/usr/bin/javac"
+                ]
+                jdk_paths = glob.glob(r"C:\Program Files\Java\jdk-*\bin\javac.exe")
+                if jdk_paths:
+                    javac_candidates.extend(jdk_paths)
+                for candidate in javac_candidates:
+                    if candidate == "javac" or os.path.exists(candidate):
+                        javac_path = candidate
+                        break
+                if not javac_path:
+                    if "pytest" in sys.modules:
+                        javac_path = "javac"
+                    else:
+                        console.print("[red]X javac not found. Please install JDK.[/red]")
+                        sys.exit(1)
+                compiler_to_use = javac_path
+                console.print(f"[dim]Using Java compiler: {compiler_to_use}[/dim]")
+            elif target.endswith(".cs"):
+                csc_path = None
+                import glob
+                csc_candidates = [
+                    os.environ.get("CSC_PATH", "csc"),
+                    "/usr/bin/csc"
+                ]
+                net_framework_cscs = glob.glob(r"C:\Windows\Microsoft.NET\Framework*\v*\csc.exe")
+                if net_framework_cscs:
+                    csc_candidates.extend(net_framework_cscs)
+                for candidate in csc_candidates:
+                    if candidate == "csc" or os.name == 'nt' and os.path.exists(candidate):
+                        csc_path = candidate
+                        break
+                if not csc_path:
+                    if "pytest" in sys.modules:
+                        csc_path = "csc"
+                    else:
+                        console.print("[red]X csc not found. Please install .NET or build tools.[/red]")
+                        sys.exit(1)
+                compiler_to_use = csc_path
+                console.print(f"[dim]Using C# compiler: {compiler_to_use}[/dim]")
+            else:
+                if not gcc_path:
+                    console.print("[red]X GCC not found. Install MSYS2 or MinGW.[/red]")
+                    sys.exit(1)
+                compiler_to_use = gcc_path
+                console.print(f"[dim]Using GCC C/C++ compiler: {compiler_to_use}[/dim]")
+
+            console.print(f"[bold magenta] Fuzzing Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
+            crashes_found = run_fuzzer(
+                source_path=target,
+                api_key=api_key,
+                gcc_path=compiler_to_use,
+                max_payloads=args.max_payloads,
+                timeout=args.timeout,
+                debug=args.debug,
+                provider=args.provider,
+                model=args.model,
+                delivery_mode=args.delivery,
+                max_patch_retries=args.max_patch_retries,
+                profile=args.profile,
+                static_only=args.static_only,
+                webhook_url=args.webhook_url,
+                sandbox=args.sandbox,
+                coverage=args.coverage,
+                webhook_secret=args.webhook_secret,
+                webhook_headers=args.webhook_header,
+                decompiler=args.decompiler,
+                decompiler_path=args.decompiler_path,
+                mode=args.mode,
+            )
+            total_crashes += (crashes_found or 0)
+            console.print()
 
     if args.ci and total_crashes > 0:
         console.print(f"[bold red]X CI/CD Scan Failed: Found {total_crashes} unique vulnerability crash(es)![/bold red]")

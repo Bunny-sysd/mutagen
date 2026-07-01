@@ -180,6 +180,9 @@ mutagen --target targets/01_buffer_overflow.c
 # Fuzz a compiled binary (requires Ghidra)
 mutagen --target path/to/binary.exe --binary
 
+# Run the fuzzer in Multi-Agent Swarm Mode (recommends: agents mode)
+mutagen --target targets/22_asyn_signal_uaf.c --mode agents
+
 # Run with more AI payloads
 python -m mutagen --target targets/01_buffer_overflow.c --max-payloads 5
 

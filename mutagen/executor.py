@@ -61,6 +61,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         exe_name_no_ext = os.path.splitext(exe_name)[0]
         placeholders = {
             "program", "./program", "a.out", "./a.out", "target", "./target",
+            "fuzzer_target", "./fuzzer_target", "fuzzer", "./fuzzer",
             exe_name, f"./{exe_name}", exe_name_no_ext, f"./{exe_name_no_ext}"
         }
         if first_arg in placeholders:
@@ -191,6 +192,8 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             # Windows NTSTATUS codes
             if result.returncode in (-1073741819, 3221225477):
                 crash_type = "ACCESS_VIOLATION (Memory Corruption!)"
+            elif result.returncode in (-1073740940, 3221226356):
+                crash_type = "HEAP_CORRUPTION (Double Free / Heap Corruption!)"
             elif result.returncode == -1073741676:
                 crash_type = "STACK_OVERFLOW"
             elif result.returncode == -1073741571:

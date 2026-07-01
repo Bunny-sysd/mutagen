@@ -1,0 +1,82 @@
+from mutagen.agents.base import BaseAgent
+from mutagen.state import ProgramContext
+from mutagen.ast_validator import validate_c_source
+from mutagen.compiler import compile_target
+from mutagen.executor import execute_payload
+import os
+import tempfile
+
+class StructuralValidatorAgent(BaseAgent):
+    def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", compiler_path: str = "gcc", api_key: str = None):
+        super().__init__("Structural Validator Agent", model_provider, model_name, api_key)
+        self.compiler_path = compiler_path
+
+    async def process(self, context: ProgramContext) -> ProgramContext:
+        context.logs.append("[StructuralValidatorAgent] Running structural validation checks...")
+        
+        patched_code = context.proposed_patches.get("primary_patch")
+        if not patched_code:
+            context.logs.append("[StructuralValidatorAgent] No proposed patch found to validate.")
+            context.verification_status = "REGRESSION_FAILED"
+            return context
+
+        # 1. Run Tree-sitter AST Pre-Check
+        result = validate_c_source(patched_code)
+        if not result.is_valid:
+            err_msg = ", ".join(f"line {e.line}: {e.message}" for e in result.errors)
+            context.logs.append(f"[StructuralValidatorAgent] AST Validation failed: {err_msg}")
+            context.verification_status = "REGRESSION_FAILED"
+            return context
+        context.logs.append(f"[StructuralValidatorAgent] AST Validation passed. Parsed {result.node_count} nodes.")
+
+        # 2. Write patch to temporary C file and compile it
+        with tempfile.TemporaryDirectory() as tmpdir:
+            temp_c_path = os.path.join(tmpdir, "patched_target.c")
+            with open(temp_c_path, "w", encoding="utf-8") as f:
+                f.write(patched_code)
+                
+            try:
+                exe_path = compile_target(temp_c_path, self.compiler_path)
+                context.logs.append(f"[StructuralValidatorAgent] Patched target compiled successfully: {exe_path}")
+            except Exception as e:
+                context.logs.append(f"[StructuralValidatorAgent] Compilation of patched target failed: {e}")
+                context.verification_status = "REGRESSION_FAILED"
+                return context
+
+            # 3. Fire all reproduction crash payloads at the patched target
+            active_crashes = [p for p in context.active_payloads if p.crash_type is not None]
+            if not active_crashes:
+                # No crashes were detected previously, so compile success is enough
+                context.verification_status = "VERIFIED_SECURE"
+                context.logs.append("[StructuralValidatorAgent] Verification passed (no active crashes were recorded).")
+                return context
+
+            all_secured = True
+            for crash in active_crashes:
+                res = execute_payload(
+                    exe_path=exe_path,
+                    args=crash.args,
+                    input_data=crash.input_data,
+                    delivery_mode="args",
+                    timeout=5
+                )
+                
+                # Check if it still crashes
+                return_code = res.get("return_code")
+                is_still_crashing = False
+                if return_code != 0 and return_code is not None:
+                    if return_code in (-1073741819, 3221225477, -1073740940, 3221226356, -1073741676, -1073741571) or return_code < 0:
+                        is_still_crashing = True
+                        
+                if is_still_crashing:
+                    context.logs.append(f"[StructuralValidatorAgent] Verification failed: Payload {crash.args} still crashed target (exit code: {return_code}).")
+                    all_secured = False
+                    break
+            
+            if all_secured:
+                context.verification_status = "VERIFIED_SECURE"
+                context.logs.append("[StructuralValidatorAgent] Verification PASSED! The patch blocks all crash payloads.")
+            else:
+                context.verification_status = "REGRESSION_FAILED"
+
+        return context

@@ -20,6 +20,8 @@ from mutagen.engines import get_engine
 from mutagen.executor import _check_docker_functional, execute_payload
 from mutagen.mutators import generate_fallback_payloads
 from mutagen.reporter import save_crash_report
+from mutagen.ast_validator import validate_c_source, format_validation_errors
+from mutagen.session_supervisor import SessionSupervisor, SessionResult
 
 console = Console(force_terminal=True, force_jupyter=False)
 
@@ -201,8 +203,411 @@ def mutate_input(args: list[str], input_data: str, delivery_mode: str) -> tuple[
         return args, mutate_string(input_data)
 
 
-def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = "", sandbox: str = "none", coverage: bool = False, webhook_secret: str = "", webhook_headers: list[str] = None, decompiler: str = "ghidra", decompiler_path: str = ""):
+# ---------------------------------------------------------------------------
+# Session-mode fuzzer (Persistent Supervisor path)
+# ---------------------------------------------------------------------------
+
+def _run_session_fuzzer(
+    exe_path: str,
+    source_code: str,
+    source_path: str,
+    delivery_mode: str,
+    timeout: int,
+    sandbox: str,
+    max_payloads: int,
+    engine,
+    debug: bool,
+    language: str = "c",
+    binary_mode: bool = False,
+    profile: str = "legacy-audit",
+    webhook_url: str = "",
+    webhook_secret: str = "",
+    webhook_headers: list[str] = None,
+) -> int:
+    """Run the fuzzer in session mode with a persistent process supervisor.
+
+    Instead of fire-and-forget payloads, this asks the AI for ordered
+    *sequences* of inputs and feeds them to a long-lived target process,
+    tracking per-step state transitions (stdout, stderr, coverage deltas).
+
+    Returns the number of unique crashes found.
+    """
+    console.print(Panel(
+        "[bold red]PHASE 3: SESSION FUZZING (Persistent Supervisor)[/bold red]\n"
+        "[dim]Feeding ordered payload sequences to a long-lived target process...[/dim]\n"
+        f"[dim]Delivery mode: {delivery_mode} | Timeout: {timeout}s[/dim]",
+        border_style="red"
+    ))
+
+    all_crashes = []
+    seen_signatures = set()
+    unique_crashes = []
+
+
+    # Build the sequence generation prompt
+    sequence_prompt = (
+        "You are a security researcher fuzzing a stateful target program.\n"
+        "The target accepts sequential inputs over a persistent connection.\n"
+        "Generate ORDERED payload sequences (not individual payloads) designed to:\n"
+        "1. First establish a valid session state (authentication, initialization)\n"
+        "2. Then exploit vulnerabilities that only appear in specific states\n\n"
+        "Each sequence should be a list of strings sent in order.\n"
+        "The target process stays alive across all steps.\n\n"
+        "CRITICAL: Do NOT include newline characters ('\\n') within any string in the 'sequence' array. "
+        "Each step string is sent as a single line to the target. For commands like 'DATA <payload>', "
+        "combine the command and payload into a single string (e.g. 'DATA AAAAAAAAAAAAAAAAAAAA').\n\n"
+        "Return a JSON array of sequence objects like:\n"
+        "[\n"
+        "  {\n"
+        '    "sequence": ["AUTH admin", "SELECT channel_5", "' + 'A' * 200 + '"],\n'
+        '    "vuln_type": "buffer_overflow",\n'
+        '    "reason": "Overflow after auth + channel select brings process to vulnerable handler",\n'
+        '    "severity": "critical",\n'
+        '    "cwe": "CWE-120"\n'
+        "  }\n"
+        "]\n\n"
+        f"Generate up to {max_payloads} sequences.\n"
+    )
+
+
+    # Ask the AI for payload sequences
+    console.print("[cyan]>> Requesting AI payload sequences for session-mode fuzzing...[/cyan]")
+
+    raw_sequences = engine.generate_payloads(source_code, sequence_prompt, max_payloads, debug)
+
+    # Normalize: the AI might return flat payloads or sequences
+    sequences = _normalize_sequences(raw_sequences)
+
+    if not sequences:
+        console.print("[yellow]>> AI returned no valid sequences. Generating fallback single-step sequences...[/yellow]")
+        from mutagen.mutators import generate_fallback_payloads
+        fallback = generate_fallback_payloads(max_payloads, "stdin")
+        sequences = [
+            {
+                "sequence": [p.get("input_data", "") or " ".join(p.get("args", []))],
+                "vuln_type": p.get("vuln_type", "unknown"),
+                "reason": p.get("reason", "Fallback payload"),
+                "severity": p.get("severity", "medium"),
+                "cwe": p.get("cwe", ""),
+            }
+            for p in fallback
+        ]
+
+    console.print(f"[green]>> Loaded {len(sequences)} payload sequences for session execution.[/green]\n")
+
+    # Build results table
+    results_table = Table(title="Session Fuzzing Results", box=box.ROUNDED, border_style="green")
+    results_table.add_column("#", style="dim", width=4)
+    results_table.add_column("Status", width=14)
+    results_table.add_column("Steps", style="cyan", width=6)
+    results_table.add_column("Crash Step", style="red", width=11)
+    results_table.add_column("Crash Type", style="red", max_width=30)
+    results_table.add_column("Coverage", style="green", width=10)
+    results_table.add_column("Unique?", style="magenta", width=8)
+
+    # --- Execute each sequence through the persistent supervisor ---
+    max_session_retries = 2
+
+    with Progress(
+        SpinnerColumn(style="red"),
+        TextColumn("[red]Running session {task.completed}/{task.total}..."),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Sessions", total=len(sequences))
+
+        for seq_idx, seq_data in enumerate(sequences):
+            steps = seq_data.get("sequence", [])
+            if not steps:
+                progress.update(task, advance=1)
+                continue
+
+            # Run the session
+            session_result = None
+            for retry in range(max_session_retries + 1):
+                try:
+                    with SessionSupervisor(
+                        exe_path, delivery_mode, timeout, sandbox, step_timeout=2.0
+                    ) as supervisor:
+                        session_result = supervisor.run_sequence(steps)
+                    if debug and session_result:
+                        console.print(f"[dim]  Session {seq_idx} execution details:[/dim]")
+                        for s_idx, step_res in enumerate(session_result.steps):
+                            console.print(f"[dim]    Step {s_idx}: input={repr(step_res.input_sent)}, alive={step_res.is_alive}, rc={step_res.return_code}, crash_type={step_res.crash_type}[/dim]")
+                            if step_res.stdout_delta:
+                                console.print(f"[dim]      stdout: {repr(step_res.stdout_delta)}[/dim]")
+                            if step_res.stderr_delta:
+                                console.print(f"[dim]      stderr: {repr(step_res.stderr_delta)}[/dim]")
+                    break
+                except Exception as e:
+                    if retry == max_session_retries:
+                        console.print(f"[red]  Session {seq_idx}: Failed after {max_session_retries} retries: {e}[/red]")
+                        session_result = None
+
+            if session_result is None:
+                results_table.add_row(
+                    str(seq_idx), "[yellow]ERROR", str(len(steps)),
+                    "-", "SESSION_FAILED", "0", ""
+                )
+                progress.update(task, advance=1)
+                continue
+
+
+            # Process results
+            status = "[bold red]CRASH!!" if session_result.crashed else "[green]OK"
+            crash_step_str = str(session_result.crash_step) if session_result.crash_step is not None else "-"
+            cov_str = str(len(session_result.total_coverage))
+
+            is_unique = ""
+            if session_result.crashed:
+                crash_entry = {
+                    "args": [],
+                    "input_data": " → ".join(steps),
+                    "payload": " → ".join(steps),
+                    "vuln_type": seq_data.get("vuln_type", "stateful_vulnerability"),
+                    "cwe": seq_data.get("cwe", ""),
+                    "reason": seq_data.get("reason", "Session-mode crash"),
+                    "severity": seq_data.get("severity", "high"),
+                    "crash_type": session_result.crash_type,
+                    "return_code": session_result.return_code,
+                    "stdout": session_result.steps[session_result.crash_step].stdout_delta if session_result.crash_step is not None and session_result.crash_step < len(session_result.steps) else "",
+                    "stderr": session_result.steps[session_result.crash_step].stderr_delta if session_result.crash_step is not None and session_result.crash_step < len(session_result.steps) else "",
+                    "session_steps": len(steps),
+                    "crash_step": session_result.crash_step,
+                    "step_history": [
+                        {
+                            "step": s.step_index,
+                            "input": s.input_sent,
+                            "stdout": s.stdout_delta[:100],
+                            "alive": s.is_alive,
+                            "coverage_blocks": len(s.cumulative_coverage),
+                        }
+                        for s in session_result.steps
+                    ],
+                }
+                sig = _crash_signature(crash_entry)
+                all_crashes.append(crash_entry)
+                if sig not in seen_signatures:
+                    seen_signatures.add(sig)
+                    unique_crashes.append(crash_entry)
+                    is_unique = "✓ NEW"
+
+            results_table.add_row(
+                str(seq_idx), status, str(len(steps)),
+                crash_step_str, session_result.crash_type[:28],
+                cov_str, is_unique,
+            )
+
+            progress.update(task, advance=1)
+
+    console.print()
+    console.print(results_table)
+    console.print()
+
+    # --- Summary ---
+    console.print(Panel(
+        f"[bold]Session Fuzzing Complete[/bold]\n"
+        f"  Sequences executed:  [cyan]{len(sequences)}[/cyan]\n"
+        f"  Total crashes:       [red]{len(all_crashes)}[/red]\n"
+        f"  Unique crashes:      [magenta]{len(unique_crashes)}[/magenta]",
+        border_style="green",
+    ))
+
+    # --- STEP 5: REPORT (reuse existing reporting) ---
+    if unique_crashes:
+        target_name = os.path.basename(source_path)
+        for ext_to_strip in (".rs", ".cpp", ".c", ".go", ".java", ".cs"):
+            if target_name.endswith(ext_to_strip):
+                target_name = target_name[:-len(ext_to_strip)]
+                break
+
+        json_file, html_file = save_crash_report(
+            unique_crashes, target_name, len(sequences),
+            "", "",
+            language=language,
+            binary_mode=binary_mode,
+            profile=profile,
+            webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
+            webhook_headers=webhook_headers,
+        )
+        console.print(f"[green]>> JSON report: {json_file}[/green]")
+        console.print(f"[green]>> HTML report: {html_file}[/green]")
+    else:
+        console.print("[green]>> No crashes found in session mode. Target survived all sequences.[/green]")
+
+    return len(unique_crashes)
+
+
+def _normalize_sequences(raw_payloads) -> list[dict]:
+    """Normalize AI output into a list of sequence dicts.
+
+    The AI might return:
+    - A list of sequence objects with a "sequence" key (ideal)
+    - A list of flat payload dicts (convert each to a single-step sequence)
+    - A list of strings (wrap each as a single-step sequence)
+    """
+    if not raw_payloads or not isinstance(raw_payloads, list):
+        return []
+
+    sequences = []
+    for item in raw_payloads:
+        if isinstance(item, dict):
+            if "sequence" in item and isinstance(item["sequence"], list):
+                # Ideal format
+                sequences.append(item)
+            elif "input_data" in item or "args" in item:
+                # Flat payload → single-step sequence
+                input_str = item.get("input_data", "")
+                if not input_str:
+                    args = item.get("args", [])
+                    if isinstance(args, list):
+                        input_str = " ".join(str(a) for a in args)
+                    else:
+                        input_str = str(args)
+                sequences.append({
+                    "sequence": [input_str] if input_str else [],
+                    "vuln_type": item.get("vuln_type", ""),
+                    "reason": item.get("reason", ""),
+                    "severity": item.get("severity", ""),
+                    "cwe": item.get("cwe", ""),
+                })
+        elif isinstance(item, str):
+            sequences.append({
+                "sequence": [item],
+                "vuln_type": "unknown",
+                "reason": "Direct string payload",
+                "severity": "medium",
+                "cwe": "",
+            })
+        elif isinstance(item, list):
+            # A bare list of strings = one sequence
+            sequences.append({
+                "sequence": [str(s) for s in item],
+                "vuln_type": "unknown",
+                "reason": "Raw sequence",
+                "severity": "medium",
+                "cwe": "",
+            })
+
+    return sequences
+
+
+def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = "", sandbox: str = "none", coverage: bool = False, webhook_secret: str = "", webhook_headers: list[str] = None, decompiler: str = "ghidra", decompiler_path: str = "", defects4c_url: str = "", defects4c_mount_dir: str = "", mode: str = "pipeline"):
     """Main fuzzer orchestration function."""
+    if mode == "agents":
+        import asyncio
+        import json
+        from mutagen.orchestrator import AgentOrchestrator
+        
+        # Read target source
+        with open(source_path, encoding="utf-8") as f:
+            source_code = f.read()
+            
+        orchestrator = AgentOrchestrator(
+            target_path=source_path,
+            source_code=source_code,
+            provider=provider,
+            model=model if model else ("gemini-2.5-flash" if provider == "gemini" else ""),
+            compiler=gcc_path
+        )
+        
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        context = loop.run_until_complete(orchestrator.run())
+        
+        for log in context.logs:
+            console.print(f"[dim]{log}[/dim]")
+            
+        unique_crashes = []
+        crashes = []
+        for p in context.active_payloads:
+            if p.crash_type is not None:
+                crash_dict = {
+                    "args": p.args,
+                    "input_data": p.input_data,
+                    "return_code": p.exit_code,
+                    "crash_type": p.crash_type,
+                    "stdout": p.stdout,
+                    "stderr": p.stderr,
+                    "vuln_type": "Memory Corruption",
+                    "cwe": "CWE-120",
+                    "severity": "critical"
+                }
+                crashes.append(crash_dict)
+                unique_crashes.append(crash_dict)
+                
+        patch_file = ""
+        exploit_file = ""
+        json_file = ""
+        html_file = ""
+        patch_verified = context.verification_status == "VERIFIED_SECURE"
+        patch_code = context.proposed_patches.get("primary_patch", "")
+        
+        exploit_code = ""
+        if crashes:
+            exploit_code = verify_and_fallback_exploit("", crashes[0], "target.exe", "args")
+            
+        target_name = os.path.basename(source_path)
+        patch_ext = os.path.splitext(source_path)[1].replace(".", "")
+        
+        if patch_code:
+            patch_file = f"patches/{target_name.replace(os.path.splitext(source_path)[1], '_FIXED.c')}"
+            os.makedirs("patches", exist_ok=True)
+            with open(patch_file, "w", encoding="utf-8") as f:
+                f.write(patch_code)
+                
+        if exploit_code:
+            os.makedirs("exploits", exist_ok=True)
+            exploit_file = f"exploits/{target_name.replace(os.path.splitext(source_path)[1], '_exploit.py')}"
+            with open(exploit_file, "w", encoding="utf-8") as f:
+                f.write(exploit_code)
+                
+        if crashes:
+            json_file, html_file = save_crash_report(
+                crashes, target_name, len(context.active_payloads), patch_code, exploit_code,
+                language=patch_ext, profile=profile, static_only=False,
+                raw_decompiled_code="", clean_source_code=source_code,
+                webhook_url=webhook_url,
+                webhook_secret=webhook_secret,
+                webhook_headers=webhook_headers,
+            )
+            
+            patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""
+            exploit_text = f"  Exploit generated:[magenta]{exploit_file}[/magenta]\n" if exploit_file else ""
+            verification_text = "  Verification:     [bold green]VERIFIED SECURE[/bold green]\n" if patch_verified else "  Verification:     [bold red]FAILED[/bold red]\n"
+            
+            summary = Panel(
+                f"[bold green]FUZZING COMPLETE (Multi-Agent Swarm)[/bold green]\n\n"
+                f"  Payloads tested:  [cyan]{len(context.active_payloads)}[/cyan]\n"
+                f"  Unique crashes:   [bold red]{len(unique_crashes)}[/bold red]\n"
+                f"  Crash rate:       [yellow]{(len(unique_crashes)/len(context.active_payloads))*100:.0f}%[/yellow]\n"
+                f"  JSON report:      [dim]{json_file}[/dim]\n"
+                f"  HTML report:      [yellow]{html_file}[/yellow]\n"
+                f"{patch_text}"
+                f"{exploit_text}"
+                f"{verification_text}",
+                title="[bold green]** AGENTS RESULTS **[/bold green]",
+                border_style="green",
+                box=box.HEAVY,
+            )
+        else:
+            summary = Panel(
+                f"[bold yellow]FUZZING COMPLETE (Multi-Agent Swarm)[/bold yellow]\n\n"
+                f"  Payloads tested:  [cyan]{len(context.active_payloads)}[/cyan]\n"
+                f"  Crashes found:    [green]0[/green]\n\n"
+                f"  [dim]No crashes found. The target may have mitigations in place.[/dim]",
+                title="AGENTS RESULTS",
+                border_style="yellow",
+                box=box.HEAVY,
+            )
+            
+        console.print(summary)
+        return len(unique_crashes)
+
     engine = get_engine(provider, api_key, model, debug, console)
 
     # --- UPFRONT DOCKER IMAGE PULLING -------------------------------------
@@ -232,8 +637,21 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             language = "java"
         elif ext == ".cs":
             language = "csharp"
+        elif ext == ".sol":
+            language = "solidity"
+        elif ext in (".html", ".htm"):
+            language = "html"
+        elif ext in (".js", ".ts"):
+            language = "javascript"
+        elif ext == ".css":
+            language = "css"
         else:
             language = "c"
+
+    if language in ("html", "javascript", "css"):
+        static_only = True
+        console.print(f"[yellow]>> Web static resource detected ({language}). Forcing static-only audit mode.[/yellow]")
+
     engine.language = language
     engine.is_decompiled = binary_mode
 
@@ -257,6 +675,195 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
     console.print(Panel(banner, border_style="green", box=box.HEAVY))
     console.print()
+
+    # --- DEFECTS4C BENCHMARK FLOW -----------------------------------------
+    if defects4c_url:
+        console.print(Panel(
+            f"[bold cyan]DEFECTS4C BENCHMARK PIPELINE[/bold cyan]\n"
+            f"[dim]Connecting to Defects4C service at {defects4c_url}...[/dim]",
+            border_style="cyan"
+        ))
+        from mutagen.defects4c import Defects4CClient, Defects4CError
+        client = Defects4CClient(defects4c_url)
+        
+        # 1. Reproduce bug
+        console.print(f"[cyan]> Reproducing Defects4C bug:[/cyan] {source_path}")
+        with Progress(
+            SpinnerColumn(style="cyan"),
+            TextColumn("[cyan]Setting up containerized bug environment..."),
+            console=console,
+        ) as progress:
+            task = progress.add_task("", total=None)
+            try:
+                client.reproduce(source_path)
+                console.print("[green]>> Bug reproduced successfully![/green]")
+            except Defects4CError as e:
+                console.print(f"[bold red]X Reproduction failed: {e}[/bold red]")
+                sys.exit(1)
+
+        # 2. Locate buggy file in mount directory.
+        # Format of bug_id: project@commit
+        parts = source_path.split("@")
+        project_name = parts[0] if parts else "project"
+        
+        # Look for source file in mounted dir. Benchmark targets are typically in standard paths inside the cloned repo.
+        # We walk the mount directory to find the modified/buggy C files.
+        buggy_files = []
+        for root_dir, _, filenames in os.walk(defects4c_mount_dir):
+            for filename in filenames:
+                if filename.endswith(".c") or filename.endswith(".cpp"):
+                    # Exclude typical build/test folders if necessary
+                    full_p = os.path.join(root_dir, filename)
+                    if "test" not in full_p.lower() and "build" not in full_p.lower():
+                        buggy_files.append(full_p)
+
+        if not buggy_files:
+            console.print(f"[red]X No C/C++ files found in mount directory: {defects4c_mount_dir}[/red]")
+            sys.exit(1)
+
+        # For simplicity, target the largest or first matching source file containing dangerous patterns.
+        # Real-world benchmark integrations target the specific buggy file path.
+        target_src_path = buggy_files[0]
+        console.print(f"[green]>> Target source file resolved: {os.path.basename(target_src_path)}[/green]")
+
+        with open(target_src_path, encoding="utf-8") as f:
+            source_code = f.read()
+
+        # 3. Phase 1 AI Analysis (with Sniper Mode pre-targeting)
+        from mutagen.static_analyzer import analyze_source
+        ai_analysis_code = source_code
+        if len(source_code) > 2000:
+            pretarget = analyze_source(source_code)
+            if pretarget.findings:
+                console.print(f"[cyan]  ⚡ Sniper Mode: {pretarget.original_line_count} lines → "
+                              f"{pretarget.focused_line_count} lines "
+                              f"({pretarget.reduction_percent:.0f}% reduction)[/cyan]")
+                ai_analysis_code = pretarget.focused_code
+
+        with Progress(
+            SpinnerColumn(style="green"),
+            TextColumn("[green]AI analyzing code for vulnerabilities..."),
+            console=console,
+        ) as progress:
+            task = progress.add_task("", total=None)
+            payloads = engine.analyze_code(ai_analysis_code, max_payloads, delivery_mode, debug, profile=profile)
+
+        if not payloads:
+            console.print("[yellow][!] AI returned no payloads. Falling back to traditional mutations.[/yellow]")
+            payloads = generate_fallback_payloads(max_payloads=max_payloads, delivery_mode=delivery_mode)
+
+        # For Defects4C, we bypass physical fuzzing phases (Step 3/4) and jump straight into Patching & Verification
+        console.print(Panel(
+            "[bold cyan]DEFECTS4C SELF-HEALING REPAIR LOOP[/bold cyan]\n"
+            f"[dim]Generating and verifying patches via Defects4C REST API (Max retries: {max_patch_retries})...[/dim]",
+            border_style="cyan"
+        ))
+
+        error_details = ""
+        patch_verified = False
+        retries_used = 0
+        patch_code = ""
+
+        # Mimic crash structure for the patch generator
+        dummy_crash = {
+            "vuln_type": payloads[0].get("vuln_type", "Memory Corruption") if payloads else "C/C++ Bug",
+            "cwe": payloads[0].get("cwe", "CWE-120") if payloads else "N/A",
+            "reason": payloads[0].get("reason", "Defects4C benchmark reproduction failure") if payloads else "",
+            "args": [],
+            "input_data": "",
+        }
+
+        attempt = 0
+        current_max_retries = max_patch_retries
+        while attempt <= current_max_retries:
+            label = "AI writing secure C patch..." if attempt == 0 else f"Self-Healing Attempt {attempt}/{current_max_retries} initializing..."
+            console.print(f"[yellow]  ↳ {label}[/yellow]")
+
+            with Progress(
+                SpinnerColumn(style="cyan"),
+                TextColumn("[cyan]Asking AI to resolve C bug..."),
+                console=console,
+            ) as progress:
+                task = progress.add_task("", total=None)
+                if attempt == 0:
+                    patch_code = engine.generate_patch(source_code, dummy_crash, debug)
+                else:
+                    patch_code = engine.refine_patch(source_code, patch_code, error_details, dummy_crash, debug)
+
+            if not patch_code:
+                error_details = "AI returned an empty C patch."
+                attempt += 1
+                continue
+
+            # AST Pre-check
+            ast_result = validate_c_source(patch_code)
+            if not ast_result.is_valid:
+                error_details = format_validation_errors(ast_result)
+                console.print(f"[yellow]    ⚡ AST Pre-Check: {len(ast_result.errors)} error(s) detected. Skipping submission.[/yellow]")
+                patch_code = ""
+                attempt += 1
+                continue
+            else:
+                console.print(f"[green]    ✓ AST Pre-Check passed ({ast_result.node_count} nodes)[/green]")
+
+            # Write patch to target file directly (benchmark expects file modification in workspace)
+            with open(target_src_path, "w", encoding="utf-8") as f:
+                f.write(patch_code)
+
+            # Submit to Defects4C fix endpoint
+            with Progress(
+                SpinnerColumn(style="cyan"),
+                TextColumn("[cyan]    Verifying patch with Defects4C test suite..."),
+                console=console,
+            ) as progress:
+                task = progress.add_task("", total=None)
+                try:
+                    fix_res = client.fix(source_path, target_src_path)
+                    success = fix_res.get("success", False)
+                except Defects4CError as e:
+                    success = False
+                    fix_res = {"message": str(e)}
+
+            if success:
+                patch_verified = True
+                retries_used = attempt
+                console.print("[bold green]    [+] PATCH VERIFIED SUCCESSFUL! All Defects4C test cases passed.[/bold green]\n")
+                break
+            else:
+                error_details = fix_res.get("message", "Tests failed or failed to compile")
+                console.print(f"[bold red]    X Verification Failed:[/bold red]\n{error_details}\n")
+                
+                # Check for detailed error dig diagnostics
+                if "handle" in fix_res:
+                    try:
+                        dig_res = client.error_dig(fix_res["handle"])
+                        if dig_res.get("classification"):
+                            error_details += f"\nDiagnostics: {dig_res.get('classification')} - {dig_res.get('root_cause')}"
+                    except Exception:
+                        pass
+                        
+                attempt += 1
+
+        # Save report
+        json_file, html_file = save_crash_report(
+            [dummy_crash], os.path.basename(target_src_path), len(payloads), patch_code, "",
+            language="c", profile=profile, static_only=False,
+            clean_source_code=source_code,
+        )
+
+        summary = Panel(
+            f"[bold green]DEFECTS4C BENCHMARK EVALUATION COMPLETE[/bold green]\n\n"
+            f"  Bug ID:           [bold yellow]{source_path}[/bold yellow]\n"
+            f"  Patch status:     {'[bold green]RESOLVED[/bold green]' if patch_verified else '[bold red]FAILED[/bold red]'}\n"
+            f"  Retries used:     [cyan]{retries_used}[/cyan]\n"
+            f"  JSON report:      [dim]{json_file}[/dim]\n"
+            f"  HTML report:      [yellow]{html_file}[/yellow]\n",
+            title="[bold green]** EVALUATION SUMMARY **[/bold green]",
+            border_style="green",
+            box=box.HEAVY,
+        )
+        console.print(summary)
+        return 1 if patch_verified else 0
 
     # --- PHASE 0: BINARY DECOMPILATION (if binary target) ----------------
     decompilation_info = None  # Will hold DecompilationResult if binary mode
@@ -382,13 +989,28 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         border_style="cyan"
     ))
 
+    # --- Sniper Mode Pre-Targeting ---
+    from mutagen.static_analyzer import analyze_source
+
+    if language == "c" and len(source_code) > 2000:
+        pretarget = analyze_source(source_code)
+        if pretarget.findings:
+            console.print(f"[cyan]  ⚡ Sniper Mode: {pretarget.original_line_count} lines → "
+                          f"{pretarget.focused_line_count} lines "
+                          f"({pretarget.reduction_percent:.0f}% reduction)[/cyan]")
+            ai_analysis_code = pretarget.focused_code
+        else:
+            ai_analysis_code = source_code
+    else:
+        ai_analysis_code = source_code
+
     with Progress(
         SpinnerColumn(style="green"),
         TextColumn("[green]AI analyzing code for vulnerabilities..."),
         console=console,
     ) as progress:
         task = progress.add_task("", total=None)
-        payloads = engine.analyze_code(source_code, max_payloads, delivery_mode, debug, profile=profile)
+        payloads = engine.analyze_code(ai_analysis_code, max_payloads, delivery_mode, debug, profile=profile)
 
     if not payloads:
         console.print("[yellow][!] AI returned no payloads (possible refusal, rate-limit, or network error).[/yellow]")
@@ -456,7 +1078,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         ))
 
         target_name = os.path.basename(source_path)
-        for ext_to_strip in (".rs", ".cpp", ".c"):
+        for ext_to_strip in (".rs", ".cpp", ".c", ".sol", ".html", ".htm", ".js", ".ts", ".css"):
             if target_name.endswith(ext_to_strip):
                 target_name = target_name[:-len(ext_to_strip)]
                 break
@@ -529,6 +1151,26 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         console.print(f"[green]>> Compiled to: {exe_path}[/green]")
         console.print()
+
+    # --- STEP 3b: SESSION-MODE FUZZING (Persistent Supervisor) -----------
+    if delivery_mode.startswith("session:"):
+        return _run_session_fuzzer(
+            exe_path=exe_path,
+            source_code=source_code,
+            source_path=source_path,
+            delivery_mode=delivery_mode,
+            timeout=timeout,
+            sandbox=sandbox,
+            max_payloads=max_payloads,
+            engine=engine,
+            debug=debug,
+            language=language,
+            binary_mode=binary_mode,
+            profile=profile,
+            webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
+            webhook_headers=webhook_headers,
+        )
 
     # --- STEP 4: FUZZ! (PARALLEL EXECUTION) ------------------------------
     console.print(Panel(
@@ -699,13 +1341,13 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 if not isinstance(rp, dict):
                     continue
                 r_args = rp.get("args", [])
-                r_input = rp.get("input_data", "")
+                r_input = rp.get("input_data") or ""
                 if isinstance(r_args, str):
                     r_args = [r_args]
                 r_args = [str(a) for a in r_args]
 
                 # Check if this refined payload has already been executed in this run
-                r_key = (tuple(r_args), r_input or "")
+                r_key = (tuple(r_args), r_input)
                 if r_key in executed_payloads:
                     console.print(f"[dim]    (Skipping duplicate refined payload: args={r_args}, input={repr(r_input[:40])})[/dim]")
                     continue
@@ -999,6 +1641,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             attempt = 0
             current_max_retries = max_patch_retries
             while attempt <= current_max_retries:
+                if attempt > 0:
+                    retries_used = attempt
                 if not patch_code:
                     label = "AI writing secure C patch..." if attempt == 0 else f"Self-Healing Attempt {attempt}/{current_max_retries} initializing..."
                     console.print(f"[yellow]  ↳ {label}[/yellow]")
@@ -1050,6 +1694,21 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                                     pass
                         attempt += 1
                         continue
+
+                # --- NEURO-SYMBOLIC AST PRE-CHECK (tree-sitter) -------
+                # Catch hallucinated syntax BEFORE wasting a GCC compile cycle.
+                if language == "c" and patch_code:
+                    ast_result = validate_c_source(patch_code)
+                    if not ast_result.is_valid:
+                        error_details = format_validation_errors(ast_result)
+                        console.print(f"[yellow]    ⚡ Neuro-Symbolic Pre-Check: {len(ast_result.errors)} AST error(s) detected. Skipping GCC.[/yellow]")
+                        for ast_err in ast_result.errors[:3]:  # Show first 3 errors
+                            console.print(f"[dim]       Line {ast_err.line}: {ast_err.message}[/dim]")
+                        patch_code = ""  # Force re-generation on next iteration
+                        attempt += 1
+                        continue
+                    else:
+                        console.print(f"[green]    ✓ AST Pre-Check passed ({ast_result.node_count} nodes, {len(ast_result.functions_found)} functions)[/green]")
 
                 # Write patch file
                 os.makedirs("patches", exist_ok=True)
