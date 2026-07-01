@@ -5,9 +5,10 @@ from mutagen.executor import execute_payload
 import os
 
 class FuzzingSupervisorAgent(BaseAgent):
-    def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", compiler_path: str = "gcc", api_key: str = None):
+    def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", compiler_path: str = "gcc", delivery_mode: str = "args", api_key: str = None):
         super().__init__("Fuzzing Supervisor Agent", model_provider, model_name, api_key)
         self.compiler_path = compiler_path
+        self.delivery_mode = delivery_mode
 
     async def process(self, context: ProgramContext) -> ProgramContext:
         context.logs.append("[FuzzingSupervisorAgent] Compiling target file...")
@@ -21,13 +22,18 @@ class FuzzingSupervisorAgent(BaseAgent):
             return context
 
         # 2. Run synthesized payloads against the compiled target
-        context.logs.append(f"[FuzzingSupervisorAgent] Executing {len(context.active_payloads)} payloads...")
+        context.logs.append(f"[FuzzingSupervisorAgent] Executing {len(context.active_payloads)} payloads using delivery mode: {self.delivery_mode}...")
         for payload in context.active_payloads:
+            # For stdin mode, ensure the payload string is passed as input_data if args is set but input_data is empty
+            input_data = payload.input_data
+            if self.delivery_mode == "stdin" and not input_data and payload.args:
+                input_data = "\n".join(payload.args)
+                
             result = execute_payload(
                 exe_path=exe_path,
                 args=payload.args,
-                input_data=payload.input_data,
-                delivery_mode="args",
+                input_data=input_data,
+                delivery_mode=self.delivery_mode,
                 timeout=5
             )
             

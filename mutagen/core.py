@@ -508,7 +508,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             source_code=source_code,
             provider=provider,
             model=model if model else ("gemini-2.5-flash" if provider == "gemini" else ""),
-            compiler=gcc_path
+            compiler=gcc_path,
+            delivery_mode=delivery_mode
         )
         
         try:
