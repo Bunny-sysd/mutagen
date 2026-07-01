@@ -55,16 +55,22 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         args = [a.replace('\x00', '') for a in args]
 
     # Strip accidental program name (argv[0]) placeholder prepended by the LLM
-    if args and len(args) > 1:
-        first_arg = args[0].strip().lower()
-        exe_name = os.path.basename(exe_path).lower()
-        exe_name_no_ext = os.path.splitext(exe_name)[0]
-        placeholders = {
-            "program", "./program", "a.out", "./a.out", "target", "./target",
-            "fuzzer_target", "./fuzzer_target", "fuzzer", "./fuzzer",
-            exe_name, f"./{exe_name}", exe_name_no_ext, f"./{exe_name_no_ext}"
-        }
-        if first_arg in placeholders:
+    if args:
+        first_arg = args[0].strip().replace("\\", "/").lower()
+        exe_clean = os.path.basename(exe_path).lower()
+        exe_name_no_ext = os.path.splitext(exe_clean)[0]
+        
+        is_placeholder = (
+            first_arg in ("program", "./program", "a.out", "./a.out", "target", "./target", 
+                          "fuzzer_target", "./fuzzer_target", "fuzzer", "./fuzzer") or
+            first_arg == exe_clean or
+            first_arg == f"./{exe_clean}" or
+            first_arg == exe_name_no_ext or
+            first_arg == f"./{exe_name_no_ext}" or
+            first_arg.endswith("/" + exe_clean) or
+            first_arg.endswith("/" + exe_name_no_ext)
+        )
+        if is_placeholder:
             args = args[1:]
 
     # --- SANDBOX COMMAND CONSTRUCT ------------------------------------------
@@ -240,7 +246,12 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 "/bin/sh",
                 "vuln_triggered",
                 "exploit_success",
-                "authenticated as admin"
+                "authenticated as admin",
+                "is not recognized as an internal or external command",
+                "operable program or batch file",
+                "command not found",
+                "no such file or directory",
+                "directory nonexistent"
             ]
 
             for indicator in logical_indicators:
