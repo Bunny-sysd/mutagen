@@ -8,19 +8,23 @@ def test_claude_engine_analyze_code(mock_anthropic_class):
     mock_client = MagicMock()
     mock_anthropic_class.return_value = mock_client
     
+    from mutagen.models import FuzzPayloadList, FuzzPayload
+    mock_parsed = FuzzPayloadList(
+        payloads=[
+            FuzzPayload(
+                args=["claude_payload"],
+                input_data="",
+                vuln_type="buffer_overflow",
+                reason="strcpy",
+                severity="critical",
+                cwe="CWE-120"
+            )
+        ]
+    )
+    
     mock_message = MagicMock()
-    # Mock return value wrapped in Markdown json block
-    mock_message.content = [MagicMock(text=json.dumps([
-        {
-            "args": ["claude_payload"],
-            "input_data": "",
-            "vuln_type": "buffer_overflow",
-            "reason": "strcpy",
-            "severity": "critical",
-            "cwe": "CWE-120"
-        }
-    ]))]
-    mock_client.messages.create.return_value = mock_message
+    mock_message.parsed = mock_parsed
+    mock_client.beta.messages.parse.return_value = mock_message
 
     engine = ClaudeEngine(api_key="test_claude_key")
     payloads = engine.analyze_code("int main() { return 0; }", 5, "args", False)
@@ -29,11 +33,12 @@ def test_claude_engine_analyze_code(mock_anthropic_class):
     assert payloads[0]["vuln_type"] == "buffer_overflow"
     assert payloads[0]["args"] == ["claude_payload"]
     
-    mock_client.messages.create.assert_called_once()
-    called_kwargs = mock_client.messages.create.call_args[1]
+    mock_client.beta.messages.parse.assert_called_once()
+    called_kwargs = mock_client.beta.messages.parse.call_args[1]
     assert called_kwargs["model"] == "claude-3-5-sonnet-latest"
-    assert "System" not in called_kwargs # System should be keyword 'system'
-    assert called_kwargs["system"] == "You are an automated code audit assistant. Respond only in raw JSON arrays."
+    assert called_kwargs["response_model"] == FuzzPayloadList
+    assert called_kwargs["system"] == "You are an automated code audit assistant."
+
 
 @patch("anthropic.Anthropic")
 def test_claude_engine_refine_payload(mock_anthropic_class):

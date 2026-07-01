@@ -103,20 +103,24 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     crash_rows = ""
     crashes_sorted = sorted(crashes, key=lambda x: x.get("confidence_score", 5), reverse=True)
     for i, c in enumerate(crashes_sorted):
-        args_display = ", ".join(c.get("args", [c.get("payload", "N/A")]))
+        args_raw = c.get("args")
+        if not args_raw:
+            payload_raw = c.get("payload")
+            args_raw = [payload_raw] if payload_raw is not None else ["N/A"]
+        args_display = ", ".join(str(x) for x in args_raw) if isinstance(args_raw, list) else str(args_raw)
         if len(args_display) > 60:
             args_display = args_display[:57] + "..."
-        severity = c.get("severity", "unknown")
+        severity = c.get("severity") or "unknown"
         sev_class = severity if severity in ("critical", "high", "medium", "low") else "low"
 
         # Security: Prevent XSS by HTML-escaping all untrusted input
-        safe_args = html.escape(args_display)
-        safe_vuln = html.escape(c.get("vuln_type", "unknown"))
-        safe_cwe = html.escape(c.get("cwe", "N/A"))
-        safe_crash = html.escape(c.get("crash_type", ""))
-        safe_reason = html.escape(c.get("reason", ""))
-        safe_sev = html.escape(severity.upper())
-        safe_class = html.escape(sev_class)
+        safe_args = html.escape(str(args_display))
+        safe_vuln = html.escape(str(c.get("vuln_type") or "unknown"))
+        safe_cwe = html.escape(str(c.get("cwe") or "N/A"))
+        safe_crash = html.escape(str(c.get("crash_type") or ""))
+        safe_reason = html.escape(str(c.get("reason") or ""))
+        safe_sev = html.escape(str(severity).upper())
+        safe_class = html.escape(str(sev_class))
 
         # Get confidence score
         conf_val = c.get("confidence_score", 5)
@@ -161,7 +165,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         </tr>"""
 
     crash_rate = (len(crashes)/total_tested*100) if total_tested else 0
-    vuln_types = list(set(c.get("vuln_type", "") for c in crashes))
+    vuln_types = list(set((c.get("vuln_type") or "") for c in crashes))
 
     # --- PARSE SECURITY TELEMETRY (IoCs & Capabilities) ---------------------
     ioc_rows = ""
@@ -174,8 +178,8 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         caps_found = {}
         severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "unknown": 0}
         for c in crashes:
-            vt = c.get("vuln_type", "unknown")
-            sev = c.get("severity", "unknown").lower()
+            vt = c.get("vuln_type") or "unknown"
+            sev = (c.get("severity") or "unknown").lower()
             if vt not in caps_found:
                 caps_found[vt] = {
                     "count": 0,
@@ -226,7 +230,12 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         extracted_registry = set()
 
         for c in crashes:
-            text_to_scan = f"{c.get('vuln_type', '')} {c.get('reason', '')} {' '.join(c.get('args', []))} {c.get('input_data', '')}"
+            vuln_t_str = c.get('vuln_type') or ''
+            reason_str = c.get('reason') or ''
+            args_list = c.get('args') or []
+            input_d_str = c.get('input_data') or ''
+            args_joined = ' '.join(str(a) for a in args_list) if isinstance(args_list, list) else str(args_list)
+            text_to_scan = f"{vuln_t_str} {reason_str} {args_joined} {input_d_str}"
             for ip in ip_pattern.findall(text_to_scan):
                 if ip not in ("127.0.0.1", "0.0.0.0"):
                     extracted_ips.add(ip)

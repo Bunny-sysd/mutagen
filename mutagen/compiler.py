@@ -155,8 +155,9 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
 
     compile_args.extend(["-o", output_path, compile_source_path])
 
-    # MinGW/MSYS2 needs explicit linking for Winsock
+    # MinGW/MSYS2 needs explicit linking for Winsock and static runtime to avoid dynamic DLL dependency errors
     if os.name == 'nt' and "tcc" not in os.path.basename(gcc_path).lower():
+        compile_args.append("-static")
         try:
             with open(source_path, encoding="utf-8") as f:
                 content = f.read()

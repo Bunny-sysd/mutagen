@@ -9,7 +9,10 @@ from mutagen.compiler import CompilationError
 @patch("mutagen.core.save_crash_report")
 @patch("builtins.open", new_callable=mock_open, read_data="int main() { return 0; }")
 @patch("os.makedirs")
-def test_run_fuzzer_self_healing_compilation_failure(mock_makedirs, mock_file, mock_save_report, mock_execute, mock_compile, mock_get_engine):
+@patch("mutagen.core.validate_c_source")
+def test_run_fuzzer_self_healing_compilation_failure(mock_ast_validate, mock_makedirs, mock_file, mock_save_report, mock_execute, mock_compile, mock_get_engine):
+    # AST validator always passes (these tests focus on compile/verification failures)
+    mock_ast_validate.return_value = MagicMock(is_valid=True, errors=[], functions_found=["main"], has_main=True, node_count=10)
     # Setup mock engine
     mock_engine = MagicMock()
     mock_get_engine.return_value = mock_engine
@@ -67,7 +70,10 @@ def test_run_fuzzer_self_healing_compilation_failure(mock_makedirs, mock_file, m
 @patch("mutagen.core.save_crash_report")
 @patch("builtins.open", new_callable=mock_open, read_data="int main() { return 0; }")
 @patch("os.makedirs")
-def test_run_fuzzer_self_healing_verification_crash(mock_makedirs, mock_file, mock_save_report, mock_execute, mock_compile, mock_get_engine):
+@patch("mutagen.core.validate_c_source")
+def test_run_fuzzer_self_healing_verification_crash(mock_ast_validate, mock_makedirs, mock_file, mock_save_report, mock_execute, mock_compile, mock_get_engine):
+    # AST validator always passes (these tests focus on verification failures)
+    mock_ast_validate.return_value = MagicMock(is_valid=True, errors=[], functions_found=["main"], has_main=True, node_count=10)
     # Setup mock engine
     mock_engine = MagicMock()
     mock_get_engine.return_value = mock_engine

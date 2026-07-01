@@ -12,3 +12,7 @@ requests>=2.28.0
 fastapi>=0.100.0
 uvicorn>=0.20.0
 httpx>=0.23.0
+
+# Neuro-Symbolic AST Validation (pre-compilation hallucination filter)
+tree-sitter>=0.23.0
+tree-sitter-c>=0.23.0

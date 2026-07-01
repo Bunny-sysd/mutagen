@@ -16,6 +16,14 @@ class BaseEngine(ABC):
             return "Java"
         elif self.lang == "csharp":
             return "C#"
+        elif self.lang == "solidity":
+            return "Solidity"
+        elif self.lang == "html":
+            return "HTML"
+        elif self.lang == "javascript":
+            return "JavaScript"
+        elif self.lang == "css":
+            return "CSS"
         return "C"
 
     @property
@@ -28,7 +36,16 @@ class BaseEngine(ABC):
             return "java"
         elif self.lang == "csharp":
             return "cs"
+        elif self.lang == "solidity":
+            return "sol"
+        elif self.lang == "html":
+            return "html"
+        elif self.lang == "javascript":
+            return "js"
+        elif self.lang == "css":
+            return "css"
         return "c"
+
 
     @abstractmethod
     def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool, profile: str = "legacy-audit") -> list[dict]:
@@ -54,5 +71,11 @@ class BaseEngine(ABC):
         """AI Symbol Recovery and deobfuscation pass. Retypes/renames symbols and adds inline comments.
         Default implementation returns raw code if not implemented by subclass."""
         return raw_code
+
+    def generate_payloads(self, source_code: str, prompt: str, max_payloads: int, debug: bool = False) -> list[dict]:
+        """Generate ordered sequence payloads for session mode fuzzing.
+        Default implementation returns empty list."""
+        return []
+
 
 

@@ -103,19 +103,24 @@ def test_openai_engine_analyze_code(mock_openai_class):
     mock_client = MagicMock()
     mock_openai_class.return_value = mock_client
     
+    from mutagen.models import FuzzPayloadList, FuzzPayload
+    mock_parsed = FuzzPayloadList(
+        payloads=[
+            FuzzPayload(
+                args=["openai_payload"],
+                input_data="",
+                vuln_type="format_string",
+                reason="printf",
+                severity="high",
+                cwe="CWE-134"
+            )
+        ]
+    )
+    
     mock_completion = MagicMock()
     mock_completion.choices = [MagicMock()]
-    mock_completion.choices[0].message.content = json.dumps([
-        {
-            "args": ["openai_payload"],
-            "input_data": "",
-            "vuln_type": "format_string",
-            "reason": "printf",
-            "severity": "high",
-            "cwe": "CWE-134"
-        }
-    ])
-    mock_client.chat.completions.create.return_value = mock_completion
+    mock_completion.choices[0].message.parsed = mock_parsed
+    mock_client.beta.chat.completions.parse.return_value = mock_completion
 
     engine = OpenAIEngine(api_key="test_openai_key", model="gpt-4o")
     payloads = engine.analyze_code("int main() { return 0; }", 3, "args", False)
@@ -124,9 +129,10 @@ def test_openai_engine_analyze_code(mock_openai_class):
     assert payloads[0]["vuln_type"] == "format_string"
     assert payloads[0]["args"] == ["openai_payload"]
     
-    called_kwargs = mock_client.chat.completions.create.call_args[1]
+    called_kwargs = mock_client.beta.chat.completions.parse.call_args[1]
     assert called_kwargs["model"] == "gpt-4o"
-    assert called_kwargs["response_format"] == {"type": "json_object"}
+    assert called_kwargs["response_format"] == FuzzPayloadList
+
 
 
 @patch("openai.OpenAI")
@@ -216,7 +222,9 @@ def test_ollama_engine_analyze_code(mock_post):
     
     called_kwargs = mock_post.call_args[1]
     assert called_kwargs["json"]["model"] == "llama3.2"
-    assert called_kwargs["json"]["format"] == "json"
+    from mutagen.models import FuzzPayloadList
+    assert called_kwargs["json"]["format"] == FuzzPayloadList.model_json_schema()
+
 
 
 @patch("requests.post")

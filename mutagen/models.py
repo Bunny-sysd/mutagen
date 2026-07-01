@@ -16,3 +16,16 @@ class FuzzPayload(BaseModel):
 class FuzzPayloadList(BaseModel):
     payloads: list[FuzzPayload]
 
+
+class FuzzSequence(BaseModel):
+    sequence: list[str]
+    vuln_type: str
+    reason: str
+    severity: str
+    cwe: str | None = ""
+
+
+class FuzzSequenceList(BaseModel):
+    sequences: list[FuzzSequence]
+
+

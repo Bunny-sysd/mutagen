@@ -48,7 +48,44 @@ def split_functions(pseudo_code: str) -> tuple[str, list[dict]]:
     return meta_header, functions
 
 def contains_dangerous_keywords(code: str) -> bool:
-    """Check if the function's code contains any of the dangerous library call tokens."""
+    """
+    Check if the function's code contains any of the dangerous library call tokens.
+    Uses AST-based query when tree-sitter is available, falling back to regex.
+    """
+    try:
+        import tree_sitter_c as tsc
+        from tree_sitter import Language, Parser
+
+        c_language = Language(tsc.language())
+        parser = Parser(c_language)
+        tree = parser.parse(code.encode("utf-8"))
+        root = tree.root_node
+
+        has_dangerous = False
+
+        def walk(node):
+            nonlocal has_dangerous
+            if has_dangerous:
+                return
+            if node.type == "call_expression":
+                func_child = node.child_by_field_name("function")
+                if func_child and func_child.type == "identifier":
+                    call_name = func_child.text.decode("utf-8", errors="replace")
+                    if call_name in DANGEROUS_KEYWORDS:
+                        has_dangerous = True
+                        return
+            for child in node.children:
+                walk(child)
+
+        walk(root)
+        if has_dangerous:
+            return True
+        if not root.has_error:
+            return False
+    except ImportError:
+        pass
+
+    # Fallback to regex
     code_lower = code.lower()
     for kw in DANGEROUS_KEYWORDS:
         if re.search(r'\b' + re.escape(kw.lower()) + r'\b', code_lower):

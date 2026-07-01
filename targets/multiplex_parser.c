@@ -70,7 +70,7 @@ void process_packet_payload(packet_header_t* header, const uint8_t* raw_payload)
     uint8_t* heap_buffer = (uint8_t*)malloc(MAX_PAYLOAD_SIZE);
     if (!heap_buffer) return;
 
-    if (header->chunk_length < MAX_PAYLOAD_SIZE) {
+    if (header->chunk_length >= 0 && header->chunk_length < MAX_PAYLOAD_SIZE) {
         memcpy(heap_buffer, raw_payload, header->chunk_length);
         g_ctx.total_bytes_processed += header->chunk_length;
         printf("Channel %d processed packet size: %d\n", header->channel_id, header->chunk_length);
