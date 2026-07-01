@@ -15,6 +15,7 @@ class TriageResult(BaseModel):
         code_snippet: str
         reason: str
     vulnerabilities: list[VulnItem]
+    suggested_delivery_mode: str  # Must be "args", "stdin", or "tcp"
 
 class TriageAgent(BaseAgent):
     def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", api_key: str = None):
@@ -28,8 +29,14 @@ class TriageAgent(BaseAgent):
         focused_code = pretarget.focused_code if pretarget.findings else context.source_code
         
         prompt = f"""You are a lead security code auditor.
-Analyze the following source code and identify all security vulnerabilities (e.g., Use After Free, Double Free, Buffer Overflow).
-Return the findings strictly adhering to the requested JSON schema. Do not generate exploit payloads or giant fuzz strings here. Only identify the flaws.
+Analyze the following source code and:
+1. Identify all security vulnerabilities (e.g., Use After Free, Double Free, Buffer Overflow).
+2. Determine how the code accepts input data.
+   - If the code uses standard input reading functions like `fgets`, `gets`, `read(0, ...)`, `scanf`, `cin >>`, `sys.stdin.read` -> select "stdin".
+   - If the code uses socket functions like `socket`, `bind`, `listen`, `accept` -> select "tcp".
+   - Otherwise (uses `argv`, `argc`, `getopt`, or has no obvious stdin/socket read) -> select "args".
+
+Return the findings strictly adhering to the requested JSON schema. Do not generate exploit payloads or giant fuzz strings here.
 
 Source Code:
 {focused_code}
@@ -53,6 +60,14 @@ Source Code:
             raw_text = response.text.strip()
             data = json.loads(raw_text)
             
+            # Save detected delivery mode
+            detected_mode = data.get("suggested_delivery_mode", "args").lower()
+            if detected_mode in ("args", "stdin", "tcp"):
+                context.delivery_mode = detected_mode
+                context.logs.append(f"[TriageAgent] Dynamically detected input delivery mode: {detected_mode}")
+            else:
+                context.delivery_mode = "args"
+            
             vulns = data.get("vulnerabilities", [])
             for item in vulns:
                 detail = VulnerabilityDetail(
@@ -68,6 +83,7 @@ Source Code:
                 
         except Exception as e:
             context.logs.append(f"[TriageAgent] Error during triage LLM call: {e}")
+            context.delivery_mode = "args"
             # Fallback to a basic AST check if LLM fails
             if pretarget.findings:
                 for finding in pretarget.findings:

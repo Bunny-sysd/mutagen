@@ -9,11 +9,13 @@ from mutagen.agents.validator import StructuralValidatorAgent
 class AgentOrchestrator:
     def __init__(self, target_path: str, source_code: str, provider: str = "gemini", model: str = "gemini-2.5-flash", compiler: str = "gcc", delivery_mode: str = "args", api_key: str = None):
         platform = sys.platform
+        self.default_delivery_mode = delivery_mode
         self.context = ProgramContext(
             target_path=target_path,
             language="c" if target_path.endswith(".c") else "python",
             os_platform=platform,
-            source_code=source_code
+            source_code=source_code,
+            delivery_mode=delivery_mode
         )
         
         # Initialize micro-agents
@@ -26,11 +28,20 @@ class AgentOrchestrator:
     async def run(self) -> ProgramContext:
         self.context.logs.append("[Orchestrator] Initializing Multi-Agent APR Swarm...")
         
-        # 1. Run Triage Agent to find bugs
+        # 1. Run Triage Agent to find bugs & detect delivery mode
         self.context = await self.triage_agent.process(self.context)
         if not self.context.vulnerabilities:
             self.context.logs.append("[Orchestrator] Code appears clean. No vulnerabilities found.")
             return self.context
+
+        # Determine active delivery mode (user explicit override beats auto-detected)
+        active_mode = self.default_delivery_mode
+        if active_mode == "args" and self.context.delivery_mode != "args":
+            active_mode = self.context.delivery_mode
+            self.context.logs.append(f"[Orchestrator] Using dynamically detected delivery mode: {active_mode}")
+            
+        self.supervisor_agent.delivery_mode = active_mode
+        self.validator_agent.delivery_mode = active_mode
 
         # 2. Run Payload Synthesizer Agent to generate test inputs
         self.context = await self.synthesizer_agent.process(self.context)
