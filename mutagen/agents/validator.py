@@ -44,7 +44,9 @@ class StructuralValidatorAgent(BaseAgent):
                 exe_path = compile_target(temp_c_path, self.compiler_path)
                 context.logs.append(f"[StructuralValidatorAgent] Patched target compiled successfully: {exe_path}")
             except Exception as e:
-                context.logs.append(f"[StructuralValidatorAgent] Compilation of patched target failed: {e}")
+                err_msg = f"[StructuralValidatorAgent] Compilation of patched target failed: {e}"
+                context.logs.append(err_msg)
+                context.notepad.append(f"Validator: Compilation error on patch: {e}")
                 context.verification_status = "REGRESSION_FAILED"
                 return context
 
@@ -54,6 +56,7 @@ class StructuralValidatorAgent(BaseAgent):
                 # No crashes were detected previously, so compile success is enough
                 context.verification_status = "VERIFIED_SECURE"
                 context.logs.append("[StructuralValidatorAgent] Verification passed (no active crashes were recorded).")
+                context.notepad.append("Validator: Verification passed (no active crashes recorded).")
                 return context
 
             all_secured = True
@@ -74,13 +77,16 @@ class StructuralValidatorAgent(BaseAgent):
                 # Check if it still crashes using the executor's oracle-resolved crashed flag
                 is_still_crashing = res.get("crashed", False)
                 if is_still_crashing:
-                    context.logs.append(f"[StructuralValidatorAgent] Verification failed: Payload {crash.args} still triggered vulnerability (type: {res.get('crash_type')}).")
+                    fail_msg = f"Validator verification failed: Payload {crash.args} still triggered vulnerability (type: {res.get('crash_type')})."
+                    context.logs.append(f"[StructuralValidatorAgent] {fail_msg}")
+                    context.notepad.append(f"Validator: {fail_msg}")
                     all_secured = False
                     break
             
             if all_secured:
                 context.verification_status = "VERIFIED_SECURE"
                 context.logs.append("[StructuralValidatorAgent] Verification PASSED! The patch blocks all crash payloads.")
+                context.notepad.append("Validator: Verification PASSED! All payloads blocked.")
             else:
                 context.verification_status = "REGRESSION_FAILED"
 

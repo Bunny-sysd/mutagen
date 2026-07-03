@@ -28,4 +28,5 @@ class ProgramContext(BaseModel):
     proposed_patches: Dict[str, str] = Field(default_factory=dict)  # patch_id -> source
     verification_status: str = "UNVERIFIED"  # UNVERIFIED, VERIFIED_SECURE, REGRESSION_FAILED
     delivery_mode: str = "args"
+    notepad: List[str] = Field(default_factory=list)
     logs: List[str] = Field(default_factory=list)

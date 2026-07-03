@@ -22,12 +22,18 @@ class PatchEngineerAgent(BaseAgent):
             context.logs.append("[PatchEngineerAgent] No crashes detected to patch.")
             return context
 
+        # Format target reasoning using notepad history if available
+        reasoning = f"Triggered by crash payload args: {crash.args}"
+        if context.notepad:
+            reasoning += "\nPrevious Swarm Notepad Notes:\n" + "\n".join(f"- {note}" for note in context.notepad)
+
         crash_data = {
             "vuln_type": crash.crash_type,
             "args": crash.args,
             "input_data": crash.input_data,
             "cwe": "CWE-120",
-            "severity": "critical"
+            "severity": "critical",
+            "reason": reasoning
         }
 
         # Check if we have a previous bad patch to refine
@@ -37,6 +43,9 @@ class PatchEngineerAgent(BaseAgent):
             context.logs.append("[PatchEngineerAgent] Refining previous failed patch...")
             # Retrieve last log or compilation error
             error_message = context.logs[-1] if context.logs else "Unknown verification error"
+            if context.notepad:
+                error_message += "\n\nShared Swarm Notepad history:\n" + "\n".join(f"- {note}" for note in context.notepad)
+            
             patched_code = self.engine.refine_patch(
                 source_code=context.source_code,
                 bad_patch=bad_patch,
@@ -55,6 +64,7 @@ class PatchEngineerAgent(BaseAgent):
         if patched_code:
             context.proposed_patches["primary_patch"] = patched_code
             context.logs.append("[PatchEngineerAgent] Proposed patch saved.")
+            context.notepad.append(f"PatchEngineerAgent: Proposed secure patch implementation (Revision {len(context.notepad) + 1})")
         else:
             context.logs.append("[PatchEngineerAgent] Failed to generate patch.")
             

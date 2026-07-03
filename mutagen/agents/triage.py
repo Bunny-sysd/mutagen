@@ -15,7 +15,7 @@ class TriageResult(BaseModel):
         code_snippet: str
         reason: str
     vulnerabilities: list[VulnItem]
-    suggested_delivery_mode: str  # Must be "args", "stdin", or "tcp"
+    suggested_delivery_mode: str  # Must be "args", "stdin", "tcp", or "http"
 
 class TriageAgent(BaseAgent):
     def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", api_key: str = None):
@@ -33,9 +33,10 @@ class TriageAgent(BaseAgent):
 Analyze the following source code and:
 1. Identify all security vulnerabilities (e.g., Use After Free, Double Free, Buffer Overflow).
 2. Determine how the code accepts input data.
+   - If the code defines a web/API server, HTTP router, or endpoint handlers (e.g. `@app.route`, `@app.get`, `@app.post`, `Flask`, `FastAPI`, `tornado`, `http.server`, `django` routes) -> select "http".
    - If the code uses standard input reading functions like `fgets`, `gets`, `read(0, ...)`, `scanf`, `cin >>`, `sys.stdin.read` -> select "stdin".
    - If the code uses socket functions like `socket`, `bind`, `listen`, `accept` -> select "tcp".
-   - Otherwise (uses `argv`, `argc`, `getopt`, or has no obvious stdin/socket read) -> select "args".
+   - Otherwise (uses `argv`, `argc`, `getopt`, or has no obvious stdin/socket/http read) -> select "args".
 
 Return the findings strictly adhering to the requested JSON schema. Do not generate exploit payloads or giant fuzz strings here.
 
@@ -63,7 +64,7 @@ Source Code:
             
             # Save detected delivery mode
             detected_mode = data.get("suggested_delivery_mode", "args").lower()
-            if detected_mode in ("args", "stdin", "tcp"):
+            if detected_mode in ("args", "stdin", "tcp", "http"):
                 context.delivery_mode = detected_mode
                 context.logs.append(f"[TriageAgent] Dynamically detected input delivery mode: {detected_mode}")
             else:
@@ -81,6 +82,7 @@ Source Code:
                 )
                 context.vulnerabilities.append(detail)
                 context.logs.append(f"[TriageAgent] Identified {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
+                context.notepad.append(f"Triage: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
                 
         except Exception as e:
             context.logs.append(f"[TriageAgent] Error during triage LLM call: {e}")
@@ -97,5 +99,7 @@ Source Code:
                         metadata={"reason": f"Dangerous call '{finding.get('name')}' identified by static analyzer"}
                     )
                     context.vulnerabilities.append(detail)
-                    
+                    context.notepad.append(f"Triage fallback: Found potential danger at line {detail.line_number}")
+
+        context.notepad.append(f"Triage: Dynamically selected input delivery mode: {context.delivery_mode}")
         return context

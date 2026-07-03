@@ -186,6 +186,75 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     process.kill()
                     stdout, stderr = process.communicate()
                     raise subprocess.TimeoutExpired(process.args, timeout, output=stdout, stderr=stderr)
+            elif delivery_mode == "http":
+                import urllib.request
+                import urllib.parse
+                import time
+                import json
+
+                # Start HTTP server target in background
+                process = subprocess.Popen(
+                    run_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env
+                )
+                time.sleep(1.0)  # Wait for web server to start up
+
+                # Parse JSON request configuration from input_data
+                method = "GET"
+                path = "/"
+                params = None
+                json_data = None
+
+                if input_data:
+                    try:
+                        req = json.loads(input_data)
+                        method = req.get("method", "GET").upper()
+                        path = req.get("path", "/")
+                        params = req.get("params")
+                        json_data = req.get("json")
+                    except Exception:
+                        pass
+
+                # Build URL (defaulting to Flask standard port 5000)
+                url = f"http://127.0.0.1:5000{path}"
+                if params:
+                    url += "?" + urllib.parse.urlencode(params)
+
+                req_body = None
+                headers = {}
+                if json_data:
+                    req_body = json.dumps(json_data).encode("utf-8")
+                    headers["Content-Type"] = "application/json"
+
+                req_obj = urllib.request.Request(url, data=req_body, headers=headers, method=method)
+
+                stdout_res = ""
+                stderr_res = ""
+                ret_code = 0
+
+                try:
+                    with urllib.request.urlopen(req_obj, timeout=timeout) as response:
+                        stdout_res = response.read().decode("utf-8", errors="ignore")
+                except urllib.error.HTTPError as e:
+                    stdout_res = e.read().decode("utf-8", errors="ignore")
+                    stderr_res = str(e)
+                except Exception as e:
+                    stderr_res = str(e)
+                    ret_code = -1
+
+                # Cleanly terminate the background web server
+                try:
+                    process.kill()
+                    srv_stdout, srv_stderr = process.communicate(timeout=2)
+                    # Merge server console outputs with response details for logical indicators scanning
+                    stdout_res += "\n" + (srv_stdout.decode("utf-8", errors="ignore") if isinstance(srv_stdout, bytes) else str(srv_stdout or ""))
+                    stderr_res += "\n" + (srv_stderr.decode("utf-8", errors="ignore") if isinstance(srv_stderr, bytes) else str(srv_stderr or ""))
+                except Exception:
+                    pass
+
+                result = subprocess.CompletedProcess(process.args, ret_code, stdout_res, stderr_res)
             else:
                 raise ValueError(f"Unknown delivery mode: {delivery_mode}")
 
