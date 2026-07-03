@@ -8,6 +8,7 @@ class PatchEngineerAgent(BaseAgent):
         self.engine = get_engine(model_provider, self.api_key, model_name)
 
     async def process(self, context: ProgramContext) -> ProgramContext:
+        self.engine.language = context.language
         context.logs.append("[PatchEngineerAgent] Generating secure patch code...")
         
         # Get the first crash payload that triggered

@@ -17,6 +17,7 @@ class PayloadSynthesizerAgent(BaseAgent):
         self.engine = get_engine(model_provider, self.api_key, model_name)
 
     async def process(self, context: ProgramContext) -> ProgramContext:
+        self.engine.language = context.language
         context.logs.append("[PayloadSynthesizerAgent] Synthesizing exploit payloads based on triage...")
         
         vuln_descriptions = []
@@ -24,7 +25,8 @@ class PayloadSynthesizerAgent(BaseAgent):
             vuln_descriptions.append(f"- {v.vuln_type} ({v.cwe}) at line {v.line_number}: {v.metadata.get('reason', '')}")
             
         prompt = f"""You are an expert security fuzzer.
-Generate up to 5 diverse inputs / arguments that will trigger the identified vulnerabilities in the C source code below.
+We are executing targets on operating system platform: {context.os_platform}.
+Generate up to 5 diverse inputs / arguments that will trigger the identified vulnerabilities in the {context.language} source code below.
 
 Vulnerabilities found:
 {"\n".join(vuln_descriptions)}
@@ -36,7 +38,8 @@ RULES:
 1. Provide argument arrays and input data to trigger the crash.
 2. IMPORTANT: Keep all input data and argument strings under 1000 characters. Use short inputs that demonstrate the logic flow (e.g. trigger words like "ABORT" or short buffer strings of length 100) rather than huge strings that break parsing.
 3. DO NOT prepend the program/target executable name (like ./a.out or ./fuzzer_target or argv[0]) to the 'args' list. The first item in the 'args' array must be the first actual argument string that the target program receives (i.e. argv[1]).
-4. Return the results matching the requested JSON schema.
+4. For logical vulnerabilities (like command injection), synthesize payloads that execute commands echoing known success strings (e.g., "echo vuln_triggered", "echo exploit_success", or "echo PWNED") or calling system status commands (e.g., "whoami", "id", or "systeminfo") so that the execution oracle can detect successful shell execution.
+5. Return the results matching the requested JSON schema.
 """
         
         try:

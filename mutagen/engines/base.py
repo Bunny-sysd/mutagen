@@ -24,6 +24,8 @@ class BaseEngine(ABC):
             return "JavaScript"
         elif self.lang == "css":
             return "CSS"
+        elif self.lang == "python":
+            return "Python"
         return "C"
 
     @property
@@ -44,6 +46,8 @@ class BaseEngine(ABC):
             return "js"
         elif self.lang == "css":
             return "css"
+        elif self.lang == "python":
+            return "py"
         return "c"
 
 

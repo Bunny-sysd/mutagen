@@ -382,7 +382,7 @@ If you must use markdown, the parser will try to strip it, but please try to ret
             return ""
 
         text = response.text.strip()
-        for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
+        for prefix in (f"```{self.lang_ext}", "```python", "```rust", "```c", "```"):
             if text.lower().startswith(prefix):
                 text = text[len(prefix):]
                 break
@@ -463,7 +463,7 @@ If you must use markdown, the parser will try to strip it, but please try to ret
             return ""
 
         text = response.text.strip()
-        for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
+        for prefix in (f"```{self.lang_ext}", "```python", "```rust", "```c", "```"):
             if text.lower().startswith(prefix):
                 text = text[len(prefix):]
                 break

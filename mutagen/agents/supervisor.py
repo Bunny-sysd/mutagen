@@ -42,32 +42,17 @@ class FuzzingSupervisorAgent(BaseAgent):
             payload.stdout = result.get("stdout", "")
             payload.stderr = result.get("stderr", "")
             
-            # Identify crash type
-            return_code = payload.exit_code
-            
             # If WDAC/AppLocker blocked, result might contain a DELIVERY_ERROR:
             exec_err = result.get("crash_type", "")
             if "DELIVERY_ERROR" in str(exec_err) or "blocked" in str(payload.stderr).lower():
                 context.logs.append(f"[FuzzingSupervisorAgent] Execution blocked/error for payload {payload.args}: {exec_err} | stderr: {payload.stderr}")
                 
-            if return_code != 0 and return_code is not None and return_code != -1:
-                # Identify crash signature
-                if return_code in (-1073741819, 3221225477):
-                    payload.crash_type = "ACCESS_VIOLATION"
-                elif return_code in (-1073740940, 3221226356):
-                    payload.crash_type = "HEAP_CORRUPTION"
-                elif return_code == -1073741676:
-                    payload.crash_type = "STACK_OVERFLOW"
-                elif return_code == -1073741571:
-                    payload.crash_type = "STACK_BUFFER_OVERRUN"
-                elif return_code < 0:
-                    payload.crash_type = f"SIGNAL_{abs(return_code)}"
-                else:
-                    payload.crash_type = "CRASH"
-                
-                context.logs.append(f"[FuzzingSupervisorAgent] Crash detected! Type: {payload.crash_type}, Code: {return_code} for args: {payload.args}")
+            # Identify crash type using the executor's oracle-resolved crashed flag
+            if result.get("crashed"):
+                payload.crash_type = result.get("crash_type")
+                context.logs.append(f"[FuzzingSupervisorAgent] Vulnerability triggered! Type: {payload.crash_type} for args: {payload.args}")
             else:
                 payload.crash_type = None
-                context.logs.append(f"[FuzzingSupervisorAgent] Payload {payload.args} returned {return_code} (No crash detected)")
+                context.logs.append(f"[FuzzingSupervisorAgent] Payload {payload.args} returned {payload.exit_code} (No vulnerability detected)")
 
         return context

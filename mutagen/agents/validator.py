@@ -21,18 +21,22 @@ class StructuralValidatorAgent(BaseAgent):
             context.verification_status = "REGRESSION_FAILED"
             return context
 
-        # 1. Run Tree-sitter AST Pre-Check
-        result = validate_c_source(patched_code)
-        if not result.is_valid:
-            err_msg = ", ".join(f"line {e.line}: {e.message}" for e in result.errors)
-            context.logs.append(f"[StructuralValidatorAgent] AST Validation failed: {err_msg}")
-            context.verification_status = "REGRESSION_FAILED"
-            return context
-        context.logs.append(f"[StructuralValidatorAgent] AST Validation passed. Parsed {result.node_count} nodes.")
+        # 1. Run Tree-sitter AST Pre-Check (C/C++ only)
+        if context.language == "c":
+            result = validate_c_source(patched_code)
+            if not result.is_valid:
+                err_msg = ", ".join(f"line {e.line}: {e.message}" for e in result.errors)
+                context.logs.append(f"[StructuralValidatorAgent] AST Validation failed: {err_msg}")
+                context.verification_status = "REGRESSION_FAILED"
+                return context
+            context.logs.append(f"[StructuralValidatorAgent] AST Validation passed. Parsed {result.node_count} nodes.")
+        else:
+            context.logs.append(f"[StructuralValidatorAgent] Skipping Tree-sitter AST check for non-C language: {context.language}")
 
-        # 2. Write patch to temporary C file and compile it
+        # 2. Write patch to temporary file and compile/validate it
+        ext = os.path.splitext(context.target_path)[1].lower()
         with tempfile.TemporaryDirectory() as tmpdir:
-            temp_c_path = os.path.join(tmpdir, "patched_target.c")
+            temp_c_path = os.path.join(tmpdir, f"patched_target{ext}")
             with open(temp_c_path, "w", encoding="utf-8") as f:
                 f.write(patched_code)
                 
@@ -67,15 +71,10 @@ class StructuralValidatorAgent(BaseAgent):
                     timeout=5
                 )
                 
-                # Check if it still crashes
-                return_code = res.get("return_code")
-                is_still_crashing = False
-                if return_code != 0 and return_code is not None:
-                    if return_code in (-1073741819, 3221225477, -1073740940, 3221226356, -1073741676, -1073741571) or return_code < 0:
-                        is_still_crashing = True
-                        
+                # Check if it still crashes using the executor's oracle-resolved crashed flag
+                is_still_crashing = res.get("crashed", False)
                 if is_still_crashing:
-                    context.logs.append(f"[StructuralValidatorAgent] Verification failed: Payload {crash.args} still crashed target (exit code: {return_code}).")
+                    context.logs.append(f"[StructuralValidatorAgent] Verification failed: Payload {crash.args} still triggered vulnerability (type: {res.get('crash_type')}).")
                     all_secured = False
                     break
             

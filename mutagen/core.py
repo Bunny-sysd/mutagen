@@ -646,6 +646,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             language = "javascript"
         elif ext == ".css":
             language = "css"
+        elif ext == ".py":
+            language = "python"
         else:
             language = "c"
 

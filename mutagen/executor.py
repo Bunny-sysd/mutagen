@@ -74,7 +74,11 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             args = args[1:]
 
     # --- SANDBOX COMMAND CONSTRUCT ------------------------------------------
-    run_cmd = [exe_path]
+    if exe_path.lower().endswith(".py"):
+        import sys
+        run_cmd = [sys.executable, exe_path]
+    else:
+        run_cmd = [exe_path]
     if sandbox == "docker" and _check_docker_functional():
         abs_exe_path = os.path.abspath(exe_path)
         exe_dir = os.path.dirname(abs_exe_path)
@@ -233,6 +237,14 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         stderr_lower = (result.stderr or "").lower()
         combined_lower = stdout_lower + stderr_lower
 
+        # Strip the input data and arguments from the output to prevent false matches
+        # when the program simply echoes the input back in logs or error messages.
+        clean_output = combined_lower
+        if input_data:
+            clean_output = clean_output.replace(input_data.lower(), "")
+        for arg in args:
+            clean_output = clean_output.replace(arg.lower(), "")
+
         if not crashed:
             logical_indicators = [
                 "access granted",
@@ -251,11 +263,13 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 "operable program or batch file",
                 "command not found",
                 "no such file or directory",
-                "directory nonexistent"
+                "directory nonexistent",
+                "pwned",
+                "pwn"
             ]
 
             for indicator in logical_indicators:
-                if indicator in combined_lower:
+                if indicator in clean_output:
                     crashed = True
                     crash_type = f"LOGICAL_EXPLOIT (Matched signature: '{indicator}')"
                     break

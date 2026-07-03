@@ -117,6 +117,15 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
             raise CompilationError(result.stderr)
         return output_path
 
+    elif ext == ".py":
+        # Python target — syntax check only
+        import sys
+        compile_args = [sys.executable, "-m", "py_compile", source_path]
+        result = subprocess.run(compile_args, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise CompilationError(result.stderr or result.stdout)
+        return source_path
+
     # C/C++ path
     # Dynamically determine output extension based on OS
     if os.name == 'nt':
