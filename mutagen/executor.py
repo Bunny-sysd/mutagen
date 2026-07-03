@@ -116,23 +116,50 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         * On Windows, access violation = return code -1073741819
     """
     try:
+        env = os.environ.copy()
+        workspace_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        if existing_pythonpath:
+            env["PYTHONPATH"] = workspace_dir + os.pathsep + existing_pythonpath
+        else:
+            env["PYTHONPATH"] = workspace_dir
+
         try:
             if delivery_mode == "args":
                 result = subprocess.run(
                     run_cmd + args,
                     capture_output=True,
                     text=True,
-                    timeout=timeout  # Kill if it hangs
+                    timeout=timeout,  # Kill if it hangs
+                    env=env
                 )
             elif delivery_mode == "stdin":
+                # Convert string representations of escapes to raw bytes
+                if isinstance(input_data, str):
+                    try:
+                        input_bytes = input_data.encode('utf-8').decode('unicode_escape').encode('latin-1')
+                    except Exception:
+                        input_bytes = input_data.encode('utf-8')
+                else:
+                    input_bytes = input_data or b""
+
                 result = subprocess.run(
                     run_cmd,
-                    input=input_data,
+                    input=input_bytes,
                     capture_output=True,
-                    text=True,
-                    timeout=timeout
+                    timeout=timeout,
+                    env=env
                 )
             elif delivery_mode.startswith("tcp:"):
+                # Convert string representations of escapes to raw bytes
+                if isinstance(input_data, str):
+                    try:
+                        input_bytes = input_data.encode('utf-8').decode('unicode_escape').encode('latin-1')
+                    except Exception:
+                        input_bytes = input_data.encode('utf-8')
+                else:
+                    input_bytes = input_data or b""
+
                 port = int(delivery_mode.split(":")[1])
                 import socket
                 import time
@@ -140,14 +167,14 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     run_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    env=env
                 )
                 time.sleep(0.5) # Wait for server to start
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     # Use standard loopback address safely
                     sock.connect(("127.0.0.1", port))
-                    sock.sendall(input_data.encode("utf-8"))
+                    sock.sendall(input_bytes)
                     sock.close()
                 except Exception:
                     pass # Might fail if process died immediately
@@ -161,6 +188,12 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     raise subprocess.TimeoutExpired(process.args, timeout, output=stdout, stderr=stderr)
             else:
                 raise ValueError(f"Unknown delivery mode: {delivery_mode}")
+
+            # Ensure outputs are decodable strings for the fuzzing oracle checks
+            if hasattr(result, "stdout") and isinstance(result.stdout, bytes):
+                result.stdout = result.stdout.decode("utf-8", errors="ignore")
+            if hasattr(result, "stderr") and isinstance(result.stderr, bytes):
+                result.stderr = result.stderr.decode("utf-8", errors="ignore")
         except (OSError, ValueError) as e:
             # OSError  — executable not found, permission denied, etc.
             # ValueError — embedded null character in args (Windows-only);

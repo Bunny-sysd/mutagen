@@ -39,7 +39,8 @@ RULES:
 2. IMPORTANT: Keep all input data and argument strings under 1000 characters. Use short inputs that demonstrate the logic flow (e.g. trigger words like "ABORT" or short buffer strings of length 100) rather than huge strings that break parsing.
 3. DO NOT prepend the program/target executable name (like ./a.out or ./fuzzer_target or argv[0]) to the 'args' list. The first item in the 'args' array must be the first actual argument string that the target program receives (i.e. argv[1]).
 4. For logical vulnerabilities (like command injection), synthesize payloads that execute commands echoing known success strings (e.g., "echo vuln_triggered", "echo exploit_success", or "echo PWNED") or calling system status commands (e.g., "whoami", "id", or "systeminfo") so that the execution oracle can detect successful shell execution.
-5. Return the results matching the requested JSON schema.
+5. If the target parses a custom binary protocol, format the 'input_data' string using standard Python string escape sequences (e.g. \x20\x00\x0eis_admin=true\x10\x00\x16echo exploit_success\x30\x00\x00) representing opcodes, lengths, and content data so that the test runner can convert it back to raw bytes.
+6. Return the results matching the requested JSON schema.
 """
         
         try:
