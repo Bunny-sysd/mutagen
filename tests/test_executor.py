@@ -1,5 +1,5 @@
 import subprocess
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch, call, ANY
 import pytest
 from mutagen.executor import execute_payload
 
@@ -35,10 +35,10 @@ def test_execute_payload_stdin_success():
         # Verify that subprocess.run was called with input parameter
         mock_run.assert_called_once_with(
             ["some_exe"],
-            input="hello input",
+            input=b"hello input",
             capture_output=True,
-            text=True,
-            timeout=5
+            timeout=5,
+            env=ANY
         )
 
 def test_execute_payload_crash_access_violation():
@@ -134,7 +134,7 @@ def test_execute_payload_tcp_success():
             ["some_exe"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            env=ANY
         )
 
         # Verify socket connected to the right port
