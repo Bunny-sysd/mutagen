@@ -46,3 +46,9 @@ tcc.zip
 # OS files
 .DS_Store
 Thumbs.db
+
+# Product Hunt & Test Mocks
+product_hunt_assets/
+defects4c_mock_*
+targets_test_batch/
+batch_report.html
