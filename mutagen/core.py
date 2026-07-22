@@ -500,7 +500,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         from mutagen.orchestrator import AgentOrchestrator
         
         # Read target source
-        with open(source_path, encoding="utf-8") as f:
+        with open(source_path, encoding="utf-8", errors="ignore") as f:
             source_code = f.read()
             
         orchestrator = AgentOrchestrator(
