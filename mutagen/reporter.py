@@ -100,14 +100,34 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     # --- HTML REPORT ---------------------------------------------------
     html_file = f"crashes/report_{target_name}_{timestamp}.html"
 
+    # Deduplicate crashes by signature (including reason) to avoid repeating identical vulnerabilities
+    deduped_crashes_map = {}
+    for c in crashes:
+        sig = f"{c.get('vuln_type', '')}::{c.get('cwe', '')}::{c.get('line_number', '')}::{c.get('crash_type', '')}::{c.get('reason', '')}"
+        if sig not in deduped_crashes_map:
+            deduped_crashes_map[sig] = {
+                "primary": c,
+                "count": 1,
+                "payloads": [c.get("args") or c.get("payload") or "N/A"]
+            }
+        else:
+            deduped_crashes_map[sig]["count"] += 1
+            deduped_crashes_map[sig]["payloads"].append(c.get("args") or c.get("payload") or "N/A")
+
+    unique_crashes_list = list(deduped_crashes_map.values())
+    unique_crashes_list.sort(key=lambda x: x["primary"].get("confidence_score", 5), reverse=True)
+
     crash_rows = ""
-    crashes_sorted = sorted(crashes, key=lambda x: x.get("confidence_score", 5), reverse=True)
-    for i, c in enumerate(crashes_sorted):
+    for i, item in enumerate(unique_crashes_list):
+        c = item["primary"]
+        count = item["count"]
         args_raw = c.get("args")
         if not args_raw:
             payload_raw = c.get("payload")
             args_raw = [payload_raw] if payload_raw is not None else ["N/A"]
         args_display = ", ".join(str(x) for x in args_raw) if isinstance(args_raw, list) else str(args_raw)
+        if count > 1:
+            args_display += f" (and {count - 1} other variant payload{'s' if count > 2 else ''})"
         if len(args_display) > 60:
             args_display = args_display[:57] + "..."
         severity = c.get("severity") or "unknown"
