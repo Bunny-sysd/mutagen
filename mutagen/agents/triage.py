@@ -6,6 +6,8 @@ import json
 from google import genai
 from pydantic import BaseModel
 
+from mutagen.agents.prompts import get_triage_prompt
+
 class TriageResult(BaseModel):
     class VulnItem(BaseModel):
         vuln_type: str
@@ -29,20 +31,7 @@ class TriageAgent(BaseAgent):
         pretarget = analyze_source(context.source_code)
         focused_code = pretarget.focused_code if pretarget.findings else context.source_code
         
-        prompt = f"""You are a lead security code auditor.
-Analyze the following source code and:
-1. Identify all security vulnerabilities (e.g., Use After Free, Double Free, Buffer Overflow).
-2. Determine how the code accepts input data.
-   - If the code defines a web/API server, HTTP router, or endpoint handlers (e.g. `@app.route`, `@app.get`, `@app.post`, `Flask`, `FastAPI`, `tornado`, `http.server`, `django` routes) -> select "http".
-   - If the code uses standard input reading functions like `fgets`, `gets`, `read(0, ...)`, `scanf`, `cin >>`, `sys.stdin.read` -> select "stdin".
-   - If the code uses socket functions like `socket`, `bind`, `listen`, `accept` -> select "tcp".
-   - Otherwise (uses `argv`, `argc`, `getopt`, or has no obvious stdin/socket/http read) -> select "args".
-
-Return the findings strictly adhering to the requested JSON schema. Do not generate exploit payloads or giant fuzz strings here.
-
-Source Code:
-{focused_code}
-"""
+        prompt = get_triage_prompt(context.language, focused_code)
         
         try:
             if self.model_provider == "gemini" and hasattr(self.engine, "client") and hasattr(self.engine.client, "models"):

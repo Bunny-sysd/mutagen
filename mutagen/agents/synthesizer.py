@@ -4,6 +4,8 @@ from mutagen.engines import get_engine
 import json
 from pydantic import BaseModel
 
+from mutagen.agents.prompts import get_synthesizer_rules
+
 class PayloadList(BaseModel):
     class PayloadItem(BaseModel):
         args: list[str]
@@ -20,13 +22,20 @@ class PayloadSynthesizerAgent(BaseAgent):
         self.engine.language = context.language
         context.logs.append("[PayloadSynthesizerAgent] Synthesizing exploit payloads based on triage...")
         
-        vuln_descriptions = []
-        for v in context.vulnerabilities:
-            vuln_descriptions.append(f"- {v.vuln_type} ({v.cwe}) at line {v.line_number}: {v.metadata.get('reason', '')}")
-            
-        prompt = f"""You are an expert security fuzzer.
-We are executing targets on operating system platform: {context.os_platform}.
-Generate up to 5 diverse inputs / arguments that will trigger the identified vulnerabilities in the {context.language} source code below.
+        if not context.vulnerabilities:
+            context.logs.append("[PayloadSynthesizerAgent] No vulnerabilities to synthesize payloads for.")
+            return context
+
+        vuln_descriptions = [
+            f"- {v.vuln_type} at line {v.line_number} ({v.cwe}): {v.metadata.get('reason', '')}"
+            for v in context.vulnerabilities
+        ]
+        
+        lang_rules = get_synthesizer_rules(context.language)
+
+        prompt = f"""You are an elite offensive security researcher and exploit developer.
+Target System Platform: {context.os_platform} (Language: {context.language})
+Your objective is to generate exact crash/exploit payloads to reproduce the identified security flaws.
 
 Vulnerabilities found:
 {"\n".join(vuln_descriptions)}
@@ -36,11 +45,10 @@ Source Code:
 
 RULES:
 1. Provide argument arrays and input data to trigger the crash.
-2. IMPORTANT: Keep all input data and argument strings under 1000 characters. Use short inputs that demonstrate the logic flow (e.g. trigger words like "ABORT" or short buffer strings of length 100) rather than huge strings that break parsing.
-3. DO NOT prepend the program/target executable name (like ./a.out or ./fuzzer_target or argv[0]) to the 'args' list. The first item in the 'args' array must be the first actual argument string that the target program receives (i.e. argv[1]).
-4. For logical vulnerabilities (like command injection), synthesize payloads that execute commands echoing known success strings (e.g., "echo vuln_triggered", "echo exploit_success", or "echo PWNED") or calling system status commands (e.g., "whoami", "id", or "systeminfo") so that the execution oracle can detect successful shell execution.
-5. If the target parses a custom binary protocol, format the 'input_data' string using standard Python string escape sequences (e.g. \x20\x00\x0eis_admin=true\x10\x00\x16echo exploit_success\x30\x00\x00) representing opcodes, lengths, and content data so that the test runner can convert it back to raw bytes.
-6. If the target is a Web API server or HTTP router, format the 'input_data' string as a JSON serialized request dict (e.g., {{"method": "GET", "path": "/ping", "params": {{"ip": "payload"}}}} or {{"method": "POST", "path": "/api/config", "json": {{"key": "val"}}}}) so that the fuzzer can automatically resolve, query, and test the endpoints.
+2. IMPORTANT: Keep all input data and argument strings under 1000 characters. Use short inputs that demonstrate the logic flow.
+3. DO NOT prepend the program/target executable name to the 'args' list.
+4. For logical vulnerabilities (like command injection), synthesize payloads that execute commands echoing known success strings (e.g., "echo vuln_triggered", "echo exploit_success", or "echo PWNED") or calling system status commands (e.g., "whoami", "id", or "systeminfo").
+{lang_rules}
 7. Return the results matching the requested JSON schema.
 """
         
