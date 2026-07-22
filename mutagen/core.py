@@ -556,7 +556,10 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         patch_ext = os.path.splitext(source_path)[1].replace(".", "")
         
         if patch_code:
-            patch_file = f"patches/{target_name.replace(os.path.splitext(source_path)[1], '_FIXED.c')}"
+            ext = os.path.splitext(source_path)[1]
+            patch_suffix = f"_FIXED{ext}" if ext else "_FIXED.c"
+            base_no_ext = os.path.splitext(target_name)[0]
+            patch_file = f"patches/{base_no_ext}{patch_suffix}"
             os.makedirs("patches", exist_ok=True)
             with open(patch_file, "w", encoding="utf-8") as f:
                 f.write(patch_code)
