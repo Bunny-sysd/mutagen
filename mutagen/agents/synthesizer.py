@@ -45,21 +45,29 @@ RULES:
 """
         
         try:
-            response = self.engine.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config={
-                    "temperature": 0.5,
-                    "response_mime_type": "application/json",
-                    "response_schema": PayloadList,
-                    "safety_settings": [
-                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                    ],
-                }
-            )
-            
-            raw_text = response.text.strip()
-            data = json.loads(raw_text)
+            if self.model_provider == "gemini" and hasattr(self.engine, "client") and hasattr(self.engine.client, "models"):
+                response = self.engine.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config={
+                        "temperature": 0.5,
+                        "response_mime_type": "application/json",
+                        "response_schema": PayloadList,
+                        "safety_settings": [
+                            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                        ],
+                    }
+                )
+                raw_text = response.text.strip()
+                data = json.loads(raw_text)
+            else:
+                # Multi-provider fallback for OpenAI, Claude, and Ollama
+                payload_items = getattr(self.engine, "_parse_generate", lambda *a, **kw: [])(
+                    prompt=prompt,
+                    response_model=PayloadList,
+                    list_key="payloads"
+                )
+                data = {"payloads": payload_items}
             
             payloads = data.get("payloads", [])
             for p in payloads:

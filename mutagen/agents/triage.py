@@ -45,22 +45,29 @@ Source Code:
 """
         
         try:
-            # Query genai Client directly with structured Pydantic schema for absolute reliability
-            response = self.engine.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config={
-                    "temperature": 0.1,
-                    "response_mime_type": "application/json",
-                    "response_schema": TriageResult,
-                    "safety_settings": [
-                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                    ],
-                }
-            )
-            
-            raw_text = response.text.strip()
-            data = json.loads(raw_text)
+            if self.model_provider == "gemini" and hasattr(self.engine, "client") and hasattr(self.engine.client, "models"):
+                response = self.engine.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config={
+                        "temperature": 0.1,
+                        "response_mime_type": "application/json",
+                        "response_schema": TriageResult,
+                        "safety_settings": [
+                            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                        ],
+                    }
+                )
+                raw_text = response.text.strip()
+                data = json.loads(raw_text)
+            else:
+                # Multi-provider fallback for OpenAI, Claude, and Ollama
+                vuln_items = getattr(self.engine, "_parse_generate", lambda *a, **kw: [])(
+                    prompt=prompt,
+                    response_model=TriageResult,
+                    list_key="vulnerabilities"
+                )
+                data = {"vulnerabilities": vuln_items, "suggested_delivery_mode": "args"}
             
             # Save detected delivery mode
             detected_mode = data.get("suggested_delivery_mode", "args").lower()
