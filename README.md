@@ -143,7 +143,7 @@ graph LR
 
 ```bash
 # Clone
-git clone https://github.com/yourusername/mutagen.git
+git clone https://github.com/Bunny-sysd/mutagen.git
 cd mutagen
 
 # Install
