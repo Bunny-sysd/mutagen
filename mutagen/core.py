@@ -499,9 +499,19 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         from mutagen.orchestrator import AgentOrchestrator
 
-        # Read target source
-        with open(source_path, encoding="utf-8", errors="ignore") as f:
-            source_code = f.read()
+        # Read target source (or decompile if target is a binary)
+        from mutagen.decompiler import decompile_binary, find_ghidra, is_binary_target
+        if is_binary_target(source_path) or binary_mode:
+            console.print(f"[bold magenta]Decompiling Binary Target: {source_path}[/bold magenta]")
+            try:
+                ghidra_bin = find_ghidra(ghidra_path) if decompiler == "ghidra" else decompiler_path
+            except Exception:
+                ghidra_bin = ""
+            decomp_res = decompile_binary(source_path, ghidra_bin, all_functions=decompile_all, decompiler=decompiler, decompiler_path=decompiler_path)
+            source_code = decomp_res.pseudo_source or "// Binary decompilation produced no symbols."
+        else:
+            with open(source_path, encoding="utf-8", errors="ignore") as f:
+                source_code = f.read()
 
         orchestrator = AgentOrchestrator(
             target_path=source_path,
@@ -730,7 +740,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         # 2. Locate buggy file in mount directory.
         # Format of bug_id: project@commit
         parts = source_path.split("@")
-        project_name = parts[0] if parts else "project"
+        _project_name = parts[0] if parts else "project"
 
         # Look for source file in mounted dir. Benchmark targets are typically in standard paths inside the cloned repo.
         # We walk the mount directory to find the modified/buggy C files.
