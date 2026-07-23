@@ -5,6 +5,7 @@ import json
 from pydantic import BaseModel
 
 from mutagen.agents.prompts import get_synthesizer_rules
+from mutagen.poc_finder import get_cwe_poc_intelligence
 
 class PayloadList(BaseModel):
     class PayloadItem(BaseModel):
@@ -26,12 +27,22 @@ class PayloadSynthesizerAgent(BaseAgent):
             context.logs.append("[PayloadSynthesizerAgent] No vulnerabilities to synthesize payloads for.")
             return context
 
+        # Query GitHub PoC Intelligence for real-world exploit snippets
+        poc_hints = []
+        for v in context.vulnerabilities[:2]:
+            intel = get_cwe_poc_intelligence(v.cwe, v.vuln_type)
+            for poc in intel.get("github_pocs", []):
+                poc_str = f"GitHub PoC ({poc['name']}): {poc['url']} - {poc['description']}"
+                poc_hints.append(poc_str)
+                context.notepad.append(f"[Intelligence] {poc_str}")
+
         vuln_descriptions = [
             f"- {v.vuln_type} at line {v.line_number} ({v.cwe}): {v.metadata.get('reason', '')}"
             for v in context.vulnerabilities
         ]
         
         lang_rules = get_synthesizer_rules(context.language)
+        poc_context_str = ("\nReal-World GitHub PoC Intelligence:\n" + "\n".join(poc_hints)) if poc_hints else ""
 
         prompt = f"""You are an elite offensive security researcher and exploit developer.
 Target System Platform: {context.os_platform} (Language: {context.language})
@@ -39,6 +50,7 @@ Your objective is to generate exact crash/exploit payloads to reproduce the iden
 
 Vulnerabilities found:
 {"\n".join(vuln_descriptions)}
+{poc_context_str}
 
 Source Code:
 {context.source_code}
