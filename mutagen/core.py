@@ -534,12 +534,30 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     "crash_type": p.crash_type,
                     "stdout": p.stdout,
                     "stderr": p.stderr,
-                    "vuln_type": "Memory Corruption",
-                    "cwe": "CWE-120",
-                    "severity": "critical"
+                    "vuln_type": getattr(p, "vuln_type", "Memory Corruption"),
+                    "cwe": getattr(p, "cwe", "CWE-120"),
+                    "severity": getattr(p, "severity", "critical")
                 }
                 crashes.append(crash_dict)
                 unique_crashes.append(crash_dict)
+                
+        # If compilation failed or no active crash reproduced, convert triaged vulnerabilities to findings
+        if not crashes and context.vulnerabilities:
+            for v in context.vulnerabilities:
+                finding = {
+                    "args": ["N/A"],
+                    "input_data": "",
+                    "return_code": 0,
+                    "crash_type": "Static Triage Finding (Header/Compilation missing)",
+                    "stdout": "",
+                    "stderr": "",
+                    "vuln_type": v.vuln_type,
+                    "cwe": v.cwe,
+                    "severity": v.severity,
+                    "reason": v.metadata.get("reason", "Identified by TriageAgent during static analysis")
+                }
+                crashes.append(finding)
+                unique_crashes.append(finding)
                 
         patch_file = ""
         exploit_file = ""
@@ -569,6 +587,16 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             exploit_file = f"exploits/{target_name.replace(os.path.splitext(source_path)[1], '_exploit.py')}"
             with open(exploit_file, "w", encoding="utf-8") as f:
                 f.write(exploit_code)
+
+        # Generate report for all runs
+        json_file, html_file = save_crash_report(
+            crashes, target_name, len(context.active_payloads), patch_code, exploit_code,
+            language=patch_ext, profile=profile, static_only=(not active_crashes if 'active_crashes' in locals() else False),
+            raw_decompiled_code="", clean_source_code=source_code,
+            webhook_url=webhook_url,
+            webhook_secret=webhook_secret,
+            webhook_headers=webhook_headers,
+        )
                 
         if crashes:
             json_file, html_file = save_crash_report(

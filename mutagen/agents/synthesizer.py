@@ -67,7 +67,26 @@ RULES:
                     }
                 )
                 raw_text = response.text.strip()
-                data = json.loads(raw_text)
+                if raw_text.startswith("```"):
+                    parts = raw_text.split("```")
+                    raw_text = parts[1] if len(parts) > 1 else raw_text
+                    if raw_text.startswith("json"):
+                        raw_text = raw_text[4:]
+                    raw_text = raw_text.strip()
+                
+                try:
+                    data = json.loads(raw_text)
+                except Exception:
+                    try:
+                        data = json.loads(raw_text, strict=False)
+                    except Exception:
+                        # Fallback parsing regex for JSON structure if string escaping broke
+                        import re
+                        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+                        if match:
+                            data = json.loads(match.group(0), strict=False)
+                        else:
+                            raise
             else:
                 # Multi-provider fallback for OpenAI, Claude, and Ollama
                 payload_items = getattr(self.engine, "_parse_generate", lambda *a, **kw: [])(
