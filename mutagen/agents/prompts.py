@@ -1,120 +1,160 @@
 """
 Language-Isolated Prompt Registry for Mutagen Swarm Micro-Agents.
-Guarantees that target code only receives security audit prompts,
-vulnerability heuristics, payload rules, and patch guidelines tailored
-strictly to its runtime and language semantics.
+Uses First-Principles Adversarial Threat Modeling to discover novel
+zero-days, implicit developer assumption flaws, state machine violations,
+and boundary edge cases beyond hardcoded vulnerability checklists.
 """
 
-# --- TRIAGE PROMPTS ---
+# --- FIRST-PRINCIPLES TRIAGE PROMPTS ---
 
 TRIAGE_PROMPTS = {
-    "rust": """You are an expert Rust security auditor.
-Analyze the provided Rust source code and:
-1. Identify memory safety and crash vulnerabilities specific to Rust:
-   - Improper `unsafe` blocks or raw pointer dereferences
-   - Out-of-bounds array/slice indexing triggering runtime `panic!`
-   - Unhandled `.unwrap()` or `.expect()` calls on `None`/`Err` leading to DoS panics
-   - Integer overflow/underflow in release/debug builds
-   - Concurrency deadlocks or data races
-2. Determine how the target receives input:
-   - Standard input reading (`std::io::stdin()`, `read_to_string`) -> "stdin"
-   - TCP socket bindings (`TcpListener`, `TcpStream`) -> "tcp"
-   - Web framework routes (`actix-web`, `axum`, `rocket`) -> "http"
-   - Command line arguments (`std::env::args`, `clap`) -> "args"
+    "c": """You are an elite zero-day security researcher operating from first principles.
+Do NOT limit your analysis to basic buffer overflows or known function names. Analyze the target C/C++ source code by asking:
 
-Source Code:
-{source_code}
-""",
+1. TAINT FLOW ANALYSIS:
+   - Where does untrusted user data enter the system (sources)?
+   - How is this data parsed, transformed, or copied?
+   - Where does it reach sensitive operations, memory pointers, or system calls (sinks)?
 
-    "python": """You are an expert Python security auditor.
-Analyze the provided Python source code and:
-1. Identify vulnerabilities specific to Python:
-   - OS Command Injection (`os.system`, `subprocess.run(..., shell=True)`, `os.popen`)
-   - Arbitrary Attribute Overwrite (`setattr`, `__dict__` manipulation)
-   - Unsafe Deserialization (`pickle.loads`, `yaml.unsafe_load`)
-   - Code execution via `eval()`, `exec()`, or dynamic imports
-   - Server-Side Template Injection (SSTI) or Path Traversal
-2. Determine how the target receives input:
-   - Web framework routes (`Flask`, `FastAPI`, `Django`, `http.server`) -> "http"
-   - Standard input (`sys.stdin.read`, `input()`) -> "stdin"
-   - Sockets (`socket.socket`, `asyncio.start_server`) -> "tcp"
-   - Command line arguments (`sys.argv`, `argparse`) -> "args"
+2. IMPLICIT DEVELOPER ASSUMPTIONS (What did the developer assume that an attacker can break?):
+   - Do they assume input length is positive or under a certain size?
+   - Do they assume strings are null-terminated or contain no control characters (`\\0`, `\\r`, `\\n`, `%`)?
+   - Do they assume integer arithmetic (`+`, `-`, `*`) will never wrap or underflow?
+   - Do they assume memory allocations (`malloc`, `calloc`) never return NULL or 0-sized blocks?
+   - Do they assume pointers are valid before dereferencing?
+   - Do they assume state variables or multi-step operations complete in exact order?
 
-Source Code:
-{source_code}
-""",
+3. CREATIVE VULNERABILITY & BOUNDARY DISCOVERY:
+   - Identify ANY flaw, memory corruption, logic bug, off-by-one, type confusion, unhandled return code, or state machine desynchronization.
 
-    "go": """You are an expert Go (Golang) security auditor.
-Analyze the provided Go source code and:
-1. Identify vulnerabilities specific to Go:
-   - Nil pointer dereferences triggering runtime panics
-   - Slice bounds out of range panics
-   - OS Command Injection (`os/exec.Command("sh", "-c", ...)`)
-   - Unhandled channel deadlocks or goroutine leaks
-   - Path traversal or unsafe `unsafe.Pointer` usage
-2. Determine how the target receives input:
-   - Web framework / HTTP routes (`net/http`, `gin`, `fiber`, `echo`) -> "http"
-   - Standard input (`os.Stdin`, `bufio.NewScanner`) -> "stdin"
-   - Sockets (`net.Listen`, `net.Dial`) -> "tcp"
-   - Command line arguments (`os.Args`, `flag`) -> "args"
-
-Source Code:
-{source_code}
-""",
-
-    "javascript": """You are an expert JavaScript/TypeScript security auditor.
-Analyze the provided Node.js/JS source code and:
-1. Identify vulnerabilities specific to JavaScript/TypeScript:
-   - Prototype Pollution (`Object.assign`, deep merge, `__proto__` injection)
-   - OS Command Injection (`child_process.exec`, `child_process.spawn(..., {shell: true})`)
-   - Code execution via `eval()`, `new Function()`, `vm.runInContext`
-   - Unhandled promise rejections or server crash panics
-   - Path Traversal (`fs.readFile` with user input)
-2. Determine how the target receives input:
-   - Web framework routes (`express`, `fastify`, `koa`, `http.createServer`) -> "http"
-   - Standard input (`readline`, `process.stdin`) -> "stdin"
-   - Sockets (`net.createServer`, `ws`) -> "tcp"
-   - Command line arguments (`process.argv`, `commander`) -> "args"
-
-Source Code:
-{source_code}
-""",
-
-    "c": """You are an expert C/C++ security auditor.
-Analyze the provided C/C++ source code and:
-1. Identify memory corruption vulnerabilities:
-   - Stack/Heap Buffer Overflows (`strcpy`, `strcat`, `sprintf`, `gets`, unchecked loops)
-   - Format String vulnerabilities (`printf(user_input)`)
-   - Use-After-Free (UAF) or Double Free
-   - Off-by-one errors or Integer Overflows leading to allocation errors
-   - Command Injection (`system()`, `popen()`)
-2. Determine how the target receives input:
-   - Standard input (`fgets`, `gets`, `read(0, ...)`, `scanf`, `cin >>`) -> "stdin"
+4. INPUT DELIVERY MODE:
+   - Standard input reading (`fgets`, `gets`, `read(0, ...)`, `scanf`, `cin >>`) -> "stdin"
    - Socket functions (`socket`, `bind`, `listen`, `accept`) -> "tcp"
    - HTTP/Web server libraries -> "http"
-   - Command line arguments (`argv`, `argc`, `getopt`) -> "args"
+   - Otherwise -> "args"
+
+Source Code:
+{source_code}
+""",
+
+    "rust": """You are an elite Rust zero-day security researcher operating from first principles.
+Do NOT limit your analysis to standard checklists. Analyze the target Rust source code by asking:
+
+1. TAINT FLOW & BOUNDARY ANALYSIS:
+   - How does untrusted data move through the program?
+   - Where are slice indices, collection lookups, or array bounds computed?
+
+2. IMPLICIT DEVELOPER ASSUMPTIONS (What assumptions can an attacker break?):
+   - Where does code rely on `.unwrap()`, `.expect()`, or `[]` indexing that panics on unexpected `None`/`Err` or out-of-bounds inputs?
+   - What occurs inside `unsafe` blocks? Are raw pointer boundaries, lifetimes, or alignment assumptions strictly validated?
+   - Can integer arithmetic wrap or panic in debug/release mode?
+   - Are there concurrency deadlocks, shared mutable state race conditions, or unhandled task panics?
+
+3. CREATIVE VULNERABILITY DISCOVERY:
+   - Identify ANY flaw, panic trigger, memory safety violation, resource exhaustion, or logic error.
+
+4. INPUT DELIVERY MODE:
+   - Standard input (`std::io::stdin()`, `read_to_string`) -> "stdin"
+   - TCP socket (`TcpListener`, `TcpStream`) -> "tcp"
+   - Web routes (`actix-web`, `axum`, `rocket`) -> "http"
+   - Otherwise -> "args"
+
+Source Code:
+{source_code}
+""",
+
+    "python": """You are an elite Python zero-day security researcher operating from first principles.
+Do NOT limit your analysis to simple keyword matches. Analyze the target Python source code by asking:
+
+1. TAINT FLOW & AUDIT:
+   - Trace how untrusted input reaches dynamic execution (`eval`, `exec`, `importlib`), system commands, file I/O, or object instantiation.
+
+2. IMPLICIT DEVELOPER ASSUMPTIONS (What assumptions can an attacker break?):
+   - Does code assume dictionary keys, JSON fields, or attributes always exist?
+   - Is user input passed to `setattr`, `__dict__`, or object constructors enabling attribute/prototype manipulation?
+   - Does input reaching deserializers (`pickle`, `yaml.unsafe_load`, `shelve`) allow arbitrary code execution?
+   - Can unhandled exceptions cause DoS server crashes?
+
+3. CREATIVE VULNERABILITY DISCOVERY:
+   - Identify ANY vulnerability, command injection, path traversal, SSTI, attribute overwrite, or business logic flaw.
+
+4. INPUT DELIVERY MODE:
+   - Web framework (`Flask`, `FastAPI`, `Django`, `http.server`) -> "http"
+   - Standard input (`sys.stdin`, `input()`) -> "stdin"
+   - Socket (`socket.socket`, `asyncio`) -> "tcp"
+   - Otherwise -> "args"
+
+Source Code:
+{source_code}
+""",
+
+    "go": """You are an elite Go (Golang) zero-day security researcher operating from first principles.
+Do NOT limit your analysis to basic rules. Analyze the target Go source code by asking:
+
+1. TAINT FLOW & BOUNDARY AUDIT:
+   - Trace untrusted input from parameters or sockets to slice operations, pointers, and command executions.
+
+2. IMPLICIT DEVELOPER ASSUMPTIONS (What assumptions can an attacker break?):
+   - Where can a nil pointer dereference occur, triggering an unhandled runtime panic?
+   - Can slice indexing (`slice[i:j]`) trigger out-of-bounds panics?
+   - Can goroutines or channel communications deadlock or leak memory?
+   - Is user input passed unsanitized to `os/exec` or path functions?
+
+3. CREATIVE VULNERABILITY DISCOVERY:
+   - Identify ANY panic condition, memory flaw, command injection, path traversal, or concurrency bug.
+
+4. INPUT DELIVERY MODE:
+   - Web/HTTP routes (`net/http`, `gin`, `fiber`, `echo`) -> "http"
+   - Standard input (`os.Stdin`, `bufio`) -> "stdin"
+   - Socket (`net.Listen`, `net.Dial`) -> "tcp"
+   - Otherwise -> "args"
+
+Source Code:
+{source_code}
+""",
+
+    "javascript": """You are an elite JavaScript/TypeScript zero-day security researcher operating from first principles.
+Do NOT limit your analysis to standard lists. Analyze the target Node.js/JS source code by asking:
+
+1. TAINT FLOW & ADVERSARIAL AUDIT:
+   - Trace untrusted input into object merges, command execution, `eval`, or file access.
+
+2. IMPLICIT DEVELOPER ASSUMPTIONS (What assumptions can an attacker break?):
+   - Can inputs contaminate Object prototypes (`__proto__`, `constructor.prototype`) via deep merge or assignment?
+   - Does code assume properties are primitive types rather than objects or arrays?
+   - Can unhandled promise rejections or uncaught exceptions crash the server process?
+
+3. CREATIVE VULNERABILITY DISCOVERY:
+   - Identify ANY prototype pollution, command injection, code evaluation, path traversal, or DoS vulnerability.
+
+4. INPUT DELIVERY MODE:
+   - Web routes (`express`, `fastify`, `koa`, `http.createServer`) -> "http"
+   - Standard input (`readline`, `process.stdin`) -> "stdin"
+   - Sockets (`net.createServer`, `ws`) -> "tcp"
+   - Otherwise -> "args"
 
 Source Code:
 {source_code}
 """
 }
 
-# --- SYNTHESIZER PROMPTS ---
+# --- CREATIVE SYNTHESIZER RULES ---
 
 SYNTHESIZER_RULES = {
-    "rust": """5. For Rust targets, format payloads that trigger slice boundary panics, unwrap panics, or input strings that reach unsafe blocks.
+    "c": """5. For C/C++ targets, generate unconventional boundary inputs: mismatched length headers, integer wrap boundaries (-1, 2147483647), control character smuggling (\\x00, %s, %x), or long buffer triggers.
 6. If the target is a Web API server, format 'input_data' as a JSON serialized request dict (e.g. {{"method": "GET", "path": "/ping", "params": {{"ip": "payload"}}}}).""",
 
-    "python": """5. For custom binary protocol targets, format 'input_data' using standard Python string escape sequences (e.g. \\x20\\x00\\x0eis_admin=true).
-6. For Web API routers (Flask/FastAPI/http.server), format 'input_data' as a JSON serialized request dict (e.g. {{"method": "GET", "path": "/ping", "params": {{"ip": "payload"}}}} or {{"method": "POST", "path": "/api/config", "json": {{"key": "val"}}}}).""",
+    "rust": """5. For Rust targets, generate inputs that violate expected invariants: zero-length slices, boundary wrapping numbers, malformed tokens, or strings triggering unwrap panics.
+6. If the target is a Web API server, format 'input_data' as a JSON serialized request dict (e.g. {{"method": "GET", "path": "/ping", "params": {{"ip": "payload"}}}}).""",
 
-    "go": """5. For Go targets, format payloads that trigger nil pointer panics, array slice index panics, or command injection args.
+    "python": """5. For Python targets, synthesize polyglots, attribute override payloads (e.g. __proto__, __dict__), shell metacharacter chains, or unescaped control chars (\\x00\\x0a).
+6. For Web API routers (Flask/FastAPI), format 'input_data' as a JSON serialized request dict (e.g. {{"method": "GET", "path": "/ping", "params": {{"ip": "payload"}}}}).""",
+
+    "go": """5. For Go targets, format inputs that trigger nil pointer panics, slice index panics, or shell command injections.
 6. If the target is a Web HTTP router, format 'input_data' as a JSON serialized request dict (e.g. {{"method": "GET", "path": "/ping", "params": {{"ip": "payload"}}}}).""",
 
-    "javascript": """5. For JS/Node targets, format payloads that trigger prototype pollution (e.g. {{"__proto__": {{"admin": true}}}}), command injection, or eval payloads.
-6. If the target is an Express/HTTP server, format 'input_data' as a JSON serialized request dict (e.g. {{"method": "POST", "path": "/api", "json": {{"key": "val"}}}}).""",
-
-    "c": """5. For C/C++ targets, format binary buffers, long overflow strings (e.g. 200 'A's), or format specifiers (e.g. %x%x%s) to trigger memory crashes or signal violations."""
+    "javascript": """5. For JS/Node targets, synthesize prototype pollution payloads (e.g. {{"__proto__": {{"admin": true}}}}), command injection, or eval code strings.
+6. If the target is an Express/HTTP server, format 'input_data' as a JSON serialized request dict (e.g. {{"method": "POST", "path": "/api", "json": {{"key": "val"}}}})."""
 }
 
 def get_triage_prompt(language: str, source_code: str) -> str:
