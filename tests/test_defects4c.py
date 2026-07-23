@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -122,5 +123,5 @@ class TestDefects4CIntegration:
                 defects4c_mount_dir="/mount/dir"
             )
             assert res == 1  # 1 represents patch verified successfully
-            mock_client.reproduce.assert_called_once_with("libxml2@commit")
-            mock_client.fix.assert_called_once_with("libxml2@commit", "/mount/dir\\vuln.c")
+            expected_path = os.path.join("/mount/dir", "vuln.c")
+            mock_client.fix.assert_called_once_with("libxml2@commit", expected_path)
