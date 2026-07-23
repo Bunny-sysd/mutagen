@@ -375,44 +375,242 @@ def generate_html_report(results: list[dict], output_path: str):
             <span>Audited Project Resources ({total_files} files)</span>
         </div>
         
-        {"".join([f"""
+    # Pre-render file panels for Python 3.10+ compatibility
+    file_panels = []
+    for r in results:
+        base_name = os.path.basename(r["file"])
+        file_path = r["file"]
+        findings = r.get("findings", [])
+        status = r.get("status")
+
+        crit_count = len([f for f in findings if f["severity"].lower() == "critical"])
+        high_count = len([f for f in findings if f["severity"].lower() == "high"])
+        med_count = len([f for f in findings if f["severity"].lower() == "medium"])
+        low_count = len([f for f in findings if f["severity"].lower() == "low"])
+
+        crit_badge = f'<span class="badge critical">{crit_count} Critical</span>' if crit_count > 0 else ''
+        high_badge = f'<span class="badge high">{high_count} High</span>' if high_count > 0 else ''
+        med_badge = f'<span class="badge medium">{med_count} Med</span>' if med_count > 0 else ''
+        low_badge = f'<span class="badge low">{low_count} Low</span>' if low_count > 0 else ''
+        clean_badge = '<span class="badge clean">Clean</span>' if len(findings) == 0 and status == "success" else ''
+        failed_badge = '<span class="badge failed">Audit Failed</span>' if status == "failed" else ''
+
+        clean_msg = '<p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 1rem;">No vulnerabilities detected in this target.</p>' if len(findings) == 0 and status == "success" else ''
+        fail_msg = f'<p style="color: var(--crit-color); font-size: 0.95rem; margin-top: 1rem;">Failed to scan: {r.get("error")}</p>' if status == "failed" else ''
+
+        finding_cards = []
+        for f in findings:
+            vuln_type = f["vuln_type"]
+            severity = f["severity"]
+            sev_lower = severity.lower()
+            reason = f["reason"]
+            cwe = f["cwe"] if f["cwe"] else 'N/A'
+            conf = f.get("confidence_score", "N/A")
+            payload = f.get("payload")
+            payload_html = f'<div class="finding-payload"><b>Exploit Trigger Input:</b> {payload}</div>' if payload else ''
+
+            finding_cards.append(f"""
+                <div class="finding-card">
+                    <div class="finding-title">
+                        <div class="finding-name">{vuln_type}</div>
+                        <span class="badge {sev_lower}">{severity}</span>
+                    </div>
+                    <div class="finding-reason">{reason}</div>
+                    <div class="finding-meta">
+                        <div>CWE: {cwe}</div>
+                        <div>Trigger Confidence: {conf}/10</div>
+                    </div>
+                    {payload_html}
+                </div>
+            """)
+
+        findings_html = "".join(finding_cards)
+
+        file_panels.append(f"""
         <div class="file-panel">
             <div class="file-header" onclick="toggleDetails(this)">
                 <div class="file-info">
-                    <div class="file-name">{os.path.basename(r["file"])}</div>
-                    <div class="file-path">{r["file"]}</div>
+                    <div class="file-name">{base_name}</div>
+                    <div class="file-path">{file_path}</div>
                 </div>
                 <div class="file-stats">
-                    {f'<span class="badge critical">{len([f for f in r["findings"] if f["severity"].lower() == "critical"])} Critical</span>' if len([f for f in r["findings"] if f["severity"].lower() == "critical"]) > 0 else ''}
-                    {f'<span class="badge high">{len([f for f in r["findings"] if f["severity"].lower() == "high"])} High</span>' if len([f for f in r["findings"] if f["severity"].lower() == "high"]) > 0 else ''}
-                    {f'<span class="badge medium">{len([f for f in r["findings"] if f["severity"].lower() == "medium"])} Med</span>' if len([f for f in r["findings"] if f["severity"].lower() == "medium"]) > 0 else ''}
-                    {f'<span class="badge low">{len([f for f in r["findings"] if f["severity"].lower() == "low"])} Low</span>' if len([f for f in r["findings"] if f["severity"].lower() == "low"]) > 0 else ''}
-                    {f'<span class="badge clean">Clean</span>' if len(r["findings"]) == 0 and r["status"] == "success" else ''}
-                    {f'<span class="badge failed">Audit Failed</span>' if r["status"] == "failed" else ''}
+                    {crit_badge}
+                    {high_badge}
+                    {med_badge}
+                    {low_badge}
+                    {clean_badge}
+                    {failed_badge}
                 </div>
             </div>
             
             <div class="file-details">
-                {f'<p style="color: var(--text-muted); font-size: 0.95rem; margin-top: 1rem;">No vulnerabilities detected in this target.</p>' if len(r["findings"]) == 0 and r["status"] == "success" else ''}
-                {f'<p style="color: var(--crit-color); font-size: 0.95rem; margin-top: 1rem;">Failed to scan: {r.get("error")}</p>' if r["status"] == "failed" else ''}
-                
-                {"".join([f"""
-                <div class="finding-card">
-                    <div class="finding-title">
-                        <div class="finding-name">{f["vuln_type"]}</div>
-                        <span class="badge {f["severity"].lower()}">{f["severity"]}</span>
-                    </div>
-                    <div class="finding-reason">{f["reason"]}</div>
-                    <div class="finding-meta">
-                        <div>CWE: {f["cwe"] if f["cwe"] else 'N/A'}</div>
-                        <div>Trigger Confidence: {f.get("confidence_score", "N/A")}/10</div>
-                    </div>
-                    {f'<div class="finding-payload"><b>Exploit Trigger Input:</b> {f["payload"]}</div>' if f.get("payload") else ''}
-                </div>
-                """ for f in r.get("findings", [])])}
+                {clean_msg}
+                {fail_msg}
+                {findings_html}
             </div>
         </div>
-        """ for r in results])}
+        """)
+
+    file_panels_html = "".join(file_panels)
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mutagen Batch Audit Report - {timestamp}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {{
+            --bg-color: #0b0f19;
+            --card-bg: rgba(22, 31, 48, 0.7);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent-color: #00ff88;
+            --crit-color: #ff4d4d;
+            --high-color: #ff9900;
+            --med-color: #ffcc00;
+            --low-color: #3399ff;
+        }}
+        body {{
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 2rem;
+        }}
+        .header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }}
+        .title-area h1 {{
+            font-size: 2.2rem;
+            margin: 0;
+            background: linear-gradient(135deg, #00ff88, #60a5fa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }}
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2.5rem;
+        }}
+        .stat-card {{
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }}
+        .stat-title {{ font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; }}
+        .stat-val {{ font-size: 2.5rem; font-weight: 700; margin: 0.5rem 0; }}
+        .stat-footer {{ font-size: 0.8rem; color: var(--text-muted); }}
+        .stat-card.crit .stat-val {{ color: var(--crit-color); }}
+        .stat-card.high .stat-val {{ color: var(--high-color); }}
+        .stat-card.med .stat-val {{ color: var(--med-color); }}
+        .stat-card.low .stat-val {{ color: var(--low-color); }}
+        
+        .section-header {{
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--card-border);
+            padding-bottom: 0.5rem;
+        }}
+        .file-panel {{
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }}
+        .file-header {{
+            padding: 1.2rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }}
+        .file-header:hover {{ background: rgba(255, 255, 255, 0.03); }}
+        .file-name {{ font-weight: 600; font-size: 1.1rem; }}
+        .file-path {{ font-size: 0.85rem; color: var(--text-muted); }}
+        .file-stats {{ display: flex; gap: 0.5rem; }}
+        .badge {{
+            padding: 0.25rem 0.6rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }}
+        .badge.critical {{ background: rgba(255, 77, 77, 0.2); color: var(--crit-color); border: 1px solid var(--crit-color); }}
+        .badge.high {{ background: rgba(255, 153, 0, 0.2); color: var(--high-color); border: 1px solid var(--high-color); }}
+        .badge.medium {{ background: rgba(255, 204, 0, 0.2); color: var(--med-color); border: 1px solid var(--med-color); }}
+        .badge.low {{ background: rgba(51, 153, 255, 0.2); color: var(--low-color); border: 1px solid var(--low-color); }}
+        .badge.clean {{ background: rgba(0, 255, 136, 0.15); color: var(--accent-color); border: 1px solid var(--accent-color); }}
+        .badge.failed {{ background: rgba(255, 77, 77, 0.1); color: #ff6666; border: 1px solid #ff6666; }}
+        
+        .file-details {{
+            display: none;
+            padding: 0 1.5rem 1.5rem 1.5rem;
+            border-top: 1px solid var(--card-border);
+        }}
+        .finding-card {{
+            background: rgba(0, 0, 0, 0.2);
+            border-left: 3px solid var(--card-border);
+            padding: 1rem;
+            margin-top: 1rem;
+            border-radius: 4px;
+        }}
+        .finding-title {{ display: flex; justify-content: space-between; font-weight: 600; }}
+        .finding-reason {{ font-size: 0.9rem; margin: 0.5rem 0; color: var(--text-muted); }}
+        .finding-meta {{ display: flex; gap: 1.5rem; font-size: 0.8rem; color: var(--text-muted); }}
+        .finding-payload {{ font-family: monospace; font-size: 0.8rem; background: rgba(0,0,0,0.4); padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem; word-break: break-all; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="title-area">
+            <h1>Mutagen Batch Audit</h1>
+            <div style="color: var(--text-muted); font-size: 0.9rem;">Automated Multi-Target Security Scanning Pipeline</div>
+        </div>
+        <div style="text-align: right; color: var(--text-muted); font-size: 0.85rem;">
+            <div>Target Directory: <b>{target_dir}</b></div>
+            <div>Generated: <b>{timestamp}</b></div>
+        </div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card crit">
+            <div class="stat-title">Critical Severity</div>
+            <div class="stat-val">{severity_counts["critical"]}</div>
+            <div class="stat-footer">Immediate exploit potential</div>
+        </div>
+        <div class="stat-card high">
+            <div class="stat-title">High Severity</div>
+            <div class="stat-val">{severity_counts["high"]}</div>
+            <div class="stat-footer">High impact vulnerabilities</div>
+        </div>
+        <div class="stat-card med">
+            <div class="stat-title">Medium Severity</div>
+            <div class="stat-val">{severity_counts["medium"]}</div>
+            <div class="stat-footer">Logic & boundary flaws</div>
+        </div>
+        <div class="stat-card low">
+            <div class="stat-title">Low Severity / Info</div>
+            <div class="stat-val">{severity_counts["low"]}</div>
+            <div class="stat-footer">Reconnaissance & design details</div>
+        </div>
+    </div>
+
+    <main>
+        <div class="section-header">
+            <span>Audited Project Resources ({total_files} files)</span>
+        </div>
+        
+        {file_panels_html}
     </main>
 
     <script>
