@@ -3,9 +3,8 @@ import hashlib
 import hmac
 import json
 import os
-import time
-
 import secrets
+import time
 
 SECRET_KEY = os.environ.get("MUTAGEN_JWT_SECRET")
 if not SECRET_KEY:

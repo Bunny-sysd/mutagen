@@ -1,23 +1,19 @@
 """Tests for the Persistent Fuzzing Supervisor (session_supervisor.py)."""
 
 import subprocess
-import socket
-import time
-from unittest.mock import MagicMock, patch, PropertyMock
-from dataclasses import dataclass
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from mutagen.session_supervisor import (
+    SessionResult,
     SessionSupervisor,
     StepResult,
-    SessionResult,
+    _check_oracles,
     _classify_crash,
     _extract_coverage,
     _strip_coverage_marker,
-    _check_oracles,
 )
-
 
 # ---------------------------------------------------------------------------
 # Unit tests for helper functions

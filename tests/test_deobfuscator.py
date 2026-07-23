@@ -3,19 +3,17 @@ Unit tests for AI Deobfuscation, scan profiles, and static-only execution gating
 """
 import os
 import sys
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Ensure project root is importable
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from mutagen.engines.gemini import GeminiEngine
-from mutagen.engines.openai_engine import OpenAIEngine
-from mutagen.engines.ollama import OllamaEngine
-from mutagen.engines.claude import ClaudeEngine
-from mutagen.core import run_fuzzer
 from mutagen.cli import main
-
+from mutagen.core import run_fuzzer
+from mutagen.engines.claude import ClaudeEngine
+from mutagen.engines.gemini import GeminiEngine
+from mutagen.engines.ollama import OllamaEngine
+from mutagen.engines.openai_engine import OpenAIEngine
 
 # =============================================================================
 # Engine Deobfuscation tests
@@ -29,13 +27,13 @@ class TestEngineDeobfuscation:
         # Mock Gemini generate_content response
         mock_response = MagicMock()
         mock_response.text = "int parsed_main() { return 0; }"
-        
+
         engine = GeminiEngine(api_key="test_key")
         engine.client.models.generate_content.return_value = mock_response
 
         raw_code = "int FUN_004010a0() { return 0; }"
         res = engine.deobfuscate_code(raw_code, debug=False)
-        
+
         assert "parsed_main" in res
         assert "FUN_004010a0" not in res
         engine.client.models.generate_content.assert_called_once()
@@ -46,24 +44,24 @@ class TestEngineDeobfuscation:
         mock_completion = MagicMock()
         mock_completion.choices = [MagicMock()]
         mock_completion.choices[0].message.content = "int resolved_function() { return 0; }"
-        
+
         engine = OpenAIEngine(api_key="test_key")
         engine.client.chat.completions.create.return_value = mock_completion
 
         raw_code = "int FUN_004010a0() { return 0; }"
         res = engine.deobfuscate_code(raw_code, debug=False)
-        
+
         assert "resolved_function" in res
         assert "FUN_004010a0" not in res
         engine.client.chat.completions.create.assert_called_once()
 
     def test_ollama_deobfuscate_code(self):
         engine = OllamaEngine(model="llama3.2")
-        
+
         with patch.object(engine, "_generate", return_value="int cleaned_logic() { return 0; }") as mock_gen:
             raw_code = "int FUN_004010a0() { return 0; }"
             res = engine.deobfuscate_code(raw_code, debug=False)
-            
+
             assert "cleaned_logic" in res
             assert "FUN_004010a0" not in res
             mock_gen.assert_called_once()
@@ -71,11 +69,11 @@ class TestEngineDeobfuscation:
     @patch("anthropic.Anthropic")
     def test_claude_deobfuscate_code(self, mock_anthropic_client):
         engine = ClaudeEngine(api_key="test_key")
-        
+
         with patch.object(engine, "_generate", return_value="int deobfuscated_claude() { return 0; }") as mock_gen:
             raw_code = "int FUN_004010a0() { return 0; }"
             res = engine.deobfuscate_code(raw_code, debug=False)
-            
+
             assert "deobfuscated_claude" in res
             assert "FUN_004010a0" not in res
             mock_gen.assert_called_once()
@@ -161,7 +159,7 @@ class TestStaticOnlyGating:
         assert crashes_found == 1
         mock_engine.analyze_code.assert_called_once()
         mock_save_report.assert_called_once()
-        
+
         # Verify that dynamic execution mocks were NOT initialized
         # (execute_payload, compile_target, etc. would have been called if not gated)
         _, save_kwargs = mock_save_report.call_args

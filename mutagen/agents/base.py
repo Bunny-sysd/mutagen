@@ -1,6 +1,8 @@
-from abc import ABC, abstractmethod
 import os
+from abc import ABC, abstractmethod
+
 from mutagen.state import ProgramContext
+
 
 class BaseAgent(ABC):
     def __init__(self, name: str, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", api_key: str = None):

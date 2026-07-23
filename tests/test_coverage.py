@@ -1,11 +1,10 @@
-import pytest
-from unittest.mock import patch, MagicMock
 import subprocess
-import os
+from unittest.mock import patch
 
-from mutagen.instrumenter import instrument_c_source
-from mutagen.executor import execute_payload
 from mutagen.core import mutate_input
+from mutagen.executor import execute_payload
+from mutagen.instrumenter import instrument_c_source
+
 
 def test_instrument_c_source_simple():
     c_code = """
@@ -44,11 +43,11 @@ def test_instrument_c_source_skip_non_executable():
     # Check that it did not place trace markers inside struct, enum or array initializers
     # Wait, the only executable block here is the main function and the if block (2 blocks)
     assert total_blocks == 2
-    
+
     # Verify no trace markers are inserted in declarations/initializers
     struct_decl = re_find_trace(instrumented, "struct Point")
     assert struct_decl is False
-    
+
     arr_init = re_find_trace(instrumented, "arr\\[\\]")
     assert arr_init is False
 

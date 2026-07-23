@@ -375,13 +375,13 @@ def decompile_binary(
         r2_bin = decompiler_path or ghidra_headless or shutil.which("r2") or shutil.which("radare2")
         if not r2_bin:
             raise DecompilationError("Radare2 executable not found on system PATH.")
-        
+
         # Run r2dec command
         cmd = [r2_bin, "-q", "-c", "aaa; pdd", binary_path]
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
             pseudo_source = res.stdout or ""
-            
+
             # Check for missing r2dec plugin or empty output
             if not pseudo_source.strip() or "r2dec" in res.stderr.lower() or "not found" in pseudo_source.lower():
                 # Fall back to printing disassembly of main function
@@ -390,14 +390,14 @@ def decompile_binary(
                 pseudo_source = res_fallback.stdout or ""
                 if not pseudo_source.strip():
                     raise DecompilationError(f"Radare2 failed to produce decompiled pseudocode. Stderr: {res.stderr}")
-            
+
             # Count mock functions
             func_count = 0
             if "Function" in pseudo_source or "sym." in pseudo_source:
                 func_count = pseudo_source.count("sym.") or 1
             else:
                 func_count = 1
-                
+
             return DecompilationResult(
                 pseudo_source=pseudo_source,
                 functions_found=func_count,
@@ -422,7 +422,7 @@ def decompile_binary(
                 lines.append(f"// Architecture: {bv.arch.name}")
                 lines.append("// ============================================")
                 lines.append("")
-                
+
                 func_count = len(bv.functions)
                 for func in bv.functions:
                     lines.append(f"// --- Function: {func.name} @ {hex(func.start)} ---")
@@ -435,7 +435,7 @@ def decompile_binary(
                     except Exception:
                         lines.append(f"// (HLIL decompilation failed for {func.name})")
                     lines.append("")
-                
+
                 return DecompilationResult(
                     pseudo_source="\n".join(lines),
                     functions_found=func_count,

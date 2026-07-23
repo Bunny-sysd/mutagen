@@ -1,8 +1,9 @@
+
 from mutagen.agents.base import BaseAgent
-from mutagen.state import ProgramContext, CrashPayload
 from mutagen.compiler import compile_target
 from mutagen.executor import execute_payload
-import os
+from mutagen.state import ProgramContext
+
 
 class FuzzingSupervisorAgent(BaseAgent):
     def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", compiler_path: str = "gcc", delivery_mode: str = "args", api_key: str = None):
@@ -12,7 +13,7 @@ class FuzzingSupervisorAgent(BaseAgent):
 
     async def process(self, context: ProgramContext) -> ProgramContext:
         context.logs.append("[FuzzingSupervisorAgent] Compiling target file...")
-        
+
         # 1. Compile target executable
         try:
             exe_path = compile_target(context.target_path, self.compiler_path)
@@ -28,7 +29,7 @@ class FuzzingSupervisorAgent(BaseAgent):
             input_data = payload.input_data
             if self.delivery_mode == "stdin" and not input_data and payload.args:
                 input_data = "\n".join(payload.args)
-                
+
             result = execute_payload(
                 exe_path=exe_path,
                 args=payload.args,
@@ -36,17 +37,17 @@ class FuzzingSupervisorAgent(BaseAgent):
                 delivery_mode=self.delivery_mode,
                 timeout=5
             )
-            
+
             # Map execution results
             payload.exit_code = result.get("return_code")
             payload.stdout = result.get("stdout", "")
             payload.stderr = result.get("stderr", "")
-            
+
             # If WDAC/AppLocker blocked, result might contain a DELIVERY_ERROR:
             exec_err = result.get("crash_type", "")
             if "DELIVERY_ERROR" in str(exec_err) or "blocked" in str(payload.stderr).lower():
                 context.logs.append(f"[FuzzingSupervisorAgent] Execution blocked/error for payload {payload.args}: {exec_err} | stderr: {payload.stderr}")
-                
+
             # Identify crash type using the executor's oracle-resolved crashed flag
             if result.get("crashed"):
                 payload.crash_type = result.get("crash_type")

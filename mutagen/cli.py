@@ -176,7 +176,7 @@ def main():
             is_inside = False
 
         if not is_inside:
-            console.print(f"[yellow][!] Target file is outside Mutagen workspace directory. Proceeding in external target mode.[/yellow]")
+            console.print("[yellow][!] Target file is outside Mutagen workspace directory. Proceeding in external target mode.[/yellow]")
 
         targets = [abs_target_file]
 

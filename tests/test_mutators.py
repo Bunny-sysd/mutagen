@@ -1,16 +1,14 @@
 """Tests for the traditional mutation fallback engine."""
 
-import pytest
 from mutagen.mutators import (
-    generate_fallback_payloads,
     _buffer_overflow_payloads,
+    _command_injection_payloads,
     _format_string_payloads,
     _integer_boundary_payloads,
     _null_and_special_payloads,
-    _command_injection_payloads,
     _off_by_one_payloads,
+    generate_fallback_payloads,
 )
-
 
 # ---------------------------------------------------------------------------
 # Individual strategy tests

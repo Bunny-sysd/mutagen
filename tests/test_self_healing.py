@@ -1,7 +1,8 @@
-import pytest
-from unittest.mock import MagicMock, patch, mock_open
-from mutagen.core import run_fuzzer
+from unittest.mock import MagicMock, mock_open, patch
+
 from mutagen.compiler import CompilationError
+from mutagen.core import run_fuzzer
+
 
 @patch("mutagen.core.get_engine")
 @patch("mutagen.core.compile_target")
@@ -16,12 +17,12 @@ def test_run_fuzzer_self_healing_compilation_failure(mock_ast_validate, mock_mak
     # Setup mock engine
     mock_engine = MagicMock()
     mock_get_engine.return_value = mock_engine
-    
+
     # 1 crash found
     mock_engine.analyze_code.return_value = [
         {"vuln_type": "buffer_overflow", "cwe": "CWE-120", "severity": "high", "args": ["A"*100]}
     ]
-    
+
     # Executing original payload crashes the target
     mock_execute.side_effect = [
         # First execution during fuzzing phase
@@ -29,20 +30,20 @@ def test_run_fuzzer_self_healing_compilation_failure(mock_ast_validate, mock_mak
         # Execution during verification phase (attempt 1, since attempt 0 failed compilation)
         {"crashed": False, "crash_type": "none", "return_code": 0, "stdout": "", "stderr": ""}
     ]
-    
+
     mock_engine.generate_patch.return_value = "bad_patch_code"
     mock_engine.refine_patch.return_value = "good_patch_code"
     mock_engine.generate_exploit.return_value = "exploit_code"
-    
+
     # Compile target fails the first time, succeeds the second time
     mock_compile.side_effect = [
         "orig_exe", # Original compile during fuzz phase
         CompilationError("compiler error!"), # First patch compile (attempt 0) fails
         "patched_exe" # Second patch compile (attempt 1) succeeds
     ]
-    
+
     mock_save_report.return_value = ("report.json", "report.html")
-    
+
     run_fuzzer(
         source_path="dummy.c",
         api_key="key",
@@ -52,7 +53,7 @@ def test_run_fuzzer_self_healing_compilation_failure(mock_ast_validate, mock_mak
         debug=False,
         max_patch_retries=2
     )
-    
+
     # Check that compile_target was called for the patched files
     assert mock_compile.call_count == 3
     # Check that refine_patch was called once
@@ -77,11 +78,11 @@ def test_run_fuzzer_self_healing_verification_crash(mock_ast_validate, mock_make
     # Setup mock engine
     mock_engine = MagicMock()
     mock_get_engine.return_value = mock_engine
-    
+
     mock_engine.analyze_code.return_value = [
         {"vuln_type": "buffer_overflow", "cwe": "CWE-120", "severity": "high", "args": ["A"*100]}
     ]
-    
+
     # Executing original payload crashes, then attempt 0 crashes verification, then attempt 1 passes verification
     mock_execute.side_effect = [
         # First execution during fuzzing phase
@@ -91,16 +92,16 @@ def test_run_fuzzer_self_healing_verification_crash(mock_ast_validate, mock_make
         # Attempt 1 verification: succeeds
         {"crashed": False, "crash_type": "none", "return_code": 0, "stdout": "", "stderr": ""}
     ]
-    
+
     mock_engine.generate_patch.return_value = "bad_patch_code"
     mock_engine.refine_patch.return_value = "good_patch_code"
     mock_engine.generate_exploit.return_value = "exploit_code"
-    
+
     # Compilation always succeeds
     mock_compile.return_value = "patched_exe"
-    
+
     mock_save_report.return_value = ("report.json", "report.html")
-    
+
     run_fuzzer(
         source_path="dummy.c",
         api_key="key",
@@ -110,7 +111,7 @@ def test_run_fuzzer_self_healing_verification_crash(mock_ast_validate, mock_make
         debug=False,
         max_patch_retries=2
     )
-    
+
     # Check that refine_patch was called once
     mock_engine.refine_patch.assert_called_once()
     args, kwargs = mock_engine.refine_patch.call_args

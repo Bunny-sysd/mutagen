@@ -40,7 +40,7 @@ class TestSaveCrashReport:
             [sample_crash_data], "test_target", 5,
         )
 
-        with open(json_file, "r") as f:
+        with open(json_file) as f:
             report = json.load(f)
 
         assert "Mutagen" in report["tool"]
@@ -56,7 +56,7 @@ class TestSaveCrashReport:
             [sample_crash_data], "test_target", 5,
         )
 
-        with open(html_file, "r", encoding="utf-8") as f:
+        with open(html_file, encoding="utf-8") as f:
             content = f.read()
 
         assert "MUTAGEN" in content
@@ -78,7 +78,7 @@ class TestSaveCrashReport:
 
         _, html_file = save_crash_report([malicious_crash], "xss_test", 1)
 
-        with open(html_file, "r", encoding="utf-8") as f:
+        with open(html_file, encoding="utf-8") as f:
             content = f.read()
 
         # The raw <script> tag from the payload should NOT appear — it should be escaped
@@ -91,7 +91,7 @@ class TestSaveCrashReport:
             [sample_crash_data], "test_target", 5,
         )
 
-        with open(json_file, "r") as f:
+        with open(json_file) as f:
             report = json.load(f)
 
         assert report["crash_rate"] == "20.0%"
@@ -100,7 +100,7 @@ class TestSaveCrashReport:
         """Zero crashes should produce 0% crash rate."""
         json_file, _ = save_crash_report([], "test_target", 5)
 
-        with open(json_file, "r") as f:
+        with open(json_file) as f:
             report = json.load(f)
 
         assert report["crash_rate"] == "0.0%"
@@ -148,7 +148,7 @@ class TestSaveCrashReport:
             profile="malware-triage"
         )
 
-        with open(html_file, "r", encoding="utf-8") as f:
+        with open(html_file, encoding="utf-8") as f:
             content = f.read()
 
         # Should contain standard mapped capability name and description
@@ -191,13 +191,13 @@ class TestSaveCrashReport:
 
         _, html_file = save_crash_report(crashes, "flow_target", 2)
 
-        with open(html_file, "r", encoding="utf-8") as f:
+        with open(html_file, encoding="utf-8") as f:
             content = f.read()
 
         # Check score rendering
         assert "9/10" in content
         assert "3/10" in content
-        
+
         # Check data flow chain rendering
         assert "main" in content
         assert "helper" in content

@@ -1,10 +1,8 @@
-import pytest
-from unittest.mock import patch, MagicMock
 import subprocess
-import os
+from unittest.mock import MagicMock, patch
 
-from mutagen.executor import execute_payload, _check_docker_functional
-from mutagen.cli import main
+from mutagen.executor import _check_docker_functional, execute_payload
+
 
 def test_check_docker_functional_success():
     with patch("subprocess.run") as mock_run:
@@ -50,7 +48,7 @@ def test_execute_payload_docker_sandbox_active():
                         )
                         res = execute_payload("target_exe", ["arg1"], None, "args", 5, "docker")
                         assert res["crashed"] is False
-                        
+
                         called_args = mock_run.call_args[0][0]
                         # Verify container wrapper syntax
                         assert "docker" in called_args
@@ -71,11 +69,11 @@ def test_execute_payload_docker_sandbox_tcp_mode():
                         mock_proc.communicate.return_value = ("OK", "")
                         mock_proc.returncode = 0
                         mock_popen.return_value = mock_proc
-                        
+
                         # Mock socket connectivity to prevent actual connection attempt during test
-                        with patch("socket.socket") as mock_sock:
-                            res = execute_payload("target_exe", [], "input_payload", "tcp:8080", 5, "docker")
-                            
+                        with patch("socket.socket"):
+                            execute_payload("target_exe", [], "input_payload", "tcp:8080", 5, "docker")
+
                             called_args = mock_popen.call_args[0][0]
                             assert "docker" in called_args
                             assert "-p" in called_args

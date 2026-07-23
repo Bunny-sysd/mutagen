@@ -1,14 +1,15 @@
 import json
-import pytest
 from unittest.mock import MagicMock, patch
+
 from mutagen.engines.claude import ClaudeEngine
+
 
 @patch("anthropic.Anthropic")
 def test_claude_engine_analyze_code(mock_anthropic_class):
     mock_client = MagicMock()
     mock_anthropic_class.return_value = mock_client
-    
-    from mutagen.models import FuzzPayloadList, FuzzPayload
+
+    from mutagen.models import FuzzPayload, FuzzPayloadList
     mock_parsed = FuzzPayloadList(
         payloads=[
             FuzzPayload(
@@ -21,7 +22,7 @@ def test_claude_engine_analyze_code(mock_anthropic_class):
             )
         ]
     )
-    
+
     mock_message = MagicMock()
     mock_message.parsed = mock_parsed
     mock_client.beta.messages.parse.return_value = mock_message
@@ -32,7 +33,7 @@ def test_claude_engine_analyze_code(mock_anthropic_class):
     assert len(payloads) == 1
     assert payloads[0]["vuln_type"] == "buffer_overflow"
     assert payloads[0]["args"] == ["claude_payload"]
-    
+
     mock_client.beta.messages.parse.assert_called_once()
     called_kwargs = mock_client.beta.messages.parse.call_args[1]
     assert called_kwargs["model"] == "claude-3-5-sonnet-latest"
@@ -44,7 +45,7 @@ def test_claude_engine_analyze_code(mock_anthropic_class):
 def test_claude_engine_refine_payload(mock_anthropic_class):
     mock_client = MagicMock()
     mock_anthropic_class.return_value = mock_client
-    
+
     mock_message = MagicMock()
     mock_message.content = [MagicMock(text=json.dumps([
         {
@@ -76,7 +77,7 @@ def test_claude_engine_refine_payload(mock_anthropic_class):
 def test_claude_engine_generate_patch_and_exploit(mock_anthropic_class):
     mock_client = MagicMock()
     mock_anthropic_class.return_value = mock_client
-    
+
     mock_message = MagicMock()
     mock_message.content = [MagicMock(text="```c\npatched_c_code_claude\n```")]
     mock_client.messages.create.return_value = mock_message

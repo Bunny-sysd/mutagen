@@ -1,7 +1,10 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-from mutagen.state import ProgramContext, VulnerabilityDetail, CrashPayload
+
 from mutagen.orchestrator import AgentOrchestrator
+from mutagen.state import CrashPayload, ProgramContext, VulnerabilityDetail
+
 
 def test_context_state_serialization():
     detail = VulnerabilityDetail(
@@ -11,12 +14,12 @@ def test_context_state_serialization():
         line_number=10,
         code_snippet="char buf[10]; strcpy(buf, input);"
     )
-    
+
     payload = CrashPayload(
         args=["arg1"],
         input_data="A" * 100
     )
-    
+
     context = ProgramContext(
         target_path="test_target.c",
         language="c",
@@ -25,7 +28,7 @@ def test_context_state_serialization():
         vulnerabilities=[detail],
         active_payloads=[payload]
     )
-    
+
     assert context.vulnerabilities[0].vuln_type == "Buffer Overflow"
     assert context.active_payloads[0].input_data == "A" * 100
     assert context.verification_status == "UNVERIFIED"

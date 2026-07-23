@@ -6,7 +6,9 @@ repair benchmarking.
 """
 
 from __future__ import annotations
+
 import time
+
 import requests
 
 
@@ -46,11 +48,11 @@ class Defects4CClient:
             resp = requests.post(url, json=payload, timeout=15)
             if resp.status_code != 200:
                 raise Defects4CError(f"Failed to start reproduction: HTTP {resp.status_code} - {resp.text}")
-            
+
             handle = resp.json().get("handle")
             if not handle:
                 raise Defects4CError("Reproduction response did not return a status handle.")
-            
+
             # Poll status
             status_url = f"{self.base_url}/status/{handle}"
             polls = 0
@@ -60,16 +62,16 @@ class Defects4CClient:
                 status_resp = requests.get(status_url, timeout=10)
                 if status_resp.status_code != 200:
                     raise Defects4CError(f"Failed to query task status: HTTP {status_resp.status_code}")
-                
+
                 data = status_resp.json()
                 status = data.get("status", "").lower()
-                
+
                 if status == "success" or status == "completed":
                     return True
                 elif status == "failed" or status == "error":
                     error_msg = data.get("message", "Unknown reproduction failure")
                     raise Defects4CError(f"Reproduction task failed: {error_msg}")
-                    
+
             raise Defects4CError("Reproduction timed out after 10 minutes.")
         except Exception as e:
             if not isinstance(e, Defects4CError):

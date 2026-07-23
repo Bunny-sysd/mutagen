@@ -1,10 +1,9 @@
-import pytest
-import requests
-import json
-import os
 from unittest.mock import MagicMock, patch
-from mutagen.defects4c import Defects4CClient, Defects4CError
+
+import pytest
+
 from mutagen.core import run_fuzzer
+from mutagen.defects4c import Defects4CClient, Defects4CError
 
 
 class TestDefects4CClient:
@@ -52,7 +51,7 @@ class TestDefects4CClient:
         mock_get.side_effect = [mock_get_resp1, mock_get_resp2]
 
         client = Defects4CClient("http://localhost:8000")
-        
+
         # Patch sleep to speed up test execution
         with patch("time.sleep") as mock_sleep:
             result = client.reproduce("libxml2@commit_hash")

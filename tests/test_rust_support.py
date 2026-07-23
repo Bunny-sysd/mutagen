@@ -1,11 +1,11 @@
 import os
-import pytest
 from unittest.mock import MagicMock, patch
 
+from mutagen.compiler import compile_target
 from mutagen.engines.gemini import GeminiEngine
 from mutagen.engines.ollama import OllamaEngine
-from mutagen.compiler import compile_target, CompilationError
 from mutagen.executor import execute_payload
+
 
 def test_engine_language_property():
     """Engines should resolve language properties dynamically."""
@@ -33,12 +33,12 @@ def test_engine_language_property():
 def test_rust_compilation(mock_run):
     """compile_target should call rustc for .rs files."""
     mock_run.return_value = MagicMock(returncode=0)
-    
+
     res_path = compile_target("src/main.rs", "rustc")
-    
+
     expected_ext = ".exe" if os.name == "nt" else ".out"
     assert res_path.endswith(expected_ext)
-    
+
     mock_run.assert_called_once()
     called_args = mock_run.call_args[0][0]
     assert called_args[0] == "rustc"
@@ -55,7 +55,7 @@ def test_rust_panic_detection(mock_run):
     mock_run.return_value = mock_response
 
     result = execute_payload("mock_binary.exe", [], "", "args", 5)
-    
+
     assert result["crashed"] is True
     assert "RUST_PANIC" in result["crash_type"]
     assert result["return_code"] == 101

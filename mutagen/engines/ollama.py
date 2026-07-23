@@ -129,20 +129,20 @@ class OllamaEngine(BaseEngine):
 4. **Economic & Front-running Vectors**: Examine slippage controls, sandwich attack opportunities, or block-timestamp manipulation vulnerabilities.
 5. **Payload Design**: Construct function arguments (e.g. address values, array limits, uint magnitudes) that cause contract storage corruption, drain balances, or lock contract logic. Generate up to {max_payloads} highly creative transaction inputs."""
         elif self.lang == "html":
-            guidelines = f"""Approach the audit step-by-step to identify front-end issues:
+            guidelines = """Approach the audit step-by-step to identify front-end issues:
 1. **DOM XSS Sources & Sinks**: Look for input parameters or URL hashes written straight to the DOM.
 2. **Resource Integrity**: Inspect script sources. Check for missing Subresource Integrity (SRI) hashes on scripts from public CDNs.
 3. **Security Directives**: Check for missing meta tag directives like Content Security Policy (CSP).
 4. **IFrame Isolation**: Inspect iframes for missing sandbox flags."""
         elif self.lang == "javascript":
-            guidelines = f"""Approach the audit step-by-step to identify script vulnerabilities:
+            guidelines = """Approach the audit step-by-step to identify script vulnerabilities:
 1. **Injection Vectors**: Search for direct calls to `eval()`, `new Function()`, `setTimeout(string)`, or setting `element.innerHTML` using unsanitized user inputs.
 2. **Secrets & Hardcoded Keys**: Audit the script for client-side API keys, credentials, or session tokens.
 3. **Open Redirects**: Identify variables modifying `window.location` or `window.location.replace()` using untrusted inputs.
 4. **Cross-Origin Security**: Check `window.addEventListener('message')` handlers to ensure they strictly validate the origin before processing payloads."""
         elif self.lang == "css":
-            guidelines = f"""Approach the audit step-by-step to identify style issues:
-1. **Attribute Exfiltration**: Identify background-image background urls tracking element attributes (e.g. input[value^="a"] {{ background-image: url(...) }}).
+            guidelines = """Approach the audit step-by-step to identify style issues:
+1. **Attribute Exfiltration**: Identify background-image background urls tracking element attributes (e.g. input[value^="a"] { background-image: url(...) }).
 2. **External Imports**: Check for dangerous imports of unverified external stylesheets."""
         else:
             guidelines = f"""Approach the audit step-by-step to identify high-severity exploits:

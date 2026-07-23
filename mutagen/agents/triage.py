@@ -1,12 +1,13 @@
-from mutagen.agents.base import BaseAgent
-from mutagen.state import ProgramContext, VulnerabilityDetail
-from mutagen.static_analyzer import analyze_source
-from mutagen.engines import get_engine
 import json
-from google import genai
+
 from pydantic import BaseModel
 
+from mutagen.agents.base import BaseAgent
 from mutagen.agents.prompts import get_triage_prompt
+from mutagen.engines import get_engine
+from mutagen.state import ProgramContext, VulnerabilityDetail
+from mutagen.static_analyzer import analyze_source
+
 
 class TriageResult(BaseModel):
     class VulnItem(BaseModel):
@@ -27,12 +28,12 @@ class TriageAgent(BaseAgent):
     async def process(self, context: ProgramContext) -> ProgramContext:
         self.engine.language = context.language
         context.logs.append("[TriageAgent] Starting code triage...")
-        
+
         pretarget = analyze_source(context.source_code)
         focused_code = pretarget.focused_code if pretarget.findings else context.source_code
-        
+
         prompt = get_triage_prompt(context.language, focused_code)
-        
+
         try:
             if self.model_provider == "gemini" and hasattr(self.engine, "client") and hasattr(self.engine.client, "models"):
                 response = self.engine.client.models.generate_content(
@@ -57,7 +58,7 @@ class TriageAgent(BaseAgent):
                     list_key="vulnerabilities"
                 )
                 data = {"vulnerabilities": vuln_items, "suggested_delivery_mode": "args"}
-            
+
             # Save detected delivery mode
             detected_mode = data.get("suggested_delivery_mode", "args").lower()
             if detected_mode in ("args", "stdin", "tcp", "http"):
@@ -65,7 +66,7 @@ class TriageAgent(BaseAgent):
                 context.logs.append(f"[TriageAgent] Dynamically detected input delivery mode: {detected_mode}")
             else:
                 context.delivery_mode = "args"
-            
+
             vulns = data.get("vulnerabilities", [])
             for item in vulns:
                 detail = VulnerabilityDetail(
@@ -79,7 +80,7 @@ class TriageAgent(BaseAgent):
                 context.vulnerabilities.append(detail)
                 context.logs.append(f"[TriageAgent] Identified {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
                 context.notepad.append(f"Triage: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
-                
+
         except Exception as e:
             context.logs.append(f"[TriageAgent] Error during triage LLM call: {e}")
             context.delivery_mode = "args"

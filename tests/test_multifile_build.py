@@ -1,7 +1,10 @@
 import os
 import tempfile
+
 import pytest
-from mutagen.compiler import compile_target, CompilationError
+
+from mutagen.compiler import CompilationError, compile_target
+
 
 def test_compile_multifile_target():
     """Verify compile_target automatically discovers local headers and sibling helper .c files."""

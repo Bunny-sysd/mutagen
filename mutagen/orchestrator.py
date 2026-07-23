@@ -1,13 +1,14 @@
 import sys
-from mutagen.state import ProgramContext
-from mutagen.agents.triage import TriageAgent
-from mutagen.agents.synthesizer import PayloadSynthesizerAgent
-from mutagen.agents.supervisor import FuzzingSupervisorAgent
-from mutagen.agents.patcher import PatchEngineerAgent
-from mutagen.agents.validator import StructuralValidatorAgent
 
 from rich.console import Console
 from rich.panel import Panel
+
+from mutagen.agents.patcher import PatchEngineerAgent
+from mutagen.agents.supervisor import FuzzingSupervisorAgent
+from mutagen.agents.synthesizer import PayloadSynthesizerAgent
+from mutagen.agents.triage import TriageAgent
+from mutagen.agents.validator import StructuralValidatorAgent
+from mutagen.state import ProgramContext
 
 console = Console(force_terminal=True)
 
@@ -22,7 +23,7 @@ class AgentOrchestrator:
             source_code=source_code,
             delivery_mode=delivery_mode
         )
-        
+
         # Initialize micro-agents
         self.triage_agent = TriageAgent(model_provider=provider, model_name=model, api_key=api_key)
         self.synthesizer_agent = PayloadSynthesizerAgent(model_provider=provider, model_name=model, api_key=api_key)
@@ -37,7 +38,7 @@ class AgentOrchestrator:
             border_style="cyan"
         ))
         self.context.logs.append("[Orchestrator] Initializing Multi-Agent APR Swarm...")
-        
+
         # 1. Run Triage Agent to find bugs & detect delivery mode
         self.context = await self.triage_agent.process(self.context)
         if not self.context.vulnerabilities:
@@ -50,7 +51,7 @@ class AgentOrchestrator:
         if active_mode == "args" and self.context.delivery_mode != "args":
             active_mode = self.context.delivery_mode
             self.context.logs.append(f"[Orchestrator] Using dynamically detected delivery mode: {active_mode}")
-            
+
         self.supervisor_agent.delivery_mode = active_mode
         self.validator_agent.delivery_mode = active_mode
 
@@ -72,7 +73,7 @@ class AgentOrchestrator:
         # 3. Run Fuzzing Supervisor to test compile & record crashes
         self.context = await self.supervisor_agent.process(self.context)
         active_crashes = [p for p in self.context.active_payloads if p.crash_type is not None]
-        
+
         if not active_crashes:
             console.print("[bold yellow]! No active crashes were reproduced by fuzzing.[/bold yellow]")
             self.context.logs.append("[Orchestrator] No active crashes were reproduced by fuzzing.")
@@ -88,16 +89,16 @@ class AgentOrchestrator:
                 border_style="green"
             ))
             self.context.logs.append(f"[Orchestrator] Healing loop attempt {attempt}/3")
-            
+
             # Run Patch Engineer
             self.context = await self.patch_agent.process(self.context)
-            
+
             # Run Structural Validator
             self.context = await self.validator_agent.process(self.context)
-            
+
             if self.context.verification_status == "VERIFIED_SECURE":
                 console.print("[bold green]✨ SECURE PATCH VERIFIED SUCCESSFULLY! Zero regressions detected.[/bold green]")
                 self.context.logs.append("[Orchestrator] Secure patch generated and verified successfully!")
                 break
-                
+
         return self.context

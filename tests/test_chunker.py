@@ -1,4 +1,10 @@
-from mutagen.chunker import split_functions, contains_dangerous_keywords, filter_functions, reconstruct_pseudo_code
+from mutagen.chunker import (
+    contains_dangerous_keywords,
+    filter_functions,
+    reconstruct_pseudo_code,
+    split_functions,
+)
+
 
 def test_split_functions():
     pseudo_code = """// ============================================
@@ -22,14 +28,14 @@ void utility() {
 }
 """
     meta, funcs = split_functions(pseudo_code)
-    
+
     assert "MUTAGEN DECOMPILED OUTPUT" in meta
     assert len(funcs) == 2
-    
+
     assert funcs[0]["name"] == "main"
     assert funcs[0]["address"] == "00401000"
     assert "strcpy" in funcs[0]["code"]
-    
+
     assert funcs[1]["name"] == "utility"
     assert funcs[1]["address"] == "00402000"
     assert "int x = 10;" in funcs[1]["code"]
@@ -37,7 +43,7 @@ void utility() {
 def test_contains_dangerous_keywords():
     code_vuln = "void vuln() { strcpy(a, b); }"
     code_safe = "void safe() { int x = 5; }"
-    
+
     assert contains_dangerous_keywords(code_vuln) is True
     assert contains_dangerous_keywords(code_safe) is False
 
@@ -47,7 +53,7 @@ def test_filter_functions():
         {"name": "helper", "address": "2", "code": "void helper() { int y = 20; }"},
         {"name": "vuln_action", "address": "3", "code": "void vuln() { VirtualAlloc(); }"}
     ]
-    
+
     filtered = filter_functions(funcs)
     assert len(filtered) == 2
     assert filtered[0]["name"] == "main"

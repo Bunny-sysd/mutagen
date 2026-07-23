@@ -1,11 +1,10 @@
-import pytest
+from mutagen.chunker import contains_dangerous_keywords
 from mutagen.static_analyzer import (
-    analyze_source,
-    StaticFinding,
     PreTargetingResult,
+    StaticFinding,
+    analyze_source,
     format_pretargeting_summary,
 )
-from mutagen.chunker import contains_dangerous_keywords
 
 
 def test_empty_and_whitespace_input():
@@ -136,7 +135,7 @@ void bad_func() {
     assert "malloc" in calls
     assert "strcpy" in calls
     assert "free" in calls
-    
+
     # But bad_func should only be extracted once
     assert list(res.focused_functions.keys()) == ["bad_func"]
 

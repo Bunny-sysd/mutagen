@@ -1,6 +1,5 @@
-import pytest
 from unittest.mock import MagicMock, patch
-import os
+
 from mutagen.cli import is_supported_language
 from mutagen.core import run_fuzzer
 

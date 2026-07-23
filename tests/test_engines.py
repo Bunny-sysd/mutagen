@@ -1,10 +1,9 @@
 import json
-import pytest
 from unittest.mock import MagicMock, patch
 
 from mutagen.engines.gemini import GeminiEngine
-from mutagen.engines.openai_engine import OpenAIEngine
 from mutagen.engines.ollama import OllamaEngine
+from mutagen.engines.openai_engine import OpenAIEngine
 
 # --- GEMINI ENGINE TESTS ----------------------------------------------------
 
@@ -12,7 +11,7 @@ from mutagen.engines.ollama import OllamaEngine
 def test_gemini_engine_analyze_code(mock_client_class):
     mock_client = MagicMock()
     mock_client_class.return_value = mock_client
-    
+
     mock_response = MagicMock()
     mock_response.text = json.dumps([
         {
@@ -32,7 +31,7 @@ def test_gemini_engine_analyze_code(mock_client_class):
     assert len(payloads) == 1
     assert payloads[0]["vuln_type"] == "buffer_overflow"
     assert payloads[0]["args"] == ["payload1"]
-    
+
     # Verify client generate_content call
     mock_client.models.generate_content.assert_called()
     called_args, called_kwargs = mock_client.models.generate_content.call_args
@@ -45,7 +44,7 @@ def test_gemini_engine_analyze_code(mock_client_class):
 def test_gemini_engine_refine_payload(mock_client_class):
     mock_client = MagicMock()
     mock_client_class.return_value = mock_client
-    
+
     mock_response = MagicMock()
     mock_response.text = json.dumps([
         {
@@ -78,7 +77,7 @@ def test_gemini_engine_refine_payload(mock_client_class):
 def test_gemini_engine_generate_patch_and_exploit(mock_client_class):
     mock_client = MagicMock()
     mock_client_class.return_value = mock_client
-    
+
     mock_response = MagicMock()
     mock_response.text = "```c\npatched_c_code\n```"
     mock_client.models.generate_content.return_value = mock_response
@@ -102,8 +101,8 @@ def test_gemini_engine_generate_patch_and_exploit(mock_client_class):
 def test_openai_engine_analyze_code(mock_openai_class):
     mock_client = MagicMock()
     mock_openai_class.return_value = mock_client
-    
-    from mutagen.models import FuzzPayloadList, FuzzPayload
+
+    from mutagen.models import FuzzPayload, FuzzPayloadList
     mock_parsed = FuzzPayloadList(
         payloads=[
             FuzzPayload(
@@ -116,7 +115,7 @@ def test_openai_engine_analyze_code(mock_openai_class):
             )
         ]
     )
-    
+
     mock_completion = MagicMock()
     mock_completion.choices = [MagicMock()]
     mock_completion.choices[0].message.parsed = mock_parsed
@@ -128,7 +127,7 @@ def test_openai_engine_analyze_code(mock_openai_class):
     assert len(payloads) == 1
     assert payloads[0]["vuln_type"] == "format_string"
     assert payloads[0]["args"] == ["openai_payload"]
-    
+
     called_kwargs = mock_client.beta.chat.completions.parse.call_args[1]
     assert called_kwargs["model"] == "gpt-4o"
     assert called_kwargs["response_format"] == FuzzPayloadList
@@ -139,7 +138,7 @@ def test_openai_engine_analyze_code(mock_openai_class):
 def test_openai_engine_refine_payload(mock_openai_class):
     mock_client = MagicMock()
     mock_openai_class.return_value = mock_client
-    
+
     mock_completion = MagicMock()
     mock_completion.choices = [MagicMock()]
     mock_completion.choices[0].message.content = json.dumps({
@@ -175,7 +174,7 @@ def test_openai_engine_refine_payload(mock_openai_class):
 def test_openai_engine_generate_patch_and_exploit(mock_openai_class):
     mock_client = MagicMock()
     mock_openai_class.return_value = mock_client
-    
+
     mock_completion = MagicMock()
     mock_completion.choices = [MagicMock()]
     mock_completion.choices[0].message.content = "```c\npatched_c_by_openai\n```"
@@ -219,7 +218,7 @@ def test_ollama_engine_analyze_code(mock_post):
     assert len(payloads) == 1
     assert payloads[0]["vuln_type"] == "use_after_free"
     assert payloads[0]["args"] == ["ollama_payload"]
-    
+
     called_kwargs = mock_post.call_args[1]
     assert called_kwargs["json"]["model"] == "llama3.2"
     from mutagen.models import FuzzPayloadList

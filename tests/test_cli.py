@@ -1,9 +1,10 @@
 import os
-import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from mutagen.cli import load_env, main
+
 
 def test_load_env_parsing(tmp_path):
     env_content = """
@@ -27,14 +28,14 @@ def test_load_env_parsing(tmp_path):
 def test_cli_defaults_with_env(mock_run_fuzzer, mock_load_env):
     # Mock sys.argv to simulate a call: mutagen --target targets/01_buffer_overflow.c
     test_args = ["mutagen", "--target", "targets/01_buffer_overflow.c"]
-    
+
     with patch.dict(os.environ, {
         "MUTAGEN_PROVIDER": "openai",
         "MUTAGEN_MODEL": "gpt-4-test",
         "MUTAGEN_API_KEY": "test_global_key"
     }, clear=True), patch("sys.argv", test_args):
         main()
-        
+
         # Verify run_fuzzer kwargs
         mock_run_fuzzer.assert_called_once()
         _, called_kwargs = mock_run_fuzzer.call_args
@@ -100,8 +101,8 @@ def test_cli_specific_key_overrides_fallback(mock_run_fuzzer, mock_load_env):
 def test_cli_binary_routing(mock_run_fuzzer, mock_load_env):
     """Test that a binary target correctly routes with binary_mode=True and flags."""
     test_args = [
-        "mutagen", 
-        "--target", "targets/01_buffer_overflow.exe", 
+        "mutagen",
+        "--target", "targets/01_buffer_overflow.exe",
         "--provider", "gemini",
         "--decompile-all",
         "--ghidra-path", "C:\\ghidra_install"
@@ -127,22 +128,21 @@ def test_cli_ci_mode_ignores_binaries(mock_run_fuzzer, mock_load_env):
     mock_run_fuzzer.return_value = 0
     # Mock sys.argv to run in CI mode
     test_args = ["mutagen", "--ci"]
-    
+
     # Mock git commands to return a binary target
-    import subprocess
     mock_run_proc = MagicMock()
     # Let git diff --name-only return target.exe and target.c
     mock_run_proc.stdout = "targets/target.exe\ntargets/target.c\n"
     mock_run_proc.returncode = 0
-    
+
     with patch("subprocess.run", return_value=mock_run_proc), \
          patch("sys.argv", test_args), \
          patch("os.path.exists", return_value=True), \
          patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"}, clear=True):
-         
+
         # We expect mutagen to warning/ignore target.exe and only pass target.c to run_fuzzer
         main()
-        
+
         # Verify run_fuzzer was called but NEVER with target.exe
         assert mock_run_fuzzer.call_count > 0
         for call in mock_run_fuzzer.call_args_list:
@@ -156,12 +156,12 @@ def test_cli_secure_boundary_validation(mock_run_fuzzer, mock_load_env):
     """Test that target files outside the workspace are blocked by the security gate."""
     # 1. Outside target path
     test_args = ["mutagen", "--target", "../outside_target.c"]
-    
+
     with patch("sys.argv", test_args), \
          patch("os.path.abspath", side_effect=lambda p: "C:\\outside_target.c" if "outside_target" in p else "C:\\mutagen"), \
          patch("os.path.commonpath", return_value="C:\\"), \
          patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"}, clear=True):
-         
+
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 1
@@ -174,7 +174,7 @@ def test_cli_secure_boundary_validation(mock_run_fuzzer, mock_load_env):
          patch("os.path.commonpath", return_value="C:\\mutagen"), \
          patch("os.path.exists", return_value=True), \
          patch.dict(os.environ, {"GEMINI_API_KEY": "test_key"}, clear=True):
-         
+
         main()
         assert mock_run_fuzzer.called
 

@@ -4,23 +4,23 @@ Tests Ghidra integration, binary detection, and decompilation pipeline.
 """
 import os
 import sys
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 # Ensure the project root is importable
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from mutagen.decompiler import (
-    is_binary_target,
-    find_ghidra,
-    decompile_binary,
+    BINARY_EXTENSIONS,
     DecompilationError,
     DecompilationResult,
-    BINARY_EXTENSIONS,
-    _resolve_headless,
     _generate_ghidra_postscript,
+    _resolve_headless,
+    decompile_binary,
+    find_ghidra,
+    is_binary_target,
 )
-
 
 # =============================================================================
 # is_binary_target() tests
@@ -222,7 +222,7 @@ class TestDecompileBinary:
         mock_result.stdout = "Analysis complete"
         mock_result.stderr = ""
 
-        with patch("subprocess.run", return_value=mock_result) as mock_run:
+        with patch("subprocess.run", return_value=mock_result):
             # We need to mock the file output that Ghidra would create
             # Since decompile_binary creates a temp dir, we need to intercept
             original_open = open
@@ -338,7 +338,7 @@ class TestEnsureCompatibleJavaHome:
                     mock_res = MagicMock()
                     mock_res.stderr = 'openjdk version "21.0.1" 2023-10-17'
                     mock_res.stdout = ''
-                    with patch("subprocess.run", return_value=mock_res) as mock_run:
+                    with patch("subprocess.run", return_value=mock_res):
                         from mutagen.decompiler import ensure_compatible_java_home
                         ensure_compatible_java_home()
                         assert os.environ["JAVA_HOME"] == "C:\\fake\\jdk-21"
@@ -354,7 +354,7 @@ class TestEnsureCompatibleJavaHome:
                         mock_res = MagicMock()
                         mock_res.stderr = 'openjdk version "21.0.11"'
                         mock_res.stdout = ''
-                        with patch("subprocess.run", return_value=mock_res) as mock_run:
+                        with patch("subprocess.run", return_value=mock_res):
                             from mutagen.decompiler import ensure_compatible_java_home
                             ensure_compatible_java_home()
                             assert os.environ["JAVA_HOME"] == "C:\\Program Files\\Microsoft\\jdk-21.0.11-hotspot"
@@ -370,7 +370,7 @@ class TestEnsureCompatibleJavaHome:
                         mock_res = MagicMock()
                         mock_res.stderr = 'openjdk version "21.0.11"'
                         mock_res.stdout = ''
-                        with patch("subprocess.run", return_value=mock_res) as mock_run:
+                        with patch("subprocess.run", return_value=mock_res):
                             from mutagen.decompiler import ensure_compatible_java_home
                             ensure_compatible_java_home()
                             assert os.environ["JAVA_HOME"] == "/usr/lib/jvm/jdk-21.0.11"

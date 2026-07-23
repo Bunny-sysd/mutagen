@@ -1,10 +1,12 @@
+import os
+import tempfile
+
 from mutagen.agents.base import BaseAgent
-from mutagen.state import ProgramContext
 from mutagen.ast_validator import validate_c_source
 from mutagen.compiler import compile_target
 from mutagen.executor import execute_payload
-import os
-import tempfile
+from mutagen.state import ProgramContext
+
 
 class StructuralValidatorAgent(BaseAgent):
     def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", compiler_path: str = "gcc", delivery_mode: str = "args", api_key: str = None):
@@ -14,7 +16,7 @@ class StructuralValidatorAgent(BaseAgent):
 
     async def process(self, context: ProgramContext) -> ProgramContext:
         context.logs.append("[StructuralValidatorAgent] Running structural validation checks...")
-        
+
         patched_code = context.proposed_patches.get("primary_patch")
         if not patched_code:
             context.logs.append("[StructuralValidatorAgent] No proposed patch found to validate.")
@@ -39,7 +41,7 @@ class StructuralValidatorAgent(BaseAgent):
             temp_c_path = os.path.join(tmpdir, f"patched_target{ext}")
             with open(temp_c_path, "w", encoding="utf-8") as f:
                 f.write(patched_code)
-                
+
             try:
                 exe_path = compile_target(temp_c_path, self.compiler_path)
                 context.logs.append(f"[StructuralValidatorAgent] Patched target compiled successfully: {exe_path}")
@@ -73,7 +75,7 @@ class StructuralValidatorAgent(BaseAgent):
                     delivery_mode=self.delivery_mode,
                     timeout=5
                 )
-                
+
                 # Check if it still crashes using the executor's oracle-resolved crashed flag
                 is_still_crashing = res.get("crashed", False)
                 if is_still_crashing:
@@ -82,7 +84,7 @@ class StructuralValidatorAgent(BaseAgent):
                     context.notepad.append(f"Validator: {fail_msg}")
                     all_secured = False
                     break
-            
+
             if all_secured:
                 context.verification_status = "VERIFIED_SECURE"
                 context.logs.append("[StructuralValidatorAgent] Verification PASSED! The patch blocks all crash payloads.")

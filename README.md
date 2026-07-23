@@ -358,20 +358,8 @@ This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-## Acknowledgments
-
-- [Google Gemini](https://ai.google.dev/) for the AI backbone
-- [Rich](https://github.com/Textualize/rich) for beautiful terminal output
-- [Ghidra](https://ghidra-sre.org/) for headless binary decompilation
-- [SANS Institute](https://www.sans.org/) for cybersecurity education
-- The open-source security research community
-
----
-
 <div align="center">
   <br>
-  <em>"Evolution through mutation."</em>
-  <br><br>
   <strong>Built by Bunny-sysd</strong>
   <br>
   <sub>If Mutagen helped you, consider giving it a star</sub>

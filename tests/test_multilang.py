@@ -1,5 +1,9 @@
 import os
+from unittest.mock import patch
+
 from mutagen.cli import is_supported_language
+from mutagen.compiler import compile_target
+
 
 def test_language_support():
     assert is_supported_language(".go") is True
@@ -8,9 +12,6 @@ def test_language_support():
     assert is_supported_language(".c") is True
     assert is_supported_language(".rs") is True
 
-
-from unittest.mock import patch
-from mutagen.compiler import compile_target
 
 @patch("subprocess.run")
 def test_compile_target_go(mock_run):

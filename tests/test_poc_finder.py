@@ -1,5 +1,5 @@
-import pytest
-from mutagen.poc_finder import search_github_pocs, get_cwe_poc_intelligence
+from mutagen.poc_finder import get_cwe_poc_intelligence, search_github_pocs
+
 
 def test_search_github_pocs_fallback():
     """Verify search_github_pocs returns structured results or fallback search pointers."""

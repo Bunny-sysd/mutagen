@@ -1,13 +1,13 @@
 import os
 import time
 import uuid
+
 from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
-from mutagen.dashboard.auth import get_token_payload, generate_jwt
+from mutagen.dashboard.auth import generate_jwt, get_token_payload
 
 app = FastAPI(title="Mutagen Cloud Dashboard API")
 security = HTTPBearer()

@@ -1,8 +1,8 @@
-import pytest
-import os
 import json
-import shutil
+import os
+
 from mutagen.ci_helper import main
+
 
 def test_ci_helper_multi_language_patches():
     # Setup mock crashes and patches directory
@@ -51,7 +51,7 @@ def test_ci_helper_multi_language_patches():
         # Check comment.md was created
         assert os.path.exists("comment.md")
 
-        with open("comment.md", "r", encoding="utf-8") as f:
+        with open("comment.md", encoding="utf-8") as f:
             content = f.read()
 
         # Verify vulnerability summary contents
@@ -75,4 +75,4 @@ def test_ci_helper_multi_language_patches():
             if os.path.exists(filename):
                 os.remove(filename)
         if os.path.exists("comment.md"):
-            os.remove(comment_filename := "comment.md")
+            os.remove("comment.md")

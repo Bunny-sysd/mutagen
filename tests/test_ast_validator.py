@@ -5,7 +5,6 @@ Verifies that tree-sitter-based pre-compilation validation correctly identifies
 structural hallucinations in AI-generated C patches before they reach GCC.
 """
 
-import pytest
 
 from mutagen.ast_validator import (
     ASTError,
@@ -13,7 +12,6 @@ from mutagen.ast_validator import (
     format_validation_errors,
     validate_c_source,
 )
-
 
 # ---------------------------------------------------------------------------
 # Valid C Code Tests

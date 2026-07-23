@@ -1,5 +1,6 @@
 from mutagen.compliance import map_cwe_to_compliance
 
+
 def test_cwe_compliance_mapping():
     mapping = map_cwe_to_compliance("CWE-120")
     assert "PCI-DSS" in mapping

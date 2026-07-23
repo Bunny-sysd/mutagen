@@ -59,9 +59,9 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         first_arg = args[0].strip().replace("\\", "/").lower()
         exe_clean = os.path.basename(exe_path).lower()
         exe_name_no_ext = os.path.splitext(exe_clean)[0]
-        
+
         is_placeholder = (
-            first_arg in ("program", "./program", "a.out", "./a.out", "target", "./target", 
+            first_arg in ("program", "./program", "a.out", "./a.out", "target", "./target",
                           "fuzzer_target", "./fuzzer_target", "fuzzer", "./fuzzer") or
             first_arg == exe_clean or
             first_arg == f"./{exe_clean}" or
@@ -194,10 +194,10 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         except Exception:
                             pass
             elif delivery_mode == "http":
-                import urllib.request
-                import urllib.parse
-                import time
                 import json
+                import time
+                import urllib.parse
+                import urllib.request
 
                 # Start HTTP server target in background
                 process = subprocess.Popen(
