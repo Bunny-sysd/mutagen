@@ -10,6 +10,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.text import Text
 
+from mutagen.ast_validator import format_validation_errors, validate_c_source
 from mutagen.compiler import CompilationError, compile_target
 from mutagen.decompiler import (
     DecompilationError,
@@ -20,8 +21,7 @@ from mutagen.engines import get_engine
 from mutagen.executor import _check_docker_functional, execute_payload
 from mutagen.mutators import generate_fallback_payloads
 from mutagen.reporter import save_crash_report
-from mutagen.ast_validator import validate_c_source, format_validation_errors
-from mutagen.session_supervisor import SessionSupervisor, SessionResult
+from mutagen.session_supervisor import SessionSupervisor
 
 console = Console(force_terminal=True, force_jupyter=False)
 
@@ -496,13 +496,13 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     """Main fuzzer orchestration function."""
     if mode == "agents":
         import asyncio
-        import json
+
         from mutagen.orchestrator import AgentOrchestrator
-        
+
         # Read target source
         with open(source_path, encoding="utf-8", errors="ignore") as f:
             source_code = f.read()
-            
+
         orchestrator = AgentOrchestrator(
             target_path=source_path,
             source_code=source_code,
@@ -511,18 +511,18 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             compiler=gcc_path,
             delivery_mode=delivery_mode
         )
-        
+
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
         context = loop.run_until_complete(orchestrator.run())
-        
+
         for log in context.logs:
             console.print(f"[dim]{log}[/dim]")
-            
+
         unique_crashes = []
         crashes = []
         for p in context.active_payloads:
@@ -540,7 +540,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 }
                 crashes.append(crash_dict)
                 unique_crashes.append(crash_dict)
-                
+
         # If compilation failed or no active crash reproduced, convert triaged vulnerabilities to findings
         if not crashes and context.vulnerabilities:
             for v in context.vulnerabilities:
@@ -558,21 +558,21 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 }
                 crashes.append(finding)
                 unique_crashes.append(finding)
-                
+
         patch_file = ""
         exploit_file = ""
         json_file = ""
         html_file = ""
         patch_verified = context.verification_status == "VERIFIED_SECURE"
         patch_code = context.proposed_patches.get("primary_patch", "")
-        
+
         exploit_code = ""
         if crashes:
             exploit_code = verify_and_fallback_exploit("", crashes[0], "target.exe", "args")
-            
+
         target_name = os.path.basename(source_path)
         patch_ext = os.path.splitext(source_path)[1].replace(".", "")
-        
+
         if patch_code:
             ext = os.path.splitext(source_path)[1]
             patch_suffix = f"_FIXED{ext}" if ext else "_FIXED.c"
@@ -581,7 +581,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             os.makedirs("patches", exist_ok=True)
             with open(patch_file, "w", encoding="utf-8") as f:
                 f.write(patch_code)
-                
+
         if exploit_code:
             os.makedirs("exploits", exist_ok=True)
             exploit_file = f"exploits/{target_name.replace(os.path.splitext(source_path)[1], '_exploit.py')}"
@@ -589,34 +589,26 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 f.write(exploit_code)
 
         # Generate report for all runs
+        has_crashes = any(c.get("return_code", 0) != 0 for c in crashes)
         json_file, html_file = save_crash_report(
             crashes, target_name, len(context.active_payloads), patch_code, exploit_code,
-            language=patch_ext, profile=profile, static_only=(not active_crashes if 'active_crashes' in locals() else False),
+            language=patch_ext, profile=profile, static_only=not has_crashes,
             raw_decompiled_code="", clean_source_code=source_code,
             webhook_url=webhook_url,
             webhook_secret=webhook_secret,
             webhook_headers=webhook_headers,
         )
-                
+
+        patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""
+        exploit_text = f"  Exploit generated:[magenta]{exploit_file}[/magenta]\n" if exploit_file else ""
+        verification_text = "  Verification:     [bold green]VERIFIED SECURE[/bold green]\n" if patch_verified else "  Verification:     [bold red]FAILED[/bold red]\n"
+
         if crashes:
-            json_file, html_file = save_crash_report(
-                crashes, target_name, len(context.active_payloads), patch_code, exploit_code,
-                language=patch_ext, profile=profile, static_only=False,
-                raw_decompiled_code="", clean_source_code=source_code,
-                webhook_url=webhook_url,
-                webhook_secret=webhook_secret,
-                webhook_headers=webhook_headers,
-            )
-            
-            patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""
-            exploit_text = f"  Exploit generated:[magenta]{exploit_file}[/magenta]\n" if exploit_file else ""
-            verification_text = "  Verification:     [bold green]VERIFIED SECURE[/bold green]\n" if patch_verified else "  Verification:     [bold red]FAILED[/bold red]\n"
-            
             summary = Panel(
                 f"[bold green]FUZZING COMPLETE (Multi-Agent Swarm)[/bold green]\n\n"
                 f"  Payloads tested:  [cyan]{len(context.active_payloads)}[/cyan]\n"
                 f"  Unique crashes:   [bold red]{len(unique_crashes)}[/bold red]\n"
-                f"  Crash rate:       [yellow]{(len(unique_crashes)/len(context.active_payloads))*100:.0f}%[/yellow]\n"
+                f"  Crash rate:       [yellow]{(len(unique_crashes)/len(context.active_payloads))*100 if context.active_payloads else 0:.0f}%[/yellow]\n"
                 f"  JSON report:      [dim]{json_file}[/dim]\n"
                 f"  HTML report:      [yellow]{html_file}[/yellow]\n"
                 f"{patch_text}"
@@ -636,7 +628,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 border_style="yellow",
                 box=box.HEAVY,
             )
-            
+
         console.print(summary)
         return len(unique_crashes)
 
@@ -719,7 +711,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         ))
         from mutagen.defects4c import Defects4CClient, Defects4CError
         client = Defects4CClient(defects4c_url)
-        
+
         # 1. Reproduce bug
         console.print(f"[cyan]> Reproducing Defects4C bug:[/cyan] {source_path}")
         with Progress(
@@ -739,7 +731,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         # Format of bug_id: project@commit
         parts = source_path.split("@")
         project_name = parts[0] if parts else "project"
-        
+
         # Look for source file in mounted dir. Benchmark targets are typically in standard paths inside the cloned repo.
         # We walk the mount directory to find the modified/buggy C files.
         buggy_files = []
@@ -866,7 +858,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             else:
                 error_details = fix_res.get("message", "Tests failed or failed to compile")
                 console.print(f"[bold red]    X Verification Failed:[/bold red]\n{error_details}\n")
-                
+
                 # Check for detailed error dig diagnostics
                 if "handle" in fix_res:
                     try:
@@ -875,7 +867,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                             error_details += f"\nDiagnostics: {dig_res.get('classification')} - {dig_res.get('root_cause')}"
                     except Exception:
                         pass
-                        
+
                 attempt += 1
 
         # Save report
@@ -1010,9 +1002,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     code_lower = source_code.lower()
     detected_patterns = [p for p in injection_patterns if p in code_lower]
     if detected_patterns:
-        console.print(f"[bold red][!] DEFENSIVE ALERT: Potential prompt injection / jailbreak payload detected in target code![/bold red]")
+        console.print("[bold red][!] DEFENSIVE ALERT: Potential prompt injection / jailbreak payload detected in target code![/bold red]")
         console.print(f"[red]    Matched indicators: {detected_patterns}[/red]")
-        console.print(f"[red]    Aborting execution to protect LLM engine alignment integrity.[/red]")
+        console.print("[red]    Aborting execution to protect LLM engine alignment integrity.[/red]")
         sys.exit(2)
 
 

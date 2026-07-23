@@ -126,13 +126,24 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
             raise CompilationError(result.stderr or result.stdout)
         return source_path
 
-    # C/C++ path
+    # C/C++ path: Multi-file project discovery & build engine
+    target_dir = os.path.dirname(os.path.abspath(source_path)) or "."
+
     # Dynamically determine output extension based on OS
     if os.name == 'nt':
         output_path = source_path.replace(".c", ".exe").replace(".cpp", ".exe")
     else:
         output_path = source_path.replace(".c", ".out").replace(".cpp", ".out")
 
+    # 1. Discover local include paths (-I)
+    include_dirs = [target_dir]
+    for sub_inc in ["include", "inc", "src", "headers"]:
+        candidate_inc = os.path.join(target_dir, sub_inc)
+        if os.path.isdir(candidate_inc):
+            include_dirs.append(candidate_inc)
+
+    # 2. Discover sibling source files (.c / .cpp) in the target directory
+    source_files = [source_path]
     compile_source_path = source_path
     temp_instrumented = None
 
@@ -148,10 +159,29 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
             with open(temp_instrumented, "w", encoding="utf-8") as f:
                 f.write(instrumented_code)
             compile_source_path = temp_instrumented
+            source_files[0] = compile_source_path
         except Exception as e:
             console.print(f"[yellow]  [!] Warning: Source-level instrumentation failed: {e}. Falling back to standard compilation.[/yellow]")
             compile_source_path = source_path
             temp_instrumented = None
+
+    # Scan directory for helper source files (excluding current main target)
+    for root, _, files in os.walk(target_dir):
+        for file in files:
+            if file.endswith((".c", ".cpp")) and not file.endswith((".instrumented.c", ".instrumented.cpp")):
+                full_sibling = os.path.join(root, file)
+                if os.path.abspath(full_sibling) != os.path.abspath(source_path):
+                    # Quick check to avoid linking multiple main() functions
+                    try:
+                        with open(full_sibling, encoding="utf-8", errors="ignore") as f_sib:
+                            sib_content = f_sib.read()
+                            if "int main(" not in sib_content and "void main(" not in sib_content:
+                                source_files.append(full_sibling)
+                    except Exception:
+                        pass
+
+    if len(source_files) > 1:
+        console.print(f"[cyan]  Multi-File Build Engine: Discovered {len(source_files)} source files in target workspace.[/cyan]")
 
     # Check if sanitizers are supported
     use_sanitizers = check_sanitizer_support(gcc_path)
@@ -162,13 +192,18 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
     else:
         console.print("[dim]  Sanitizers not supported (or using TCC). Compiling standard binary...[/dim]")
 
-    compile_args.extend(["-o", output_path, compile_source_path])
+    # Add include directory flags (-I)
+    for inc in include_dirs:
+        compile_args.extend(["-I", inc])
+
+    compile_args.extend(["-o", output_path])
+    compile_args.extend(source_files)
 
     # MinGW/MSYS2 needs explicit linking for Winsock and static runtime to avoid dynamic DLL dependency errors
     if os.name == 'nt' and "tcc" not in os.path.basename(gcc_path).lower():
         compile_args.append("-static")
         try:
-            with open(source_path, encoding="utf-8") as f:
+            with open(source_path, encoding="utf-8", errors="ignore") as f:
                 content = f.read()
             if "winsock2.h" in content:
                 compile_args.append("-lws2_32")
@@ -191,7 +226,7 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
             pass
 
     if result.returncode != 0:
-        raise CompilationError(result.stderr)
+        raise CompilationError(result.stderr or result.stdout)
 
     return output_path
 
