@@ -104,11 +104,21 @@ RULES:
                             raise
             else:
                 # Multi-provider fallback for OpenAI, Claude, and Ollama
-                payload_items = getattr(self.engine, "_parse_generate", lambda *a, **kw: [])(
-                    prompt=prompt,
-                    response_model=PayloadList,
-                    list_key="payloads"
-                )
+                raw_payloads = self.engine.generate_payloads(context.source_code, prompt, max_payloads=5, debug=False)
+                payload_items = []
+                for item in raw_payloads:
+                    if isinstance(item, dict):
+                        payload_items.append({
+                            "args": item.get("args", []),
+                            "input_data": item.get("input_data", ""),
+                            "reason": item.get("reason", "Synthesized by AI swarm")
+                        })
+                    elif isinstance(item, str):
+                        payload_items.append({
+                            "args": [item],
+                            "input_data": item,
+                            "reason": "Synthesized string payload"
+                        })
                 data = {"payloads": payload_items}
 
             payloads = data.get("payloads", [])

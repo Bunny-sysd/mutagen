@@ -163,26 +163,21 @@ def main():
     else:
         target_file = args.target
         abs_target_file = os.path.abspath(target_file)
-        
-        # Secure boundary check: ensure target_file is strictly inside the workspace directory.
-        # string.startswith can be bypassed (e.g. workspace_dir = 'C:\mutagen', target = 'C:\mutagen_evil\file.c')
-        try:
-            # Resolve common path. On Windows, paths can be mixed-case, so lower them for comparison.
-            common = os.path.commonpath([workspace_dir, abs_target_file])
-            if os.name == 'nt':
-                is_inside = (common.lower() == workspace_dir.lower())
-            else:
-                is_inside = (common == workspace_dir)
-        except ValueError:
-            is_inside = False
-
-        if not is_inside:
-            console.print(f"[red]X Security Error: Target file must be inside the Mutagen workspace: {workspace_dir}[/red]")
-            sys.exit(1)
 
         if not os.path.exists(abs_target_file):
             console.print(f"[red]X File not found: {target_file}[/red]")
             sys.exit(1)
+
+        # Notice if target file is outside workspace directory
+        try:
+            common = os.path.commonpath([workspace_dir, abs_target_file])
+            is_inside = (common.lower() == workspace_dir.lower()) if os.name == 'nt' else (common == workspace_dir)
+        except ValueError:
+            is_inside = False
+
+        if not is_inside:
+            console.print(f"[yellow][!] Target file is outside Mutagen workspace directory. Proceeding in external target mode.[/yellow]")
+
         targets = [abs_target_file]
 
 
