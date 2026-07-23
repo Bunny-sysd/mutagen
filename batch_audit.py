@@ -1,20 +1,21 @@
-import os
-import sys
+import argparse
 import glob
 import json
+import os
+import sys
 import time
-import argparse
 from datetime import datetime
+
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
+from rich.table import Table
 
 # Add current directory to path so mutagen package imports work cleanly
 sys.path.insert(0, os.getcwd())
 
+from mutagen.cli import is_supported_language, load_env
 from mutagen.core import run_fuzzer
-from mutagen.cli import load_env, is_supported_language
 
 console = Console(force_terminal=True, force_jupyter=False)
 
@@ -36,40 +37,42 @@ def find_newest_report(target_name: str, start_time: float) -> str | None:
     safe_target = "".join(c if c.isalnum() or c in "._-" else "_" for c in target_name)
     pattern = os.path.join("crashes", f"crash_report_{safe_target}_*.json")
     matching_files = glob.glob(pattern)
-    
+
     newest_file = None
     newest_mtime = 0.0
-    
+
     for f in matching_files:
         mtime = os.path.getmtime(f)
         if mtime >= start_time - 5:  # Allow 5s clock skew buffer
             if mtime > newest_mtime:
                 newest_mtime = mtime
                 newest_file = f
-                
+
     return newest_file
 
 def generate_html_report(results: list[dict], output_path: str):
     """Generates a premium HTML/CSS dashboard containing all batch findings."""
     total_files = len(results)
-    audited_files = [r for r in results if r["status"] == "success"]
-    failed_files = [r for r in results if r["status"] == "failed"]
-    
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    target_dir = os.path.dirname(results[0]["file"]) if results else "targets"
+
     # Calculate totals
     severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     total_findings = 0
-    
+
     for r in results:
         for f in r.get("findings", []):
             sev = f.get("severity", "").lower()
             if sev in severity_counts:
                 severity_counts[sev] += 1
                 total_findings += 1
-                
+
     # Calculate simple health score (starts at 100, drops by severity weight)
     score_penalty = (severity_counts["critical"] * 25) + (severity_counts["high"] * 10) + (severity_counts["medium"] * 3) + (severity_counts["low"] * 1)
     health_score = max(0, 100 - score_penalty)
-    
+
+    health_color = '#22c55e' if health_score >= 80 else '#eab308' if health_score >= 50 else '#ef4444'
+
     # Sleek dark mode visual template
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -92,13 +95,13 @@ def generate_html_report(results: list[dict], output_path: str):
             --text-main: #f8fafc;
             --text-muted: #94a3b8;
         }}
-        
+
         * {{
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }}
-        
+
         body {{
             background: radial-gradient(circle at top right, #1e1b4b, var(--bg-dark));
             font-family: 'Outfit', sans-serif;
@@ -106,7 +109,7 @@ def generate_html_report(results: list[dict], output_path: str):
             min-height: 100vh;
             padding: 2.5rem;
         }}
-        
+
         header {{
             max-width: 1200px;
             margin: 0 auto 3rem auto;
@@ -114,12 +117,12 @@ def generate_html_report(results: list[dict], output_path: str):
             justify-content: space-between;
             align-items: center;
         }}
-        
+
         .brand {{
             display: flex;
             flex-direction: column;
         }}
-        
+
         .brand h1 {{
             font-size: 2.5rem;
             font-weight: 800;
@@ -127,13 +130,13 @@ def generate_html_report(results: list[dict], output_path: str):
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }}
-        
+
         .brand p {{
             color: var(--text-muted);
             font-size: 0.95rem;
             margin-top: 0.25rem;
         }}
-        
+
         .health-badge {{
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid var(--border-color);
@@ -144,13 +147,13 @@ def generate_html_report(results: list[dict], output_path: str):
             gap: 1rem;
             backdrop-filter: blur(10px);
         }}
-        
+
         .health-val {{
             font-size: 2rem;
             font-weight: 800;
-            color: {('#22c55e' if health_score >= 80 else '#eab308' if health_score >= 50 else '#ef4444')};
+            color: {health_color};
         }}
-        
+
         .dashboard-grid {{
             max-width: 1200px;
             margin: 0 auto 3rem auto;
@@ -158,7 +161,7 @@ def generate_html_report(results: list[dict], output_path: str):
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 1.5rem;
         }}
-        
+
         .stat-card {{
             background: var(--panel-bg);
             border: 1px solid var(--border-color);
@@ -171,7 +174,7 @@ def generate_html_report(results: list[dict], output_path: str):
             position: relative;
             overflow: hidden;
         }}
-        
+
         .stat-card::before {{
             content: '';
             position: absolute;
@@ -180,12 +183,12 @@ def generate_html_report(results: list[dict], output_path: str):
             width: 4px;
             height: 100%;
         }}
-        
+
         .stat-card.critical::before {{ background: var(--crit-color); }}
         .stat-card.high::before {{ background: var(--high-color); }}
         .stat-card.medium::before {{ background: var(--med-color); }}
         .stat-card.low::before {{ background: var(--low-color); }}
-        
+
         .stat-title {{
             color: var(--text-muted);
             font-size: 0.85rem;
@@ -193,23 +196,23 @@ def generate_html_report(results: list[dict], output_path: str):
             font-weight: 600;
             letter-spacing: 0.05em;
         }}
-        
+
         .stat-val {{
             font-size: 2.75rem;
             font-weight: 800;
             margin: 0.75rem 0;
         }}
-        
+
         .stat-footer {{
             font-size: 0.85rem;
             color: var(--text-muted);
         }}
-        
+
         main {{
             max-width: 1200px;
             margin: 0 auto;
         }}
-        
+
         .section-header {{
             font-size: 1.5rem;
             font-weight: 600;
@@ -218,7 +221,7 @@ def generate_html_report(results: list[dict], output_path: str):
             align-items: center;
             gap: 0.75rem;
         }}
-        
+
         .file-panel {{
             background: var(--panel-bg);
             border: 1px solid var(--border-color);
@@ -228,12 +231,12 @@ def generate_html_report(results: list[dict], output_path: str):
             overflow: hidden;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }}
-        
+
         .file-panel:hover {{
             border-color: rgba(255, 255, 255, 0.15);
             box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
         }}
-        
+
         .file-header {{
             padding: 1.25rem 1.5rem;
             display: flex;
@@ -242,29 +245,29 @@ def generate_html_report(results: list[dict], output_path: str):
             cursor: pointer;
             user-select: none;
         }}
-        
+
         .file-info {{
             display: flex;
             align-items: center;
             gap: 1.25rem;
         }}
-        
+
         .file-name {{
             font-weight: 600;
             font-size: 1.1rem;
         }}
-        
+
         .file-path {{
             color: var(--text-muted);
             font-size: 0.85rem;
             font-family: 'JetBrains Mono', monospace;
         }}
-        
+
         .file-stats {{
             display: flex;
             gap: 0.5rem;
         }}
-        
+
         .badge {{
             padding: 0.35rem 0.75rem;
             border-radius: 8px;
@@ -272,21 +275,21 @@ def generate_html_report(results: list[dict], output_path: str):
             font-weight: 600;
             text-transform: uppercase;
         }}
-        
+
         .badge.critical {{ background: rgba(239, 68, 68, 0.15); color: var(--crit-color); border: 1px solid rgba(239, 68, 68, 0.3); }}
         .badge.high {{ background: rgba(249, 115, 22, 0.15); color: var(--high-color); border: 1px solid rgba(249, 115, 22, 0.3); }}
         .badge.medium {{ background: rgba(234, 179, 8, 0.15); color: var(--med-color); border: 1px solid rgba(234, 179, 8, 0.3); }}
         .badge.low {{ background: rgba(59, 130, 246, 0.15); color: var(--low-color); border: 1px solid rgba(59, 130, 246, 0.3); }}
         .badge.clean {{ background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3); }}
         .badge.failed {{ background: rgba(239, 68, 68, 0.2); color: var(--crit-color); }}
-        
+
         .file-details {{
             display: none;
             padding: 0 1.5rem 1.5rem 1.5rem;
             border-top: 1px solid var(--border-color);
             background: rgba(15, 23, 42, 0.4);
         }}
-        
+
         .finding-card {{
             background: rgba(30, 41, 59, 0.5);
             border: 1px solid var(--border-color);
@@ -294,26 +297,26 @@ def generate_html_report(results: list[dict], output_path: str):
             padding: 1.25rem;
             margin-top: 1.25rem;
         }}
-        
+
         .finding-title {{
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 0.75rem;
         }}
-        
+
         .finding-name {{
             font-size: 1.05rem;
             font-weight: 600;
         }}
-        
+
         .finding-reason {{
             font-size: 0.95rem;
             color: #cbd5e1;
             line-height: 1.5;
             margin-bottom: 1rem;
         }}
-        
+
         .finding-meta {{
             display: flex;
             gap: 1.5rem;
@@ -321,7 +324,7 @@ def generate_html_report(results: list[dict], output_path: str):
             color: var(--text-muted);
             font-family: 'JetBrains Mono', monospace;
         }}
-        
+
         .finding-payload {{
             margin-top: 1rem;
             background: #020617;
@@ -370,11 +373,11 @@ def generate_html_report(results: list[dict], output_path: str):
         </div>
     </div>
 
-    <main>
         <div class="section-header">
             <span>Audited Project Resources ({total_files} files)</span>
         </div>
-        
+    """
+
     # Pre-render file panels for Python 3.10+ compatibility
     file_panels = []
     for r in results:
@@ -409,165 +412,155 @@ def generate_html_report(results: list[dict], output_path: str):
             payload = f.get("payload")
             payload_html = f'<div class="finding-payload"><b>Exploit Trigger Input:</b> {payload}</div>' if payload else ''
 
-            finding_cards.append(f"""
-                <div class="finding-card">
-                    <div class="finding-title">
-                        <div class="finding-name">{vuln_type}</div>
-                        <span class="badge {sev_lower}">{severity}</span>
-                    </div>
-                    <div class="finding-reason">{reason}</div>
-                    <div class="finding-meta">
-                        <div>CWE: {cwe}</div>
-                        <div>Trigger Confidence: {conf}/10</div>
-                    </div>
-                    {payload_html}
-                </div>
-            """)
+            card = (
+                f'<div class="finding-card">'
+                f'<div class="finding-title"><div class="finding-name">{vuln_type}</div><span class="badge {sev_lower}">{severity}</span></div>'
+                f'<div class="finding-reason">{reason}</div>'
+                f'<div class="finding-meta"><div>CWE: {cwe}</div><div>Trigger Confidence: {conf}/10</div></div>'
+                f'{payload_html}'
+                f'</div>'
+            )
+            finding_cards.append(card)
 
         findings_html = "".join(finding_cards)
 
-        file_panels.append(f"""
-        <div class="file-panel">
-            <div class="file-header" onclick="toggleDetails(this)">
-                <div class="file-info">
-                    <div class="file-name">{base_name}</div>
-                    <div class="file-path">{file_path}</div>
-                </div>
-                <div class="file-stats">
-                    {crit_badge}
-                    {high_badge}
-                    {med_badge}
-                    {low_badge}
-                    {clean_badge}
-                    {failed_badge}
-                </div>
-            </div>
-            
-            <div class="file-details">
-                {clean_msg}
-                {fail_msg}
-                {findings_html}
-            </div>
-        </div>
-        """)
+        panel = (
+            f'<div class="file-panel">'
+            f'<div class="file-header" onclick="toggleDetails(this)">'
+            f'<div class="file-info"><div class="file-name">{base_name}</div><div class="file-path">{file_path}</div></div>'
+            f'<div class="file-stats">{crit_badge}{high_badge}{med_badge}{low_badge}{clean_badge}{failed_badge}</div>'
+            f'</div>'
+            f'<div class="file-details">{clean_msg}{fail_msg}{findings_html}</div>'
+            f'</div>'
+        )
+        file_panels.append(panel)
 
     file_panels_html = "".join(file_panels)
 
-    html_content = f"""<!DOCTYPE html>
+    crit_count = str(severity_counts["critical"])
+    high_count = str(severity_counts["high"])
+    med_count = str(severity_counts["medium"])
+    low_count = str(severity_counts["low"])
+
+    css_styles = """
+:root {
+    --bg-color: #0b0f19;
+    --card-bg: rgba(22, 31, 48, 0.7);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --text-main: #f3f4f6;
+    --text-muted: #9ca3af;
+    --accent-color: #00ff88;
+    --crit-color: #ff4d4d;
+    --high-color: #ff9900;
+    --med-color: #ffcc00;
+    --low-color: #3399ff;
+}
+body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg-color);
+    color: var(--text-main);
+    margin: 0;
+    padding: 2rem;
+}
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+.title-area h1 {
+    font-size: 2.2rem;
+    margin: 0;
+    background: linear-gradient(135deg, #00ff88, #60a5fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2.5rem;
+}
+.stat-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 1.5rem;
+}
+.stat-title { font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; }
+.stat-val { font-size: 2.5rem; font-weight: 700; margin: 0.5rem 0; }
+.stat-footer { font-size: 0.8rem; color: var(--text-muted); }
+.stat-card.crit .stat-val { color: var(--crit-color); }
+.stat-card.high .stat-val { color: var(--high-color); }
+.stat-card.med .stat-val { color: var(--med-color); }
+.stat-card.low .stat-val { color: var(--low-color); }
+
+.section-header {
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--card-border);
+    padding-bottom: 0.5rem;
+}
+.file-panel {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+}
+.file-header {
+    padding: 1.2rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+.file-header:hover { background: rgba(255, 255, 255, 0.03); }
+.file-name { font-weight: 600; font-size: 1.1rem; }
+.file-path { font-size: 0.85rem; color: var(--text-muted); }
+.file-stats { display: flex; gap: 0.5rem; }
+.badge {
+    padding: 0.25rem 0.6rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.badge.critical { background: rgba(255, 77, 77, 0.2); color: var(--crit-color); border: 1px solid var(--crit-color); }
+.badge.high { background: rgba(255, 153, 0, 0.2); color: var(--high-color); border: 1px solid var(--high-color); }
+.badge.medium { background: rgba(255, 204, 0, 0.2); color: var(--med-color); border: 1px solid var(--med-color); }
+.badge.low { background: rgba(51, 153, 255, 0.2); color: var(--low-color); border: 1px solid var(--low-color); }
+.badge.clean { background: rgba(0, 255, 136, 0.15); color: var(--accent-color); border: 1px solid var(--accent-color); }
+.badge.failed { background: rgba(255, 77, 77, 0.1); color: #ff6666; border: 1px solid #ff6666; }
+
+.file-details {
+    display: none;
+    padding: 0 1.5rem 1.5rem 1.5rem;
+    border-top: 1px solid var(--card-border);
+}
+.finding-card {
+    background: rgba(0, 0, 0, 0.2);
+    border-left: 3px solid var(--card-border);
+    padding: 1rem;
+    margin-top: 1rem;
+    border-radius: 4px;
+}
+.finding-title { display: flex; justify-content: space-between; font-weight: 600; }
+.finding-reason { font-size: 0.9rem; margin: 0.5rem 0; color: var(--text-muted); }
+.finding-meta { display: flex; gap: 1.5rem; font-size: 0.8rem; color: var(--text-muted); }
+.finding-payload { font-family: monospace; font-size: 0.8rem; background: rgba(0,0,0,0.4); padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem; word-break: break-all; }
+"""
+
+    html_template = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mutagen Batch Audit Report - {timestamp}</title>
+    <title>Mutagen Batch Audit Report - {{TIMESTAMP}}</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
-        :root {{
-            --bg-color: #0b0f19;
-            --card-bg: rgba(22, 31, 48, 0.7);
-            --card-border: rgba(255, 255, 255, 0.08);
-            --text-main: #f3f4f6;
-            --text-muted: #9ca3af;
-            --accent-color: #00ff88;
-            --crit-color: #ff4d4d;
-            --high-color: #ff9900;
-            --med-color: #ffcc00;
-            --low-color: #3399ff;
-        }}
-        body {{
-            font-family: 'Outfit', sans-serif;
-            background: var(--bg-color);
-            color: var(--text-main);
-            margin: 0;
-            padding: 2rem;
-        }}
-        .header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-        }}
-        .title-area h1 {{
-            font-size: 2.2rem;
-            margin: 0;
-            background: linear-gradient(135deg, #00ff88, #60a5fa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }}
-        .stats-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2.5rem;
-        }}
-        .stat-card {{
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            padding: 1.5rem;
-        }}
-        .stat-title {{ font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; }}
-        .stat-val {{ font-size: 2.5rem; font-weight: 700; margin: 0.5rem 0; }}
-        .stat-footer {{ font-size: 0.8rem; color: var(--text-muted); }}
-        .stat-card.crit .stat-val {{ color: var(--crit-color); }}
-        .stat-card.high .stat-val {{ color: var(--high-color); }}
-        .stat-card.med .stat-val {{ color: var(--med-color); }}
-        .stat-card.low .stat-val {{ color: var(--low-color); }}
-        
-        .section-header {{
-            font-size: 1.3rem;
-            font-weight: 600;
-            margin-bottom: 1.5rem;
-            border-bottom: 1px solid var(--card-border);
-            padding-bottom: 0.5rem;
-        }}
-        .file-panel {{
-            background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            margin-bottom: 1rem;
-            overflow: hidden;
-        }}
-        .file-header {{
-            padding: 1.2rem 1.5rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: pointer;
-            user-select: none;
-        }}
-        .file-header:hover {{ background: rgba(255, 255, 255, 0.03); }}
-        .file-name {{ font-weight: 600; font-size: 1.1rem; }}
-        .file-path {{ font-size: 0.85rem; color: var(--text-muted); }}
-        .file-stats {{ display: flex; gap: 0.5rem; }}
-        .badge {{
-            padding: 0.25rem 0.6rem;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }}
-        .badge.critical {{ background: rgba(255, 77, 77, 0.2); color: var(--crit-color); border: 1px solid var(--crit-color); }}
-        .badge.high {{ background: rgba(255, 153, 0, 0.2); color: var(--high-color); border: 1px solid var(--high-color); }}
-        .badge.medium {{ background: rgba(255, 204, 0, 0.2); color: var(--med-color); border: 1px solid var(--med-color); }}
-        .badge.low {{ background: rgba(51, 153, 255, 0.2); color: var(--low-color); border: 1px solid var(--low-color); }}
-        .badge.clean {{ background: rgba(0, 255, 136, 0.15); color: var(--accent-color); border: 1px solid var(--accent-color); }}
-        .badge.failed {{ background: rgba(255, 77, 77, 0.1); color: #ff6666; border: 1px solid #ff6666; }}
-        
-        .file-details {{
-            display: none;
-            padding: 0 1.5rem 1.5rem 1.5rem;
-            border-top: 1px solid var(--card-border);
-        }}
-        .finding-card {{
-            background: rgba(0, 0, 0, 0.2);
-            border-left: 3px solid var(--card-border);
-            padding: 1rem;
-            margin-top: 1rem;
-            border-radius: 4px;
-        }}
-        .finding-title {{ display: flex; justify-content: space-between; font-weight: 600; }}
-        .finding-reason {{ font-size: 0.9rem; margin: 0.5rem 0; color: var(--text-muted); }}
-        .finding-meta {{ display: flex; gap: 1.5rem; font-size: 0.8rem; color: var(--text-muted); }}
-        .finding-payload {{ font-family: monospace; font-size: 0.8rem; background: rgba(0,0,0,0.4); padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem; word-break: break-all; }}
+{{CSS_STYLES}}
     </style>
 </head>
 <body>
@@ -577,67 +570,81 @@ def generate_html_report(results: list[dict], output_path: str):
             <div style="color: var(--text-muted); font-size: 0.9rem;">Automated Multi-Target Security Scanning Pipeline</div>
         </div>
         <div style="text-align: right; color: var(--text-muted); font-size: 0.85rem;">
-            <div>Target Directory: <b>{target_dir}</b></div>
-            <div>Generated: <b>{timestamp}</b></div>
+            <div>Target Directory: <b>{{TARGET_DIR}}</b></div>
+            <div>Generated: <b>{{TIMESTAMP}}</b></div>
         </div>
     </div>
 
     <div class="stats-grid">
         <div class="stat-card crit">
             <div class="stat-title">Critical Severity</div>
-            <div class="stat-val">{severity_counts["critical"]}</div>
+            <div class="stat-val">{{CRIT_COUNT}}</div>
             <div class="stat-footer">Immediate exploit potential</div>
         </div>
         <div class="stat-card high">
             <div class="stat-title">High Severity</div>
-            <div class="stat-val">{severity_counts["high"]}</div>
+            <div class="stat-val">{{HIGH_COUNT}}</div>
             <div class="stat-footer">High impact vulnerabilities</div>
         </div>
         <div class="stat-card med">
             <div class="stat-title">Medium Severity</div>
-            <div class="stat-val">{severity_counts["medium"]}</div>
+            <div class="stat-val">{{MED_COUNT}}</div>
             <div class="stat-footer">Logic & boundary flaws</div>
         </div>
         <div class="stat-card low">
             <div class="stat-title">Low Severity / Info</div>
-            <div class="stat-val">{severity_counts["low"]}</div>
+            <div class="stat-val">{{LOW_COUNT}}</div>
             <div class="stat-footer">Reconnaissance & design details</div>
         </div>
     </div>
 
     <main>
         <div class="section-header">
-            <span>Audited Project Resources ({total_files} files)</span>
+            <span>Audited Project Resources ({{TOTAL_FILES}} files)</span>
         </div>
-        
-        {file_panels_html}
+
+        {{FILE_PANELS_HTML}}
     </main>
 
     <script>
-        function toggleDetails(header) {{
+        function toggleDetails(header) {
             const details = header.nextElementSibling;
-            if (details.style.display === 'block') {{
+            if (details.style.display === 'block') {
                 details.style.display = 'none';
-            }} else {{
+            } else {
                 details.style.display = 'block';
-            }}
-        }}
+            }
+        }
     </script>
 </body>
 </html>
 """
+
+    html_content = (
+        html_template
+        .replace("{{TIMESTAMP}}", timestamp)
+        .replace("{{CSS_STYLES}}", css_styles)
+        .replace("{{TARGET_DIR}}", target_dir)
+        .replace("{{CRIT_COUNT}}", crit_count)
+        .replace("{{HIGH_COUNT}}", high_count)
+        .replace("{{MED_COUNT}}", med_count)
+        .replace("{{LOW_COUNT}}", low_count)
+        .replace("{{TOTAL_FILES}}", str(total_files))
+        .replace("{{FILE_PANELS_HTML}}", file_panels_html)
+    )
+
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html_content)
 
 def main():
     load_env()
-    
+
     # Fix Windows console encoding for colored/unicode output
     import io
     if sys.platform == "win32" and "pytest" not in sys.modules:
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-    
+
     parser = argparse.ArgumentParser(description="Mutagen Batch Directory Security Audit Runner")
     parser.add_argument("--dir", default="targets", help="Directory to scan recursively (default: targets)")
     parser.add_argument("--provider", default="gemini", help="AI provider (gemini, openai, claude, ollama)")
@@ -645,20 +652,20 @@ def main():
     parser.add_argument("--max-payloads", type=int, default=5, help="Max payloads per file")
     parser.add_argument("--output", default="batch_report.html", help="Dashboard HTML output file")
     args = parser.parse_args()
-    
+
     # 1. Discover targets
     console.print(Panel.fit("[bold purple]MUTAGEN BATCH AUDIT[/bold purple]\nScanning directory for targets...", border_style="purple"))
     files = get_supported_files(args.dir)
-    
+
     if not files:
         console.print(f"[yellow]No supported source files found in directory: {args.dir}[/yellow]")
         sys.exit(0)
-        
+
     console.print(f"[green]>> Discovered {len(files)} files to audit.[/green]\n")
-    
+
     # 2. Run scans
     results = []
-    
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -667,11 +674,11 @@ def main():
         console=console
     ) as progress:
         audit_task = progress.add_task("[cyan]Auditing source targets...", total=len(files))
-        
+
         for file_path in files:
             progress.update(audit_task, description=f"[cyan]Auditing: {os.path.basename(file_path)}")
             start_time = time.time()
-            
+
             try:
                 # Run fuzzer programmatically in static_only mode
                 run_fuzzer(
@@ -685,22 +692,22 @@ def main():
                     model=args.model,
                     static_only=True
                 )
-                
+
                 # Locate generated JSON report file
                 new_report = find_newest_report(os.path.basename(file_path), start_time)
                 findings = []
-                
+
                 if new_report and os.path.exists(new_report):
-                    with open(new_report, "r", encoding="utf-8") as rf:
+                    with open(new_report, encoding="utf-8") as rf:
                         report_data = json.load(rf)
                         findings = report_data.get("crashes", [])
-                
+
                 results.append({
                     "file": file_path,
                     "status": "success",
                     "findings": findings
                 })
-                
+
             except Exception as e:
                 results.append({
                     "file": file_path,
@@ -708,12 +715,12 @@ def main():
                     "findings": [],
                     "error": str(e)
                 })
-                
+
             progress.advance(audit_task)
-            
+
     # 3. Rich summary table output
     console.print("\n[bold green]BATCH SCANS COMPLETE[/bold green]\n")
-    
+
     summary_table = Table(title="Security Audit Summary", border_style="dim")
     summary_table.add_column("#", justify="right", style="cyan", no_wrap=True)
     summary_table.add_column("Target File", style="white")
@@ -722,7 +729,7 @@ def main():
     summary_table.add_column("High", justify="right", style="orange3")
     summary_table.add_column("Medium", justify="right", style="yellow")
     summary_table.add_column("Low", justify="right", style="blue")
-    
+
     for idx, r in enumerate(results, 1):
         if r["status"] == "failed":
             summary_table.add_row(
@@ -736,9 +743,9 @@ def main():
             high = len([f for f in r["findings"] if f["severity"].lower() == "high"])
             med = len([f for f in r["findings"] if f["severity"].lower() == "medium"])
             low = len([f for f in r["findings"] if f["severity"].lower() == "low"])
-            
+
             status_str = "[green]CLEAN[/green]" if len(r["findings"]) == 0 else "[yellow]VULNERABLE[/yellow]"
-            
+
             summary_table.add_row(
                 str(idx),
                 os.path.basename(r["file"]),
@@ -748,9 +755,9 @@ def main():
                 str(med),
                 str(low)
             )
-            
+
     console.print(summary_table)
-    
+
     # 4. Generate HTML Dashboard
     generate_html_report(results, args.output)
     console.print(f"\n[bold green][+] Unified Security Dashboard saved to: [yellow]{args.output}[/yellow][/bold green]")
