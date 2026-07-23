@@ -14,8 +14,6 @@ from mutagen.ast_validator import format_validation_errors, validate_c_source
 from mutagen.compiler import CompilationError, compile_target
 from mutagen.decompiler import (
     DecompilationError,
-    decompile_binary,
-    find_ghidra,
 )
 from mutagen.engines import get_engine
 from mutagen.executor import _check_docker_functional, execute_payload
@@ -497,10 +495,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     if mode == "agents":
         import asyncio
 
-        from mutagen.orchestrator import AgentOrchestrator
-
         # Read target source (or decompile if target is a binary)
         from mutagen.decompiler import decompile_binary, find_ghidra, is_binary_target
+        from mutagen.orchestrator import AgentOrchestrator
         if is_binary_target(source_path) or binary_mode:
             console.print(f"[bold magenta]Decompiling Binary Target: {source_path}[/bold magenta]")
             try:

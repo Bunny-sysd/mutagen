@@ -21,15 +21,13 @@ Delivery modes
 
 from __future__ import annotations
 
+import queue
 import re
 import socket
-import queue
 import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Optional
-
 
 # ---------------------------------------------------------------------------
 # Result dataclasses
@@ -45,7 +43,7 @@ class StepResult:
     coverage_delta: list[int] = field(default_factory=list)
     cumulative_coverage: set[int] = field(default_factory=set)
     is_alive: bool = True
-    return_code: Optional[int] = None
+    return_code: int | None = None
     crash_type: str = "none"
     elapsed_ms: float = 0.0
 
@@ -55,11 +53,11 @@ class SessionResult:
     """Aggregated result of an entire payload sequence (session)."""
     steps: list[StepResult] = field(default_factory=list)
     crashed: bool = False
-    crash_step: Optional[int] = None
+    crash_step: int | None = None
     crash_type: str = "none"
     total_coverage: set[int] = field(default_factory=set)
     coverage_progression: list[set[int]] = field(default_factory=list)
-    return_code: Optional[int] = None
+    return_code: int | None = None
 
 # ---------------------------------------------------------------------------
 # Crash classification — shared taxonomy with executor.py
@@ -207,12 +205,12 @@ class SessionSupervisor:
         self.sandbox = sandbox
         self.step_timeout = step_timeout
 
-        self._process: Optional[subprocess.Popen] = None
-        self._socket: Optional[socket.socket] = None
+        self._process: subprocess.Popen | None = None
+        self._socket: socket.socket | None = None
         self._stdout_queue: queue.Queue = queue.Queue()
         self._stderr_queue: queue.Queue = queue.Queue()
-        self._stdout_thread: Optional[threading.Thread] = None
-        self._stderr_thread: Optional[threading.Thread] = None
+        self._stdout_thread: threading.Thread | None = None
+        self._stderr_thread: threading.Thread | None = None
         self._cumulative_coverage: set[int] = set()
         self._step_count = 0
         self._started = False
@@ -252,6 +250,13 @@ class SessionSupervisor:
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self._socket.settimeout(self.step_timeout)
             self._socket.connect(("127.0.0.1", port))
+            # Drain initial server greeting banner if present
+            try:
+                banner = self._socket.recv(1024)
+                if banner:
+                    pass  # Initial banner received and cleared
+            except (TimeoutError, OSError):
+                pass
         else:
             raise ValueError(
                 f"Unsupported session delivery mode: {self.delivery_mode}. "
@@ -321,7 +326,7 @@ class SessionSupervisor:
 
     # -- Step execution ------------------------------------------------------
 
-    def send_step(self, input_data: str, step_timeout: Optional[float] = None) -> StepResult:
+    def send_step(self, input_data: str, step_timeout: float | None = None) -> StepResult:
         """Send one input to the persistent process and capture the response.
 
         Parameters
@@ -495,7 +500,7 @@ class SessionSupervisor:
 
     # -- Context manager support ---------------------------------------------
 
-    def __enter__(self) -> "SessionSupervisor":
+    def __enter__(self) -> SessionSupervisor:
         self.start()
         return self
 
@@ -576,7 +581,7 @@ class SessionSupervisor:
         response = b""
         try:
             response = self._socket.recv(4096)
-        except socket.timeout:
+        except TimeoutError:
             pass
 
         # Also drain stdout/stderr from the process
