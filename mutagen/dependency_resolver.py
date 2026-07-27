@@ -142,8 +142,8 @@ def parse_compilation_error(stderr_output: str) -> list[str]:
                 for flag in lib_flags:
                     suggested_flags.add(flag)
 
-    # 2. Undefined references: undefined reference to `curl_easy_init'
-    undefined_refs = re.findall(r'undefined reference to [`\']([^`\']+)[\'`]', stderr_output, re.IGNORECASE)
+    # 2. Undefined references: undefined reference to `curl_easy_init` or symbol 'pow@@GLIBC_2.29'
+    undefined_refs = re.findall(r'undefined reference to [`\'\s]+([^`\'\s]+)', stderr_output, re.IGNORECASE)
     for ref in undefined_refs:
         ref_lower = ref.lower()
         if "curl_" in ref_lower:
@@ -157,5 +157,11 @@ def parse_compilation_error(stderr_output: str) -> list[str]:
             suggested_flags.add("-lsqlite3")
         elif "pthread_" in ref_lower:
             suggested_flags.add("-pthread")
+        elif "pow" in ref_lower or "sqrt" in ref_lower or "sin" in ref_lower or "cos" in ref_lower or "floor" in ref_lower or "ceil" in ref_lower:
+            suggested_flags.add("-lm")
+
+    # 3. DSO missing / libm symbol resolution errors
+    if "dso missing" in stderr_output.lower() or "libm.so" in stderr_output.lower():
+        suggested_flags.add("-lm")
 
     return sorted(list(suggested_flags))

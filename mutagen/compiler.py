@@ -192,24 +192,31 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
             compile_source_path = source_path
             temp_instrumented = None
 
-    # Scan target_dir and parent_dir for helper source files (excluding main/instrumented targets)
+    # Scan target_dir and parent_dir for helper source files (excluding main/fuzzer/instrumented targets)
     seen_sources = {os.path.abspath(source_path)}
     scan_roots = [abs_target_dir]
     if parent_dir and os.path.exists(parent_dir) and parent_dir != os.path.dirname(parent_dir):
         scan_roots.append(parent_dir)
 
+    target_basename = os.path.basename(source_path).lower()
+
     for scan_root in scan_roots:
         for root, _, files in os.walk(scan_root):
             for file in files:
-                if file.endswith((".c", ".cpp")) and not file.endswith((".instrumented.c", ".instrumented.cpp")):
+                file_lower = file.lower()
+                if file_lower.endswith((".c", ".cpp")) and not file_lower.endswith((".instrumented.c", ".instrumented.cpp")):
+                    # Skip standalone fuzzer harnesses and test files unless it is the direct target being compiled
+                    if file_lower != target_basename and (file_lower.endswith(("fuzzer.c", "fuzz.c", "_test.c")) or "fuzzer_" in file_lower):
+                        continue
+
                     full_sibling = os.path.abspath(os.path.join(root, file))
                     if full_sibling not in seen_sources:
                         seen_sources.add(full_sibling)
-                        # Quick check to avoid linking multiple main() functions
+                        # Quick check to avoid linking multiple main() or LLVMFuzzerTestOneInput() functions
                         try:
                             with open(full_sibling, encoding="utf-8", errors="ignore") as f_sib:
                                 sib_content = f_sib.read()
-                                if "int main(" not in sib_content and "void main(" not in sib_content:
+                                if "int main(" not in sib_content and "void main(" not in sib_content and "LLVMFuzzerTestOneInput" not in sib_content:
                                     source_files.append(full_sibling)
                         except Exception:
                             pass
@@ -217,7 +224,7 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
     if len(source_files) > 1:
         console.print(f"[cyan]  Multi-File Build Engine: Discovered {len(source_files)} source files in target workspace.[/cyan]")
 
-    # Resolve automatic header dependency flags (e.g. -lcurl, -lssl, -lz)
+    # Resolve automatic header dependency flags (e.g. -lcurl, -lssl, -lz, -lm)
     auto_dep_flags = resolve_header_dependencies(source_path)
     if auto_dep_flags:
         console.print(f"[cyan]  Dependency Resolver: Injected header dependency flags: {' '.join(auto_dep_flags)}[/cyan]")
@@ -238,6 +245,10 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
     compile_args.extend(["-o", output_path])
     compile_args.extend(source_files)
     compile_args.extend(auto_dep_flags)
+
+    # Ensure -lm is explicitly appended at the very end of GCC command if math library symbols are used
+    if "-lm" not in compile_args and os.name != 'nt':
+        compile_args.append("-lm")
 
     # MinGW/MSYS2 needs explicit linking for Winsock and static runtime to avoid dynamic DLL dependency errors
     if os.name == 'nt' and "tcc" not in os.path.basename(gcc_path).lower():
