@@ -150,6 +150,55 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     timeout=timeout,
                     env=env
                 )
+            elif delivery_mode == "file":
+                # Convert string / hex payload to raw byte buffer
+                if isinstance(input_data, bytes):
+                    input_bytes = input_data
+                elif isinstance(input_data, str) and input_data.strip():
+                    try:
+                        input_bytes = input_data.encode('utf-8').decode('unicode_escape').encode('latin-1')
+                    except Exception:
+                        input_bytes = input_data.encode('utf-8')
+                else:
+                    input_bytes = b"A" * 64
+
+                # Determine temporary directory for host or docker sandbox
+                exe_dir = os.path.dirname(os.path.abspath(exe_path)) if os.path.exists(exe_path) else os.getcwd()
+                import uuid
+                temp_filename = f"mutagen_payload_{uuid.uuid4().hex[:8]}.bin"
+                temp_file_path = os.path.join(exe_dir, temp_filename)
+
+                try:
+                    with open(temp_file_path, "wb") as f:
+                        f.write(input_bytes)
+
+                    file_args = list(args) if args else []
+                    target_file_param = temp_filename if (sandbox == "docker" and _check_docker_functional()) else temp_file_path
+                    if not file_args:
+                        file_args = [target_file_param]
+                    else:
+                        replaced = False
+                        for i, arg in enumerate(file_args):
+                            if any(ext in arg.lower() for ext in [".bin", ".txt", ".png", ".jpg", ".dat", ".json", ".xml", "payload", "input"]):
+                                file_args[i] = target_file_param
+                                replaced = True
+                                break
+                        if not replaced:
+                            file_args.append(target_file_param)
+
+                    result = subprocess.run(
+                        run_cmd + file_args,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        env=env
+                    )
+                finally:
+                    if os.path.exists(temp_file_path):
+                        try:
+                            os.remove(temp_file_path)
+                        except Exception:
+                            pass
             elif delivery_mode.startswith("tcp:"):
                 # Convert string representations of escapes to raw bytes
                 if isinstance(input_data, str):

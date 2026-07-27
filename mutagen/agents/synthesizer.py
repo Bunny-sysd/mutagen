@@ -1,6 +1,6 @@
 import json
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from mutagen.agents.base import BaseAgent
 from mutagen.agents.prompts import get_synthesizer_rules
@@ -11,15 +11,16 @@ from mutagen.state import CrashPayload, ProgramContext
 
 class PayloadList(BaseModel):
     class PayloadItem(BaseModel):
-        args: list[str]
-        input_data: str
-        reason: str
+        args: list[str] = Field(default_factory=list)
+        input_data: str = ""
+        raw_bytes_hex: str | None = None
+        reason: str = ""
     payloads: list[PayloadItem]
 
 def robust_json_parse(raw: str) -> dict:
     """Sanitizes raw LLM output, strips markdown, handles unescaped characters, and uses regex/dict fallbacks."""
     if not raw or not raw.strip():
-        return {"payloads": [{"args": [], "input_data": "", "reason": "Fallback due to empty response"}]}
+        return {"payloads": [{"args": [], "input_data": "", "raw_bytes_hex": None, "reason": "Fallback due to empty response"}]}
 
     cleaned = raw.strip()
     # Strip markdown block wrappers (```json ... ``` or ``` ...)
@@ -58,7 +59,7 @@ def robust_json_parse(raw: str) -> dict:
             pass
 
     # Fallback default dict
-    return {"payloads": [{"args": [], "input_data": "", "reason": "Fallback due to JSON parse error"}]}
+    return {"payloads": [{"args": [], "input_data": "", "raw_bytes_hex": None, "reason": "Fallback due to JSON parse error"}]}
 
 
 class PayloadSynthesizerAgent(BaseAgent):
@@ -93,7 +94,7 @@ class PayloadSynthesizerAgent(BaseAgent):
         poc_context_str = ("\nReal-World GitHub PoC Intelligence:\n" + "\n".join(poc_hints)) if poc_hints else ""
 
         prompt = f"""You are an elite offensive security researcher and exploit developer.
-Target System Platform: {context.os_platform} (Language: {context.language})
+Target System Platform: {context.os_platform} (Language: {context.language}, Delivery Mode: {context.delivery_mode})
 Your objective is to generate exact crash/exploit payloads to reproduce the identified security flaws.
 
 Vulnerabilities found:
@@ -104,10 +105,11 @@ Source Code:
 {context.source_code}
 
 RULES:
-1. Provide argument arrays and input data to trigger the crash.
+1. Provide argument arrays, raw text/hex byte buffers, or structured input data to trigger the crash.
 2. IMPORTANT: Keep all input data and argument strings under 1000 characters. Use short inputs that demonstrate the logic flow.
 3. DO NOT prepend the program/target executable name to the 'args' list.
-4. For logical vulnerabilities (like command injection), synthesize payloads that execute commands echoing known success strings (e.g., "echo vuln_triggered", "echo exploit_success", or "echo PWNED") or calling system status commands (e.g., "whoami", "id", or "systeminfo").
+4. For 'file' delivery mode, provide raw structured bytes in 'input_data' or as a hex string in 'raw_bytes_hex' (e.g., "41414141...").
+5. For logical vulnerabilities (like command injection), synthesize payloads that execute commands echoing known success strings (e.g., "echo vuln_triggered", "echo exploit_success", or "echo PWNED") or calling system status commands (e.g., "whoami", "id", or "systeminfo").
 {lang_rules}
 7. Return the results matching the requested JSON schema.
 """
@@ -136,12 +138,14 @@ RULES:
                         payload_items.append({
                             "args": item.get("args", []),
                             "input_data": item.get("input_data", ""),
+                            "raw_bytes_hex": item.get("raw_bytes_hex"),
                             "reason": item.get("reason", "Synthesized by AI swarm")
                         })
                     elif isinstance(item, str):
                         payload_items.append({
                             "args": [item],
                             "input_data": item,
+                            "raw_bytes_hex": None,
                             "reason": "Synthesized string payload"
                         })
                 data = {"payloads": payload_items}
@@ -150,11 +154,13 @@ RULES:
             for p in payloads:
                 args = p.get("args", [])
                 input_data = p.get("input_data", "")
+                raw_bytes_hex = p.get("raw_bytes_hex")
                 reason = p.get("reason", "")
 
                 crash_payload = CrashPayload(
                     args=args,
-                    input_data=input_data
+                    input_data=input_data,
+                    raw_bytes_hex=raw_bytes_hex
                 )
                 context.active_payloads.append(crash_payload)
                 context.logs.append(f"[PayloadSynthesizerAgent] Generated payload args: {args} (Reason: {reason})")

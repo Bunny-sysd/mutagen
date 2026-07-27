@@ -18,7 +18,7 @@ class TriageResult(BaseModel):
         code_snippet: str
         reason: str
     vulnerabilities: list[VulnItem]
-    suggested_delivery_mode: str  # Must be "args", "stdin", "tcp", or "http"
+    suggested_delivery_mode: str  # Must be "args", "stdin", "file", "tcp", or "http"
 
 class TriageAgent(BaseAgent):
     def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", api_key: str = None):
@@ -61,11 +61,18 @@ class TriageAgent(BaseAgent):
 
             # Save detected delivery mode
             detected_mode = data.get("suggested_delivery_mode", "args").lower()
-            if detected_mode in ("args", "stdin", "tcp", "http"):
+            if detected_mode in ("args", "stdin", "file", "tcp", "http"):
                 context.delivery_mode = detected_mode
-                context.logs.append(f"[TriageAgent] Dynamically detected input delivery mode: {detected_mode}")
             else:
                 context.delivery_mode = "args"
+
+            # Heuristic check: if code opens/reads files, auto-upgrade to 'file' mode
+            source_lower = context.source_code.lower()
+            file_indicators = ["fopen(", "fread(", "fscanf(", "readfile(", "parse_file(", "open("]
+            if context.delivery_mode == "args" and any(ind in source_lower for ind in file_indicators):
+                context.delivery_mode = "file"
+
+            context.logs.append(f"[TriageAgent] Dynamically detected input delivery mode: {context.delivery_mode}")
 
             vulns = data.get("vulnerabilities", [])
             for item in vulns:
