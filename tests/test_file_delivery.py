@@ -1,4 +1,3 @@
-import sys
 
 from mutagen.executor import execute_payload
 from mutagen.state import CrashPayload
@@ -12,22 +11,22 @@ def test_crash_payload_bytes():
     assert cp_str.payload_bytes == b"hello"
 
 def test_execute_payload_file_mode(tmp_path):
-    # Create a small C script or test script that expects a file argument
-    if sys.platform == "win32":
-        py_script = tmp_path / "test_file_target.py"
-        py_script.write_text("""
-import sys
-with open(sys.argv[1], "rb") as f:
-    data = f.read()
-if b"CRASH_TRIGGER" in data:
-    raise ValueError("Target Crashed!")
-""")
-        res = execute_payload(
-            exe_path=str(py_script),
-            args=[],
-            input_data="CRASH_TRIGGER_DATA",
-            delivery_mode="file",
-            timeout=5
-        )
-        assert res["crashed"] is True or res["return_code"] != 0
-        assert "ValueError" in res["stderr"] or "Target Crashed" in res["stderr"]
+    py_script = tmp_path / "test_file_target.py"
+    py_script.write_text(
+        "import sys\n"
+        "with open(sys.argv[1], 'rb') as f:\n"
+        "    data = f.read()\n"
+        "if b'CRASH_TRIGGER' in data:\n"
+        "    sys.stderr.write('TARGET_CRASHED_FILE_MODE\\n')\n"
+        "    sys.stderr.flush()\n"
+        "    sys.exit(1)\n"
+    )
+    res = execute_payload(
+        exe_path=str(py_script),
+        args=[],
+        input_data="CRASH_TRIGGER_DATA",
+        delivery_mode="file",
+        timeout=5
+    )
+    assert res["crashed"] is True or res["return_code"] != 0
+    assert "TARGET_CRASHED_FILE_MODE" in res["stderr"]
