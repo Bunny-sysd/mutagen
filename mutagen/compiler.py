@@ -149,14 +149,27 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
     else:
         output_path = source_path.replace(".c", ".out").replace(".cpp", ".out")
 
-    # 1. Discover local include paths (-I)
-    include_dirs = [target_dir]
-    for sub_inc in ["include", "inc", "src", "headers"]:
-        candidate_inc = os.path.join(target_dir, sub_inc)
-        if os.path.isdir(candidate_inc):
-            include_dirs.append(candidate_inc)
+    # 1. Discover local include paths (-I) across target_dir, parent_dir, and repo_root
+    abs_target_dir = os.path.abspath(target_dir)
+    parent_dir = os.path.dirname(abs_target_dir)
+    repo_root = os.path.abspath(os.getcwd())
 
-    # 2. Discover sibling source files (.c / .cpp) in the target directory
+    candidate_base_dirs = [abs_target_dir]
+    if parent_dir and parent_dir != abs_target_dir:
+        candidate_base_dirs.append(parent_dir)
+    if repo_root and repo_root not in candidate_base_dirs:
+        candidate_base_dirs.append(repo_root)
+
+    include_dirs = []
+    for base in candidate_base_dirs:
+        if base not in include_dirs:
+            include_dirs.append(base)
+        for sub_inc in ["include", "inc", "src", "headers", "h"]:
+            candidate_inc = os.path.join(base, sub_inc)
+            if os.path.isdir(candidate_inc) and candidate_inc not in include_dirs:
+                include_dirs.append(candidate_inc)
+
+    # 2. Discover sibling source files (.c / .cpp) across target_dir and parent_dir
     source_files = [source_path]
     compile_source_path = source_path
     temp_instrumented = None
@@ -179,20 +192,27 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
             compile_source_path = source_path
             temp_instrumented = None
 
-    # Scan directory for helper source files (excluding current main target)
-    for root, _, files in os.walk(target_dir):
-        for file in files:
-            if file.endswith((".c", ".cpp")) and not file.endswith((".instrumented.c", ".instrumented.cpp")):
-                full_sibling = os.path.join(root, file)
-                if os.path.abspath(full_sibling) != os.path.abspath(source_path):
-                    # Quick check to avoid linking multiple main() functions
-                    try:
-                        with open(full_sibling, encoding="utf-8", errors="ignore") as f_sib:
-                            sib_content = f_sib.read()
-                            if "int main(" not in sib_content and "void main(" not in sib_content:
-                                source_files.append(full_sibling)
-                    except Exception:
-                        pass
+    # Scan target_dir and parent_dir for helper source files (excluding main/instrumented targets)
+    seen_sources = {os.path.abspath(source_path)}
+    scan_roots = [abs_target_dir]
+    if parent_dir and os.path.exists(parent_dir) and parent_dir != os.path.dirname(parent_dir):
+        scan_roots.append(parent_dir)
+
+    for scan_root in scan_roots:
+        for root, _, files in os.walk(scan_root):
+            for file in files:
+                if file.endswith((".c", ".cpp")) and not file.endswith((".instrumented.c", ".instrumented.cpp")):
+                    full_sibling = os.path.abspath(os.path.join(root, file))
+                    if full_sibling not in seen_sources:
+                        seen_sources.add(full_sibling)
+                        # Quick check to avoid linking multiple main() functions
+                        try:
+                            with open(full_sibling, encoding="utf-8", errors="ignore") as f_sib:
+                                sib_content = f_sib.read()
+                                if "int main(" not in sib_content and "void main(" not in sib_content:
+                                    source_files.append(full_sibling)
+                        except Exception:
+                            pass
 
     if len(source_files) > 1:
         console.print(f"[cyan]  Multi-File Build Engine: Discovered {len(source_files)} source files in target workspace.[/cyan]")

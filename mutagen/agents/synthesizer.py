@@ -16,6 +16,51 @@ class PayloadList(BaseModel):
         reason: str
     payloads: list[PayloadItem]
 
+def robust_json_parse(raw: str) -> dict:
+    """Sanitizes raw LLM output, strips markdown, handles unescaped characters, and uses regex/dict fallbacks."""
+    if not raw or not raw.strip():
+        return {"payloads": [{"args": [], "input_data": "", "reason": "Fallback due to empty response"}]}
+
+    cleaned = raw.strip()
+    # Strip markdown block wrappers (```json ... ``` or ``` ...)
+    if cleaned.startswith("```"):
+        parts = cleaned.split("```")
+        cleaned = parts[1] if len(parts) > 1 else cleaned
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+
+    # Attempt 1: Direct json.loads
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    # Attempt 2: Strict=False for raw newlines/tabs inside string literals
+    try:
+        data = json.loads(cleaned, strict=False)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    # Attempt 3: Regex match for outermost JSON object { ... }
+    import re
+    match = re.search(r'\{.*\}', cleaned, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(0), strict=False)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+
+    # Fallback default dict
+    return {"payloads": [{"args": [], "input_data": "", "reason": "Fallback due to JSON parse error"}]}
+
+
 class PayloadSynthesizerAgent(BaseAgent):
     def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", api_key: str = None):
         super().__init__("Payload Synthesizer Agent", model_provider, model_name, api_key)
@@ -81,27 +126,7 @@ RULES:
                         ],
                     }
                 )
-                raw_text = response.text.strip()
-                if raw_text.startswith("```"):
-                    parts = raw_text.split("```")
-                    raw_text = parts[1] if len(parts) > 1 else raw_text
-                    if raw_text.startswith("json"):
-                        raw_text = raw_text[4:]
-                    raw_text = raw_text.strip()
-
-                try:
-                    data = json.loads(raw_text)
-                except Exception:
-                    try:
-                        data = json.loads(raw_text, strict=False)
-                    except Exception:
-                        # Fallback parsing regex for JSON structure if string escaping broke
-                        import re
-                        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-                        if match:
-                            data = json.loads(match.group(0), strict=False)
-                        else:
-                            raise
+                data = robust_json_parse(response.text)
             else:
                 # Multi-provider fallback for OpenAI, Claude, and Ollama
                 raw_payloads = self.engine.generate_payloads(context.source_code, prompt, max_payloads=5, debug=False)
@@ -136,8 +161,8 @@ RULES:
 
         except Exception as e:
             context.logs.append(f"[PayloadSynthesizerAgent] Error generating payloads: {e}")
-            # Fallback
-            context.active_payloads.append(CrashPayload(args=["ABORT"], input_data=""))
-            context.logs.append("[PayloadSynthesizerAgent] Added fallback payload 'ABORT'")
+            # Fallback payload
+            context.active_payloads.append(CrashPayload(args=[], input_data="", reason="Fallback due to execution error"))
+            context.logs.append("[PayloadSynthesizerAgent] Added safe fallback payload")
 
         return context
