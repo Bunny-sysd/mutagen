@@ -611,11 +611,13 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         verification_text = "  Verification:     [bold green]VERIFIED SECURE[/bold green]\n" if patch_verified else "  Verification:     [bold red]FAILED[/bold red]\n"
 
         if crashes:
+            total_payloads_cnt = len(context.active_payloads) if context.active_payloads else 1
+            calculated_crash_rate = min(100.0, (len(crashes) / total_payloads_cnt) * 100)
             summary = Panel(
                 f"[bold green]FUZZING COMPLETE (Multi-Agent Swarm)[/bold green]\n\n"
                 f"  Payloads tested:  [cyan]{len(context.active_payloads)}[/cyan]\n"
                 f"  Unique crashes:   [bold red]{len(unique_crashes)}[/bold red]\n"
-                f"  Crash rate:       [yellow]{(len(unique_crashes)/len(context.active_payloads))*100 if context.active_payloads else 0:.0f}%[/yellow]\n"
+                f"  Crash rate:       [yellow]{calculated_crash_rate:.0f}%[/yellow]\n"
                 f"  JSON report:      [dim]{json_file}[/dim]\n"
                 f"  HTML report:      [yellow]{html_file}[/yellow]\n"
                 f"{patch_text}"
@@ -1573,7 +1575,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         if target_name.endswith(ext_to_strip):
             target_name = target_name[:-len(ext_to_strip)]
             break
-    crash_rate = (len(all_crashes)/len(payloads)*100) if payloads else 0
+    crash_rate = min(100.0, (len(all_crashes) / len(payloads) * 100)) if payloads else 0
 
     # Use unique_crashes for patching/exploit (most interesting distinct bugs)
     crashes = unique_crashes
