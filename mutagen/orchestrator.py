@@ -33,7 +33,7 @@ class AgentOrchestrator:
 
     async def run(self) -> ProgramContext:
         console.print(Panel(
-            "[bold cyan]PHASE 1: TRIAGE & AST AUDIT[/bold cyan]\n"
+            "[bold cyan]PHASE 1/4 [25%]: TRIAGE & AST AUDIT[/bold cyan]\n"
             "[dim]TriageAgent is analyzing code architecture & detecting input delivery mode...[/dim]",
             border_style="cyan"
         ))
@@ -42,7 +42,7 @@ class AgentOrchestrator:
         # 1. Run Triage Agent to find bugs & detect delivery mode
         self.context = await self.triage_agent.process(self.context)
         if not self.context.vulnerabilities:
-            console.print("[bold green]✓ Triage Complete: Code appears clean. No vulnerabilities found.[/bold green]")
+            console.print("[bold green][100%] [✓] Analysis Complete: Code appears clean. No vulnerabilities found.[/bold green]")
             self.context.logs.append("[Orchestrator] Code appears clean. No vulnerabilities found.")
             return self.context
 
@@ -56,7 +56,7 @@ class AgentOrchestrator:
         self.validator_agent.delivery_mode = active_mode
 
         console.print(Panel(
-            f"[bold yellow]PHASE 2: PAYLOAD SYNTHESIS[/bold yellow]\n"
+            f"[bold yellow]PHASE 2/4 [50%]: PAYLOAD SYNTHESIS[/bold yellow]\n"
             f"[dim]PayloadSynthesizerAgent is constructing targeted exploit payloads for {len(self.context.vulnerabilities)} vulnerability findings...[/dim]",
             border_style="yellow"
         ))
@@ -65,7 +65,7 @@ class AgentOrchestrator:
         self.context = await self.synthesizer_agent.process(self.context)
 
         console.print(Panel(
-            f"[bold magenta]PHASE 3: SUPERVISOR FUZZING & CRASH REPRODUCTION[/bold magenta]\n"
+            f"[bold magenta]PHASE 3/4 [75%]: SUPERVISOR FUZZING & CRASH REPRODUCTION[/bold magenta]\n"
             f"[dim]FuzzingSupervisorAgent is executing {len(self.context.active_payloads)} test payloads (Delivery Mode: {active_mode})...[/dim]",
             border_style="magenta"
         ))
@@ -75,7 +75,7 @@ class AgentOrchestrator:
         active_crashes = [p for p in self.context.active_payloads if p.crash_type is not None]
 
         if not active_crashes:
-            console.print("[bold yellow]! No active crashes were reproduced by fuzzing.[/bold yellow]")
+            console.print(f"[bold yellow][100%] [!] Execution Complete: Tested {len(self.context.active_payloads)} payload(s). No active crashes reproduced (target may contain mitigations or require specific inputs).[/bold yellow]")
             self.context.logs.append("[Orchestrator] No active crashes were reproduced by fuzzing.")
             return self.context
 
@@ -84,7 +84,7 @@ class AgentOrchestrator:
         # 4. Self-Healing Loop: Patch & Verify
         for attempt in range(1, 4):
             console.print(Panel(
-                f"[bold green]PHASE 4: SELF-HEALING LOOP (Attempt {attempt}/3)[/bold green]\n"
+                f"[bold green]PHASE 4/4 [100%]: SELF-HEALING LOOP (Attempt {attempt}/3)[/bold green]\n"
                 "[dim]PatchEngineerAgent generating patch & StructuralValidatorAgent re-testing...[/dim]",
                 border_style="green"
             ))
@@ -97,7 +97,7 @@ class AgentOrchestrator:
             self.context = await self.validator_agent.process(self.context)
 
             if self.context.verification_status == "VERIFIED_SECURE":
-                console.print("[bold green]✨ SECURE PATCH VERIFIED SUCCESSFULLY! Zero regressions detected.[/bold green]")
+                console.print("[bold green][100%] ✨ SECURE PATCH VERIFIED SUCCESSFULLY! Zero regressions detected.[/bold green]")
                 self.context.logs.append("[Orchestrator] Secure patch generated and verified successfully!")
                 break
 

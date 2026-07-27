@@ -1019,8 +1019,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
     # --- STEP 2: AI ANALYSIS ---------------------------------------------
     console.print(Panel(
-        f"[bold cyan]PHASE 1: AI CODE ANALYSIS ({delivery_mode.upper()} mode - {profile} profile)[/bold cyan]\n"
-        "[dim]Sending source code to for vulnerability analysis...[/dim]",
+        f"[bold cyan]PHASE 1/5 [20%]: AI CODE ANALYSIS ({delivery_mode.upper()} mode - {profile} profile)[/bold cyan]\n"
+        "[dim]Sending source code to AI engine for vulnerability analysis...[/dim]",
         border_style="cyan"
     ))
 
@@ -1165,7 +1165,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         # In binary mode, fuzz the original binary directly — no compilation needed
         exe_path = source_path
         console.print(Panel(
-            "[bold cyan]PHASE 2: COMPILE TARGET[/bold cyan]\n"
+            "[bold cyan]PHASE 2/5 [40%]: COMPILE TARGET[/bold cyan]\n"
             "[bold green]SKIPPED[/bold green] — Using original binary directly for fuzzing.",
             border_style="dim"
         ))
@@ -1173,7 +1173,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         console.print()
     else:
         console.print(Panel(
-            "[bold cyan]PHASE 2: COMPILE TARGET[/bold cyan]\n"
+            "[bold cyan]PHASE 2/5 [40%]: COMPILE TARGET[/bold cyan]\n"
             "[dim]Building the target with security protections disabled...[/dim]",
             border_style="cyan"
         ))
@@ -1207,11 +1207,11 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             webhook_headers=webhook_headers,
         )
 
-    # --- STEP 4: FUZZ! (PARALLEL EXECUTION) ------------------------------
+    # --- STEP 4: EXECUTE PAYLOADS & TEST FOR CRASHES ----------------------
     console.print(Panel(
-        "[bold red]PHASE 3: FUZZING[/bold red]\n"
-        "[dim]Injecting AI payloads into the target in parallel...[/dim]",
-        border_style="red"
+        f"[bold cyan]PHASE 3/5 [60%]: EXECUTE PAYLOADS ({delivery_mode.upper()} mode)[/bold cyan]\n"
+        f"[dim]Firing {len(payloads)} targeted payloads at binary (Timeout: {timeout}s | Sandbox: {sandbox})...[/dim]",
+        border_style="cyan"
     ))
 
     all_crashes = []          # Every crash hit (may contain dupes)
@@ -1592,7 +1592,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         if binary_mode:
             # --- BINARY MODE: Exploit generation only, no patching -----------
             console.print(Panel(
-                "[bold cyan]PHASE 4: EXPLOIT GENERATION (Binary Mode)[/bold cyan]\n"
+                "[bold cyan]PHASE 4/5 [80%]: EXPLOIT GENERATION (Binary Mode)[/bold cyan]\n"
                 "[dim]Generating exploit script... (Auto-patch unavailable — no source code)[/dim]",
                 border_style="cyan"
             ))
@@ -1617,7 +1617,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 console.print("[red]X Failed to generate exploit.[/red]\n")
 
             console.print(Panel(
-                "[bold cyan]PHASE 5: AUTO-PATCH & VERIFICATION[/bold cyan]\n"
+                "[bold cyan]PHASE 5/5 [100%]: AUTO-PATCH & VERIFICATION[/bold cyan]\n"
                 "[bold yellow]SKIPPED[/bold yellow] — Source code unavailable for binary targets.\n"
                 "[dim]Manual remediation required based on the vulnerability report.[/dim]",
                 border_style="dim"
@@ -1639,7 +1639,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         else:
             # --- SOURCE MODE: Full patch + exploit + verification -----------
             console.print(Panel(
-                "[bold cyan]PHASE 4: AUTO-PATCH & EXPLOIT GENERATION[/bold cyan]\n"
+                "[bold cyan]PHASE 4/5 [80%]: AUTO-PATCH & EXPLOIT GENERATION[/bold cyan]\n"
                 "[dim]Asking AI to generate a secure fix and Python exploit...[/dim]",
                 border_style="cyan"
             ))
@@ -1668,7 +1668,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             error_details = ""
 
             console.print(Panel(
-                "[bold cyan]PHASE 5: AUTO-PATCH VERIFICATION & SELF-HEALING[/bold cyan]\n"
+                "[bold cyan]PHASE 5/5 [100%]: AUTO-PATCH VERIFICATION & SELF-HEALING[/bold cyan]\n"
                 f"[dim]Mathematically proving the patch works (Max self-healing retries: {max_patch_retries})...[/dim]",
                 border_style="cyan"
             ))
