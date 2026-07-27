@@ -129,6 +129,20 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
     # C/C++ path: Multi-file project discovery & build engine
     target_dir = os.path.dirname(os.path.abspath(source_path)) or "."
 
+    # 0. Check for native build systems (CMake, Make, Cargo, Go, .NET)
+    from mutagen.dependency_resolver import (
+        build_with_native_tool,
+        detect_build_system,
+        parse_compilation_error,
+        resolve_header_dependencies,
+    )
+
+    build_sys = detect_build_system(target_dir)
+    if build_sys and not coverage:
+        native_out = build_with_native_tool(build_sys, target_dir)
+        if native_out and os.path.exists(native_out):
+            return native_out
+
     # Dynamically determine output extension based on OS
     if os.name == 'nt':
         output_path = source_path.replace(".c", ".exe").replace(".cpp", ".exe")
@@ -183,6 +197,11 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
     if len(source_files) > 1:
         console.print(f"[cyan]  Multi-File Build Engine: Discovered {len(source_files)} source files in target workspace.[/cyan]")
 
+    # Resolve automatic header dependency flags (e.g. -lcurl, -lssl, -lz)
+    auto_dep_flags = resolve_header_dependencies(source_path)
+    if auto_dep_flags:
+        console.print(f"[cyan]  Dependency Resolver: Injected header dependency flags: {' '.join(auto_dep_flags)}[/cyan]")
+
     # Check if sanitizers are supported
     use_sanitizers = check_sanitizer_support(gcc_path)
     compile_args = [gcc_path]
@@ -198,6 +217,7 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
 
     compile_args.extend(["-o", output_path])
     compile_args.extend(source_files)
+    compile_args.extend(auto_dep_flags)
 
     # MinGW/MSYS2 needs explicit linking for Winsock and static runtime to avoid dynamic DLL dependency errors
     if os.name == 'nt' and "tcc" not in os.path.basename(gcc_path).lower():
@@ -205,7 +225,7 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
         try:
             with open(source_path, encoding="utf-8", errors="ignore") as f:
                 content = f.read()
-            if "winsock2.h" in content:
+            if "winsock2.h" in content and "-lws2_32" not in compile_args:
                 compile_args.append("-lws2_32")
         except Exception:
             pass
@@ -216,7 +236,23 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
     if gcc_dir:
         env["PATH"] = gcc_dir + os.pathsep + env.get("PATH", "")
 
-    result = subprocess.run(compile_args, capture_output=True, text=True, env=env)
+    # Self-healing compilation loop (retry up to 2 times with auto-discovered error flags)
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        result = subprocess.run(compile_args, capture_output=True, text=True, env=env)
+        if result.returncode == 0:
+            break
+
+        # Parse stderr for missing header/library flags
+        stderr_text = result.stderr or result.stdout
+        suggested = parse_compilation_error(stderr_text)
+        new_flags = [sf for sf in suggested if sf not in compile_args]
+
+        if new_flags and attempt < max_retries:
+            console.print(f"[yellow]  [!] Self-Healing Build Engine (Attempt {attempt+1}): Injecting auto-discovered flags: {' '.join(new_flags)}[/yellow]")
+            compile_args.extend(new_flags)
+        else:
+            break
 
     # Clean up temp instrumented source
     if temp_instrumented and os.path.exists(temp_instrumented):
