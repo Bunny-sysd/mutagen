@@ -46,7 +46,8 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
 
     if ext == ".go":
         output_path = source_path.replace(".go", ".exe" if os.name == 'nt' else ".out")
-        compile_args = [gcc_path, "build", "-o", output_path, source_path]
+        go_bin = gcc_path if "go" in os.path.basename(gcc_path).lower() else "go"
+        compile_args = [go_bin, "build", "-o", output_path, source_path]
         result = subprocess.run(compile_args, capture_output=True, text=True)
         if result.returncode != 0:
             raise CompilationError(result.stderr or result.stdout)
@@ -214,9 +215,12 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
                         seen_sources.add(full_sibling)
                         # Quick check to avoid linking multiple main() or LLVMFuzzerTestOneInput() functions
                         try:
+                            import re
                             with open(full_sibling, encoding="utf-8", errors="ignore") as f_sib:
                                 sib_content = f_sib.read()
-                                if "int main(" not in sib_content and "void main(" not in sib_content and "LLVMFuzzerTestOneInput" not in sib_content:
+                                has_main = bool(re.search(r'\b(int|void)\s+main\s*\(', sib_content))
+                                has_fuzzer = bool(re.search(r'\bLLVMFuzzerTestOneInput\s*\(', sib_content))
+                                if not has_main and not has_fuzzer:
                                     source_files.append(full_sibling)
                         except Exception:
                             pass

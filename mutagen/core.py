@@ -114,32 +114,22 @@ def run_poc():
             proc.kill()
             sys.exit(0)
 
-    elif delivery_mode.startswith("tcp:"):
-        # Launch process and send payload over socket
-        port = int(delivery_mode.split(":")[1])
-        print(f"[*] Launching server and waiting for port {{port}}...")
-        proc = subprocess.Popen([exe_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        time.sleep(0.5) # Wait for bind
-
+    elif delivery_mode == "file":
+        # Launch with payload written to temporary file
+        import tempfile
+        print(f"[*] Writing payload to temporary file...")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as tmp:
+            tmp.write(payload.encode('utf-8', errors='ignore') if isinstance(payload, str) else payload)
+            tmp_path = tmp.name
+        print(f"[*] Executing with file argument: {{tmp_path}}")
+        cmd = [exe_path] + (args if args else [tmp_path])
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = proc.communicate(timeout=5)
+        print(f"[*] Process exited with return code: {{proc.returncode}}")
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(3.0)
-            s.connect(("127.0.0.1", port))
-            print(f"[*] Sending packet payload (len={{len(payload)}})...")
-            s.sendall(payload.encode('utf-8', errors='ignore') if isinstance(payload, str) else payload)
-            s.close()
-            print("[*] Payload sent successfully.")
-        except Exception as e:
-            print(f"[!] Socket connection failed: {{e}}")
-        finally:
-            # Check status
-            time.sleep(0.5)
-            ret = proc.poll()
-            if ret is not None:
-                print(f"[*] Server terminated with return code: {{ret}}")
-            else:
-                print("[*] Server is still running, terminating...")
-                proc.terminate()
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     run_poc()
@@ -761,7 +751,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         target_src_path = buggy_files[0]
         console.print(f"[green]>> Target source file resolved: {os.path.basename(target_src_path)}[/green]")
 
-        with open(target_src_path, encoding="utf-8") as f:
+        with open(target_src_path, encoding="utf-8", errors="ignore") as f:
             source_code = f.read()
 
         # 3. Phase 1 AI Analysis (with Sniper Mode pre-targeting)
@@ -1234,9 +1224,19 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         """Execute a single payload and return structured result."""
         args = p.get("args", [])
         input_data = p.get("input_data", "")
+        raw_bytes_hex = p.get("raw_bytes_hex")
         if isinstance(args, str):
             args = [args]
         args = [str(a) for a in args]
+
+        # Bridge raw_bytes_hex → input_data for file mode.
+        # The synthesizer stores binary payloads as hex strings in raw_bytes_hex,
+        # but execute_payload only reads input_data. Convert here.
+        if raw_bytes_hex and (not input_data or not str(input_data).strip()):
+            try:
+                input_data = bytes.fromhex(raw_bytes_hex)
+            except ValueError:
+                pass  # Invalid hex — fall through to default
 
         result = execute_payload(exe_path, args, input_data, delivery_mode, timeout, sandbox)
         return {
@@ -1366,7 +1366,11 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         current_max_retries = 2
         while retry_attempt <= current_max_retries:
             console.print(f"[yellow]  ↳ Payload {i+1} failed. Agentic Retry {retry_attempt}/{current_max_retries} initializing...[/yellow]")
-            refined = engine.refine_payload(source_code, last_args, last_input, last_result["stdout"], last_result["stderr"], last_result["return_code"], delivery_mode)
+            cov_info = {
+                "hit_blocks": last_result.get("coverage", []),
+                "total_coverage_count": len(global_coverage),
+            }
+            refined = engine.refine_payload(source_code, last_args, last_input, last_result["stdout"], last_result["stderr"], last_result["return_code"], delivery_mode, coverage_info=cov_info)
             if not refined:
                 console.print("[dim]    (No refined payloads returned, skipping retry)[/dim]")
                 break
@@ -1377,14 +1381,22 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     continue
                 r_args = rp.get("args", [])
                 r_input = rp.get("input_data") or ""
+                r_raw_hex = rp.get("raw_bytes_hex")
                 if isinstance(r_args, str):
                     r_args = [r_args]
                 r_args = [str(a) for a in r_args]
 
+                # Bridge raw_bytes_hex → input_data for file mode
+                if r_raw_hex and (not r_input or not str(r_input).strip()):
+                    try:
+                        r_input = bytes.fromhex(r_raw_hex)
+                    except ValueError:
+                        pass
+
                 # Check if this refined payload has already been executed in this run
-                r_key = (tuple(r_args), r_input)
+                r_key = (tuple(r_args), r_input if isinstance(r_input, str) else r_input.hex())
                 if r_key in executed_payloads:
-                    console.print(f"[dim]    (Skipping duplicate refined payload: args={r_args}, input={repr(r_input[:40])})[/dim]")
+                    console.print(f"[dim]    (Skipping duplicate refined payload: args={r_args}, input={repr(str(r_input)[:40])})[/dim]")
                     continue
                 executed_payloads.add(r_key)
 
@@ -1397,8 +1409,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     "payload_refined", "refined_payload", "placeholder",
                     "<payload>", "your_payload_here", "payload", ""
                 }
-                payload_content = " ".join(r_args) + (r_input or "")
-                if len(payload_content.strip()) < 10 or payload_content.strip().lower() in _STUB_PLACEHOLDERS:
+                payload_content = " ".join(r_args) + (r_input if isinstance(r_input, str) else "")
+                if isinstance(r_input, str) and (len(payload_content.strip()) < 10 or payload_content.strip().lower() in _STUB_PLACEHOLDERS):
                     console.print(f"[dim]    (Skipping stub/placeholder refined payload: {repr(payload_content[:40])})[/dim]")
                     continue
 

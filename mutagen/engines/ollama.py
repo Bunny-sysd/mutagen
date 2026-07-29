@@ -184,7 +184,11 @@ The program receives input via: {delivery_mode}.
         return parsed
 
 
-    def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str) -> list[dict]:
+    def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str, coverage_info: dict | None = None) -> list[dict]:
+        cov_prompt_snippet = ""
+        if coverage_info:
+            cov_prompt_snippet = f"\n- Coverage hit: {coverage_info.get('hit_blocks', [])}\n- Total blocks: {coverage_info.get('total_coverage_count', 0)}\n"
+
         prompt = f"""We are fuzzing this {self.lang_name} code where input is delivered via {delivery_mode}:
 {source_code}
 
@@ -194,10 +198,11 @@ Previous attempt details:
 - Exit code was: {return_code}
 - Stdout: {stdout}
 - Stderr: {stderr}
-
+{cov_prompt_snippet}
 Generate 2-3 refined payloads in a JSON list (containing both "args" and "input_data" fields) to bypass validation or cause a crash/panic."""
         raw = self._generate(prompt, format_json=True)
-        return self._parse_payload_list(raw)
+        from mutagen.engines.output_parser import parse_payloads
+        return parse_payloads(raw)
 
     def generate_patch(self, source_code: str, crash_data: dict, debug: bool = False) -> str:
         import sys

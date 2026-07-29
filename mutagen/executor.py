@@ -36,6 +36,8 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             input_data = "\n".join(parts)
     elif isinstance(input_data, list):
         input_data = "\n".join(str(x) for x in input_data)
+    elif isinstance(input_data, bytes):
+        pass
     elif input_data is None:
         input_data = ""
     else:
@@ -79,7 +81,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         run_cmd = [sys.executable, exe_path]
     else:
         run_cmd = [exe_path]
-    if sandbox == "docker" and _check_docker_functional():
+    if sandbox != "none" and _check_docker_functional():
         abs_exe_path = os.path.abspath(exe_path)
         exe_dir = os.path.dirname(abs_exe_path)
         exe_name = os.path.basename(abs_exe_path)
@@ -143,13 +145,19 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 else:
                     input_bytes = input_data or b""
 
-                result = subprocess.run(
+                res_proc = subprocess.run(
                     run_cmd,
                     input=input_bytes,
                     capture_output=True,
                     timeout=timeout,
                     env=env
                 )
+                class _Res:
+                    pass
+                result = _Res()
+                result.returncode = res_proc.returncode
+                result.stdout = res_proc.stdout.decode("utf-8", errors="ignore") if isinstance(res_proc.stdout, bytes) else (res_proc.stdout or "")
+                result.stderr = res_proc.stderr.decode("utf-8", errors="ignore") if isinstance(res_proc.stderr, bytes) else (res_proc.stderr or "")
             elif delivery_mode == "file":
                 # Convert string / hex payload to raw byte buffer
                 if isinstance(input_data, bytes):
@@ -401,7 +409,13 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         # when the program simply echoes the input back in logs or error messages.
         clean_output = combined_lower
         if input_data:
-            clean_output = clean_output.replace(input_data.lower(), "")
+            if isinstance(input_data, bytes):
+                try:
+                    clean_output = clean_output.replace(input_data.decode("utf-8", errors="ignore").lower(), "")
+                except Exception:
+                    pass
+            elif isinstance(input_data, str):
+                clean_output = clean_output.replace(input_data.lower(), "")
         for arg in args:
             clean_output = clean_output.replace(arg.lower(), "")
 

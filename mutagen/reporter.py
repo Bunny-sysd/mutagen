@@ -65,7 +65,8 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     os.makedirs("crashes", exist_ok=True)
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    json_file = f"crashes/crash_report_{target_name}_{timestamp}.json"
+    safe_name = os.path.basename(target_name).replace(":", "_").replace("/", "_").replace("\\", "_")
+    json_file = f"crashes/crash_report_{safe_name}_{timestamp}.json"
 
     report = {
         "tool": "Mutagen v2.0",

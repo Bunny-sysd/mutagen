@@ -180,7 +180,11 @@ The program receives input via: {delivery_mode}.
         return payloads
 
 
-    def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str) -> list[dict]:
+    def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str, coverage_info: dict | None = None) -> list[dict]:
+        cov_prompt_snippet = ""
+        if coverage_info:
+            cov_prompt_snippet = f"\nCOVERAGE FEEDBACK:\n- Basic blocks hit by this payload: {coverage_info.get('hit_blocks', [])}\n- Cumulative workspace coverage: {coverage_info.get('total_coverage_count', 0)} blocks\n"
+
         prompt = f"""You are an expert defensive security researcher. You previously analyzed this {self.lang_name} source code to find vulnerabilities.
 Your previous payload DID NOT CRASH the target program. We need to refine the attack.
 
@@ -199,7 +203,7 @@ EXECUTION RESULTS:
 - Exit Code: {return_code}
 - Stdout: {stdout.strip() if stdout else "None"}
 - Stderr: {stderr.strip() if stderr else "None"}
-
+{cov_prompt_snippet}
 Please analyze why the previous payload failed to cause a memory corruption/crash.
 Generate 2-3 new, refined payloads to try to bypass the mitigation or hit the vulnerability correctly.
 
@@ -208,6 +212,7 @@ IMPORTANT RULES:
 2. Each element must have these fields:
    - "args": an array of strings, one per command-line argument (used if delivery mode is 'args')
    - "input_data": a string containing the raw input to feed via stdin or network (used if delivery mode is 'stdin' or 'tcp')
+   - "raw_bytes_hex": (optional) hex-encoded string of raw bytes for binary file/stream inputs (e.g. "89504e470d0a1a0a")
    - "vuln_type": the vulnerability type
    - "reason": brief explanation of why THIS new payload will succeed where the last one failed
    - "severity": "critical", "high", "medium", or "low"
@@ -224,13 +229,8 @@ Respond with ONLY the JSON array."""
                 response_format={"type": "json_object"} if ("gpt-4" in self.model or "gpt-3.5" in self.model) and "o1" not in self.model else None
             )
             raw = response.choices[0].message.content.strip()
-            data = json.loads(raw)
-            if isinstance(data, dict):
-                for k, v in data.items():
-                    if isinstance(v, list):
-                        return v
-                return [data]
-            return data
+            from mutagen.engines.output_parser import parse_payloads
+            return parse_payloads(raw)
         except Exception as e:
             console.print(f"[red]OpenAI refinement failed: {e}[/red]")
             return []

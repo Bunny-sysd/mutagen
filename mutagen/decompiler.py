@@ -258,6 +258,7 @@ def _generate_ghidra_postscript(output_file: str, all_functions: bool = False) -
     representation to the specified output file.
     """
     # Ghidra scripts are written in Java and extend GhidraScript
+    safe_path = output_file.replace("\\", "/").replace('"', '\\"')
     script = f'''//Decompile all functions and write pseudo-C to output file.
 //@category Mutagen
 //@description Export decompiled C for Mutagen analysis
@@ -277,7 +278,7 @@ public class MutagenExportDecompiled extends GhidraScript {{
 
     @Override
     public void run() throws Exception {{
-        String outputPath = "{output_file.replace(os.sep, '/')}";
+        String outputPath = "{safe_path}";
         PrintWriter writer = new PrintWriter(new FileWriter(outputPath));
 
         Program program = currentProgram;

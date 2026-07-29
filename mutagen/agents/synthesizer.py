@@ -1,4 +1,5 @@
 import json
+import struct
 
 from pydantic import BaseModel, Field
 
@@ -6,6 +7,7 @@ from mutagen.agents.base import BaseAgent
 from mutagen.agents.prompts import get_synthesizer_rules
 from mutagen.engines import get_engine
 from mutagen.poc_finder import get_cwe_poc_intelligence
+from mutagen.safety import GEMINI_SAFETY_OFF
 from mutagen.state import CrashPayload, ProgramContext
 
 
@@ -58,8 +60,61 @@ def robust_json_parse(raw: str) -> dict:
         except Exception:
             pass
 
-    # Fallback default dict
+    # Fallback default dict — generate format-aware binary payloads for file mode
     return {"payloads": [{"args": [], "input_data": "", "raw_bytes_hex": None, "reason": "Fallback due to JSON parse error"}]}
+
+
+def _generate_file_mode_fallback_payloads() -> list[dict]:
+    """Generate format-aware binary fallback payloads for file-based targets.
+    These cover common binary parser inputs (PNG, JPEG, ELF, PDF, ZIP, raw fuzz)
+    so that even without AI payloads, the fuzzer has a real chance of triggering
+    crashes in file-parsing code paths."""
+    payloads = []
+
+    # 1. Minimal PNG with corrupted IHDR (oversized dimensions trigger integer overflow)
+    png_sig = b'\x89PNG\r\n\x1a\n'
+    # IHDR: width=0xFFFFFFFF, height=0xFFFFFFFF, bit_depth=8, color_type=2
+    ihdr_data = struct.pack('>II', 0xFFFFFFFF, 0xFFFFFFFF) + b'\x08\x02\x00\x00\x00'
+    ihdr_chunk = struct.pack('>I', len(ihdr_data)) + b'IHDR' + ihdr_data
+    png_payload = png_sig + ihdr_chunk
+    payloads.append({
+        "args": [], "input_data": "",
+        "raw_bytes_hex": png_payload.hex(),
+        "reason": "Fallback: corrupted PNG with 0xFFFFFFFF dimensions (integer overflow)"
+    })
+
+    # 2. Minimal PNG with zero-length IDAT (triggers allocation edge cases)
+    idat_chunk = struct.pack('>I', 0) + b'IDAT'
+    iend_chunk = struct.pack('>I', 0) + b'IEND'
+    png_zero = png_sig + ihdr_chunk + idat_chunk + iend_chunk
+    payloads.append({
+        "args": [], "input_data": "",
+        "raw_bytes_hex": png_zero.hex(),
+        "reason": "Fallback: PNG with zero-length IDAT chunk (allocation edge case)"
+    })
+
+    # 3. Truncated file (just PNG signature, no chunks — triggers out-of-bounds read)
+    payloads.append({
+        "args": [], "input_data": "",
+        "raw_bytes_hex": png_sig.hex(),
+        "reason": "Fallback: truncated PNG signature only (OOB read)"
+    })
+
+    # 4. Large repetitive buffer (classic heap spray / overflow trigger)
+    payloads.append({
+        "args": [], "input_data": "",
+        "raw_bytes_hex": (b'A' * 8192).hex(),
+        "reason": "Fallback: 8KB buffer overflow probe"
+    })
+
+    # 5. Null bytes interspersed (triggers null-termination assumptions)
+    payloads.append({
+        "args": [], "input_data": "",
+        "raw_bytes_hex": (b'\x00' * 256 + b'\xff' * 256).hex(),
+        "reason": "Fallback: null byte + 0xFF block (boundary probe)"
+    })
+
+    return payloads
 
 
 class PayloadSynthesizerAgent(BaseAgent):
@@ -123,12 +178,20 @@ RULES:
                         "temperature": 0.5,
                         "response_mime_type": "application/json",
                         "response_schema": PayloadList,
-                        "safety_settings": [
-                            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                        ],
+                        "safety_settings": GEMINI_SAFETY_OFF,
                     }
                 )
-                data = robust_json_parse(response.text)
+                raw_response_text = response.text
+                # Diagnostic: log raw API response length for debugging empty/blocked responses
+                if not raw_response_text or not raw_response_text.strip():
+                    context.logs.append("[PayloadSynthesizerAgent] WARNING: Gemini API returned empty response (possible safety block or rate limit).")
+                    if context.delivery_mode == "file":
+                        context.logs.append("[PayloadSynthesizerAgent] Activating format-aware file mode fallback payloads...")
+                        data = {"payloads": _generate_file_mode_fallback_payloads()}
+                    else:
+                        data = robust_json_parse(raw_response_text)
+                else:
+                    data = robust_json_parse(raw_response_text)
             else:
                 # Multi-provider fallback for OpenAI, Claude, and Ollama
                 raw_payloads = self.engine.generate_payloads(context.source_code, prompt, max_payloads=5, debug=False)

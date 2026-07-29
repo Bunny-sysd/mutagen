@@ -14,4 +14,4 @@ def test_generate_decompile_headless_script():
         with open(script_path, encoding="utf-8") as f:
             content = f.read()
         assert "DecompInterface" in content
-        assert "ConsoleTaskMonitor" in content
+        assert "GhidraScript" in content

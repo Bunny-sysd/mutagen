@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from mutagen.agents.base import BaseAgent
 from mutagen.agents.prompts import get_triage_prompt
 from mutagen.engines import get_engine
+from mutagen.safety import GEMINI_SAFETY_OFF
 from mutagen.state import ProgramContext, VulnerabilityDetail
 from mutagen.static_analyzer import analyze_source
 
@@ -32,7 +33,19 @@ class TriageAgent(BaseAgent):
         pretarget = analyze_source(context.source_code)
         focused_code = pretarget.focused_code if pretarget.findings else context.source_code
 
+        # Enrich prompt with multi-file workspace call graph summary if available
+        graph_summary = ""
+        if context.target_path:
+            import os
+            from mutagen.project_graph import summarize_project_graph
+            target_dir = os.path.dirname(os.path.abspath(context.target_path))
+            graph_text = summarize_project_graph(target_dir)
+            if "No multi-file workspace" not in graph_text:
+                graph_summary = f"\n\nPROJECT WORKSPACE CONTEXT:\n{graph_text}\n"
+
         prompt = get_triage_prompt(context.language, focused_code)
+        if graph_summary:
+            prompt += graph_summary
 
         try:
             if self.model_provider == "gemini" and hasattr(self.engine, "client") and hasattr(self.engine.client, "models"):
@@ -43,21 +56,24 @@ class TriageAgent(BaseAgent):
                         "temperature": 0.1,
                         "response_mime_type": "application/json",
                         "response_schema": TriageResult,
-                        "safety_settings": [
-                            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                        ],
+                        "safety_settings": GEMINI_SAFETY_OFF,
                     }
                 )
                 raw_text = response.text.strip()
                 data = json.loads(raw_text)
             else:
                 # Multi-provider fallback for OpenAI, Claude, and Ollama
-                vuln_items = getattr(self.engine, "_parse_generate", lambda *a, **kw: [])(
+                res_obj = getattr(self.engine, "_parse_generate", lambda *a, **kw: [])(
                     prompt=prompt,
                     response_model=TriageResult,
                     list_key="vulnerabilities"
                 )
-                data = {"vulnerabilities": vuln_items, "suggested_delivery_mode": "args"}
+                if isinstance(res_obj, dict):
+                    data = res_obj
+                elif isinstance(res_obj, list):
+                    data = {"vulnerabilities": res_obj, "suggested_delivery_mode": "args"}
+                else:
+                    data = {"vulnerabilities": [], "suggested_delivery_mode": "args"}
 
             # Save detected delivery mode
             detected_mode = data.get("suggested_delivery_mode", "args").lower()

@@ -32,6 +32,7 @@ class PatchEngineerAgent(BaseAgent):
             "vuln_type": crash.crash_type,
             "args": crash.args,
             "input_data": crash.input_data,
+            "raw_bytes_hex": crash.raw_bytes_hex,
             "cwe": "CWE-120",
             "severity": "critical",
             "reason": reasoning

@@ -26,6 +26,8 @@ COMMON_HEADER_LIB_MAP = {
 
 def detect_build_system(target_dir: str) -> str | None:
     """Detects if a project uses a standard build system (CMake, Make, Cargo, Go, .NET, Maven)."""
+    if not target_dir or not os.path.isdir(target_dir):
+        return None
     if os.path.exists(os.path.join(target_dir, "CMakeLists.txt")):
         return "cmake"
     if os.path.exists(os.path.join(target_dir, "Makefile")) or os.path.exists(os.path.join(target_dir, "makefile")):

@@ -6,7 +6,7 @@ from rich.console import Console
 console = Console(force_terminal=True, force_jupyter=False)
 
 def extract_comparison_constraints(source_code: str) -> dict:
-    """Scans target source code for comparison constraints, magic numbers, and string comparison targets."""
+    """Scans target source code for comparison constraints, magic numbers, and string comparison targets using AST + regex."""
     constraints = {
         "magic_hex": [],
         "strings": [],
@@ -16,7 +16,47 @@ def extract_comparison_constraints(source_code: str) -> dict:
     if not source_code:
         return constraints
 
-    # 1. Extract magic hexadecimal constants (e.g. 0xDEADBEEF, 0x12345678, 0xDEADC0DE)
+    # Attempt tree-sitter AST extraction first for high precision
+    try:
+        import tree_sitter_c as tsc
+        from tree_sitter import Language, Parser
+
+        c_language = Language(tsc.language())
+        parser = Parser(c_language)
+        code_bytes = source_code.encode("utf-8")
+        tree = parser.parse(code_bytes)
+
+        def _traverse(node):
+            if node.type == "string_literal":
+                raw_str = code_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+                clean = raw_str.strip('"').strip("'")
+                if clean and len(clean) > 1 and clean not in constraints["strings"]:
+                    constraints["strings"].append(clean)
+            elif node.type == "number_literal":
+                num_str = code_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+                if num_str.startswith("0x") or num_str.startswith("0X"):
+                    try:
+                        val = int(num_str, 16)
+                        if val not in constraints["magic_hex"]:
+                            constraints["magic_hex"].append(val)
+                    except ValueError:
+                        pass
+                else:
+                    try:
+                        val = int(num_str)
+                        if val > 0 and val not in constraints["integers"]:
+                            constraints["integers"].append(val)
+                    except ValueError:
+                        pass
+
+            for child in node.children:
+                _traverse(child)
+
+        _traverse(tree.root_node)
+    except Exception:
+        pass
+
+    # Regex fallback / secondary pass
     hex_matches = re.findall(r'0x[0-9a-fA-F]{4,8}', source_code)
     for hx in hex_matches:
         try:
@@ -26,14 +66,12 @@ def extract_comparison_constraints(source_code: str) -> dict:
         except ValueError:
             pass
 
-    # 2. Extract string comparison targets (strcmp, strncmp, memcmp)
     str_matches = re.findall(r'(?:strcmp|strncmp|memcmp|stricmp|strcasecmp)\s*\(\s*(?:[^\,]+)\,\s*"([^"]+)"', source_code)
     str_matches2 = re.findall(r'(?:strcmp|strncmp|memcmp|stricmp|strcasecmp)\s*\(\s*"([^"]+)"\,\s*(?:[^\)]+)\)', source_code)
     for s in str_matches + str_matches2:
         if s and s not in constraints["strings"]:
             constraints["strings"].append(s)
 
-    # 3. Extract integer equality/boundary constants
     int_matches = re.findall(r'(?:==|!=|<|>|<=|>=)\s*([0-9]{2,10})', source_code)
     for num_str in int_matches:
         try:

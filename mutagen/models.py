@@ -5,6 +5,7 @@ from pydantic import BaseModel
 class FuzzPayload(BaseModel):
     args: list[str]
     input_data: str | None = ""
+    raw_bytes_hex: str | None = None
     vuln_type: str
     reason: str
     severity: str

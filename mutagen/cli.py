@@ -77,6 +77,7 @@ def main():
     parser.add_argument("--static-only", action="store_true", help="Enable static-only analysis, skipping dynamic fuzzer execution")
     parser.add_argument("--webhook-url", default="", help="Custom automation webhook endpoint to post scanning payloads to (e.g. n8n, Jira, Slack)")
     parser.add_argument("--sandbox", default="none", choices=["none", "docker"], help="Isolation sandbox engine to execute target binaries in (default: none)")
+    parser.add_argument("--no-sandbox", action="store_true", help="Explicitly opt out of container isolation (execute directly on host)")
     parser.add_argument("--coverage", action="store_true", help="Enable coverage-guided hybrid fuzzing (default: False)")
     parser.add_argument("--webhook-secret", default=os.environ.get("MUTAGEN_WEBHOOK_SECRET", ""), help="Shared secret key to sign webhook payloads using HMAC-SHA256")
     parser.add_argument("--webhook-header", action="append", default=[], help="Custom header to send with the webhook request (format: Name: Value)")
@@ -87,6 +88,9 @@ def main():
     parser.add_argument("--defects4c-mount-dir", default="", help="Shared directory mount where Defects4C repositories are placed")
 
     args = parser.parse_args()
+
+    if args.no_sandbox:
+        args.sandbox = "none"
 
     # Safety logic: force static-only if performing malware triage
     if args.profile == "malware-triage":

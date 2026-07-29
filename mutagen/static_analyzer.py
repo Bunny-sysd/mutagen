@@ -322,6 +322,27 @@ def _walk_for_calls(
                 # Track the enclosing function node for extraction
                 if enclosing and func_name not in dangerous_func_nodes:
                     dangerous_func_nodes[func_name] = enclosing
+            else:
+                # Dynamic AST heuristic for custom wrapper functions:
+                # Only flag if an argument involves pointer arithmetic or array subscripting on a pointer
+                has_ptr_op = any(child.type in ("pointer_expression", "subscript_expression") for child in node.children)
+                if has_ptr_op and len(node.children) > 1:
+                    enclosing = _find_enclosing_function(node)
+                    func_name = _get_function_name(enclosing) if enclosing else "<global>"
+                    line_num = node.start_point[0] + 1
+                    context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
+
+                    findings.append(StaticFinding(
+                        function_name=func_name,
+                        line=line_num,
+                        pattern_type="custom_ptr_arithmetic",
+                        call_name=call_name,
+                        severity="medium",
+                        cwe="CWE-119",
+                        context_snippet=context.strip(),
+                    ))
+                    if enclosing and func_name not in dangerous_func_nodes:
+                        dangerous_func_nodes[func_name] = enclosing
 
     for child in node.children:
         _walk_for_calls(child, source_bytes, source_lines, dangerous_names, findings, dangerous_func_nodes)

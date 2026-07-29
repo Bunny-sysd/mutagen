@@ -30,6 +30,13 @@ class FuzzingSupervisorAgent(BaseAgent):
             if self.delivery_mode == "stdin" and not input_data and payload.args:
                 input_data = "\n".join(payload.args)
 
+            # Bridge raw_bytes_hex → input_data for file/stdin mode (binary payloads)
+            if payload.raw_bytes_hex and (not input_data or not str(input_data).strip()):
+                try:
+                    input_data = bytes.fromhex(payload.raw_bytes_hex)
+                except ValueError:
+                    pass
+
             result = execute_payload(
                 exe_path=exe_path,
                 args=payload.args,

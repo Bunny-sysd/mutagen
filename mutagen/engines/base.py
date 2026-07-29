@@ -56,7 +56,7 @@ class BaseEngine(ABC):
         pass
 
     @abstractmethod
-    def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str) -> list[dict]:
+    def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str, coverage_info: dict | None = None) -> list[dict]:
         pass
 
     @abstractmethod

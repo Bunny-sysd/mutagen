@@ -16,9 +16,22 @@ class AgentOrchestrator:
     def __init__(self, target_path: str, source_code: str, provider: str = "gemini", model: str = "gemini-2.5-flash", compiler: str = "gcc", delivery_mode: str = "args", api_key: str = None):
         platform = sys.platform
         self.default_delivery_mode = delivery_mode
+        ext = target_path.lower().split(".")[-1] if "." in target_path else ""
+        lang_map = {
+            "c": "c",
+            "cpp": "c++",
+            "cxx": "c++",
+            "cc": "c++",
+            "rs": "rust",
+            "go": "go",
+            "java": "java",
+            "cs": "csharp",
+            "py": "python"
+        }
+        detected_lang = lang_map.get(ext, "c" if target_path.endswith(".c") else "python")
         self.context = ProgramContext(
             target_path=target_path,
-            language="c" if target_path.endswith(".c") else "python",
+            language=detected_lang,
             os_platform=platform,
             source_code=source_code,
             delivery_mode=delivery_mode

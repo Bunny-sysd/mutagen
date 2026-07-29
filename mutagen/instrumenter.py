@@ -33,8 +33,10 @@ def instrument_c_source(source_code: str) -> tuple[str, int]:
     # Save comments
     def comment_repl(match):
         return get_placeholder(match.group(0), "COMMENT")
-    # Match block and line comments
-    processed = re.sub(r'/\*.*?\*/|//.*?$', comment_repl, processed, flags=re.MULTILINE | re.DOTALL)
+    # Match block comments (can span multiple lines)
+    processed = re.sub(r'/\*.*?\*/', comment_repl, processed, flags=re.DOTALL)
+    # Match line comments (ends at newline)
+    processed = re.sub(r'//[^\r\n]*', comment_repl, processed)
 
     # 2. Find and instrument executable braces
     # We scan for '{' and determine if it's a code block (functions, control statements)

@@ -197,7 +197,11 @@ The program receives input via: {delivery_mode}.
 
 
 
-    def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str) -> list[dict]:
+    def refine_payload(self, source_code: str, failed_args: list[str], failed_input: str, stdout: str, stderr: str, return_code: int, delivery_mode: str, coverage_info: dict | None = None) -> list[dict]:
+        cov_prompt_snippet = ""
+        if coverage_info:
+            cov_prompt_snippet = f"\nCOVERAGE METRICS:\n- Basic blocks hit: {coverage_info.get('hit_blocks', [])}\n- Total workspace coverage: {coverage_info.get('total_coverage_count', 0)} blocks\n"
+
         prompt = f"""You audit security vulnerabilities in {self.lang_name} code.
 A previous payload did not crash the target. Refine it to trigger the bug.
 
@@ -212,12 +216,13 @@ EXECUTION METRICS:
 - Return code: {return_code}
 - stdout: {stdout}
 - stderr: {stderr}
-
+{cov_prompt_snippet}
 Generate 2-3 new, refined payloads.
 Respond ONLY with a valid JSON array matching the original schema. No extra words."""
 
         raw = self._generate(prompt, system="You are an automated payload refinement assistant. Respond only in raw JSON arrays.")
-        return self._extract_json(raw)
+        from mutagen.engines.output_parser import parse_payloads
+        return parse_payloads(raw)
 
     def generate_patch(self, source_code: str, crash_data: dict, debug: bool = False) -> str:
         import sys
