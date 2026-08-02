@@ -520,8 +520,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         for log in context.logs:
             console.print(f"[dim]{log}[/dim]")
 
-        unique_crashes = []
-        crashes = []
+        dynamic_crashes = []
+        unique_dynamic_crashes = []
         for p in context.active_payloads:
             if p.crash_type is not None:
                 crash_dict = {
@@ -535,11 +535,11 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     "cwe": getattr(p, "cwe", "CWE-120"),
                     "severity": getattr(p, "severity", "critical")
                 }
-                crashes.append(crash_dict)
-                unique_crashes.append(crash_dict)
+                dynamic_crashes.append(crash_dict)
+                unique_dynamic_crashes.append(crash_dict)
 
-        # If compilation failed or no active crash reproduced, convert triaged vulnerabilities to findings
-        if not crashes and context.vulnerabilities:
+        static_findings = []
+        if context.vulnerabilities:
             for v in context.vulnerabilities:
                 finding = {
                     "args": ["N/A"],
@@ -553,8 +553,10 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     "severity": v.severity,
                     "reason": v.metadata.get("reason", "Identified by TriageAgent during static analysis")
                 }
-                crashes.append(finding)
-                unique_crashes.append(finding)
+                static_findings.append(finding)
+
+        crashes = dynamic_crashes if dynamic_crashes else static_findings
+        unique_crashes = unique_dynamic_crashes if dynamic_crashes else static_findings
 
         patch_file = ""
         exploit_file = ""
@@ -564,8 +566,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         patch_code = context.proposed_patches.get("primary_patch", "")
 
         exploit_code = ""
-        if crashes:
-            exploit_code = verify_and_fallback_exploit("", crashes[0], "target.exe", "args")
+        if dynamic_crashes:
+            exploit_code = verify_and_fallback_exploit("", dynamic_crashes[0], "target.exe", "args")
 
         target_name = os.path.basename(source_path)
         patch_ext = os.path.splitext(source_path)[1].replace(".", "")
@@ -586,7 +588,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 f.write(exploit_code)
 
         # Generate report for all runs
-        has_crashes = any(c.get("return_code", 0) != 0 for c in crashes)
+        has_crashes = len(dynamic_crashes) > 0
         json_file, html_file = save_crash_report(
             crashes, target_name, len(context.active_payloads), patch_code, exploit_code,
             language=patch_ext, profile=profile, static_only=not has_crashes,
@@ -598,15 +600,21 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""
         exploit_text = f"  Exploit generated:[magenta]{exploit_file}[/magenta]\n" if exploit_file else ""
-        verification_text = "  Verification:     [bold green]VERIFIED SECURE[/bold green]\n" if patch_verified else "  Verification:     [bold red]FAILED[/bold red]\n"
+        
+        if context.verification_status == "VERIFIED_SECURE":
+            verification_text = "  Verification:     [bold green]VERIFIED SECURE[/bold green]\n"
+        elif context.verification_status == "REGRESSION_FAILED":
+            verification_text = "  Verification:     [bold red]FAILED[/bold red]\n"
+        else:
+            verification_text = "  Verification:     [dim]N/A (No active crashes to verify)[/dim]\n"
 
-        if crashes:
+        if dynamic_crashes:
             total_payloads_cnt = len(context.active_payloads) if context.active_payloads else 1
-            calculated_crash_rate = min(100.0, (len(crashes) / total_payloads_cnt) * 100)
+            calculated_crash_rate = min(100.0, (len(dynamic_crashes) / total_payloads_cnt) * 100)
             summary = Panel(
                 f"[bold green]FUZZING COMPLETE (Multi-Agent Swarm)[/bold green]\n\n"
                 f"  Payloads tested:  [cyan]{len(context.active_payloads)}[/cyan]\n"
-                f"  Unique crashes:   [bold red]{len(unique_crashes)}[/bold red]\n"
+                f"  Unique crashes:   [bold red]{len(unique_dynamic_crashes)}[/bold red]\n"
                 f"  Crash rate:       [yellow]{calculated_crash_rate:.0f}%[/yellow]\n"
                 f"  JSON report:      [dim]{json_file}[/dim]\n"
                 f"  HTML report:      [yellow]{html_file}[/yellow]\n"
@@ -618,18 +626,24 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 box=box.HEAVY,
             )
         else:
+            static_finding_text = f"  Static findings:  [magenta]{len(static_findings)}[/magenta]\n" if static_findings else ""
             summary = Panel(
                 f"[bold yellow]FUZZING COMPLETE (Multi-Agent Swarm)[/bold yellow]\n\n"
                 f"  Payloads tested:  [cyan]{len(context.active_payloads)}[/cyan]\n"
-                f"  Crashes found:    [green]0[/green]\n\n"
-                f"  [dim]No crashes found. The target may have mitigations in place.[/dim]",
+                f"  Unique crashes:   [green]0[/green]\n"
+                f"  Crash rate:       [green]0%[/green]\n"
+                f"{static_finding_text}"
+                f"  JSON report:      [dim]{json_file}[/dim]\n"
+                f"  HTML report:      [yellow]{html_file}[/yellow]\n"
+                f"{verification_text}\n"
+                f"  [dim]No active crashes reproduced by fuzzing.[/dim]",
                 title="AGENTS RESULTS",
                 border_style="yellow",
                 box=box.HEAVY,
             )
 
         console.print(summary)
-        return len(unique_crashes)
+        return len(unique_dynamic_crashes)
 
     engine = get_engine(provider, api_key, model, debug, console)
 

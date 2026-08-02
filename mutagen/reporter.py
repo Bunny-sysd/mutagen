@@ -68,6 +68,10 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     safe_name = os.path.basename(target_name).replace(":", "_").replace("/", "_").replace("\\", "_")
     json_file = f"crashes/crash_report_{safe_name}_{timestamp}.json"
 
+    actual_crashes = [c for c in crashes if c.get("return_code", 0) != 0 or c.get("crash_type") not in (None, "Static Triage Finding (Header/Compilation missing)")] if static_only else crashes
+    total_crashes_count = len(actual_crashes) if not static_only else 0
+    crash_rate_str = f"{(total_crashes_count / total_tested * 100):.1f}%" if (total_tested and not static_only) else "0%"
+
     report = {
         "tool": "Mutagen v2.0",
         "target": target_name,
@@ -76,8 +80,8 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         "static_only": static_only,
         "timestamp": timestamp,
         "total_payloads_tested": total_tested,
-        "total_crashes_found": len(crashes),
-        "crash_rate": f"{(len(crashes)/total_tested*100):.1f}%" if total_tested else "0%",
+        "total_crashes_found": total_crashes_count,
+        "crash_rate": crash_rate_str,
         "unique_vuln_types": list(set(c.get("vuln_type", "") for c in crashes)),
         "unique_cwes": list(set(c.get("cwe", "") for c in crashes if c.get("cwe"))),
         "crashes": crashes,
