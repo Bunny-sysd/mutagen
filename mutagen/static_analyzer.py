@@ -75,6 +75,10 @@ DANGEROUS_CALLS: dict[str, dict] = {
     "accept":   {"category": "network",        "severity": "medium",   "cwe": "CWE-200"},
     "send":     {"category": "network",        "severity": "medium",   "cwe": "CWE-200"},
     "sendto":   {"category": "network",        "severity": "medium",   "cwe": "CWE-200"},
+    # --- Format & Bit-Depth Transformations ---
+    "png_image_finish_read":  {"category": "format_transformation", "severity": "high", "cwe": "CWE-681"},
+    "png_set_IHDR":           {"category": "format_transformation", "severity": "medium", "cwe": "CWE-190"},
+    "png_get_IHDR":           {"category": "format_transformation", "severity": "medium", "cwe": "CWE-190"},
 }
 
 
@@ -221,8 +225,9 @@ def analyze_source(code: str) -> PreTargetingResult:
 
     result.findings = findings
 
-    if not findings:
-        # No dangerous patterns found — return full code
+    if result.original_line_count <= 1500 or not findings:
+        # For files under 1500 lines, return full source code so complex state machines,
+        # bit-depth transformers, and logic functions (like png_image_finish_read) are preserved.
         result.focused_code = code
         result.focused_line_count = result.original_line_count
         result.reduction_percent = 0.0

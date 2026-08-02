@@ -18,14 +18,16 @@ Do NOT limit your analysis to basic buffer overflows or known function names. An
 
 2. IMPLICIT DEVELOPER ASSUMPTIONS (What did the developer assume that an attacker can break?):
    - Do they assume input length is positive or under a certain size?
-   - Do they assume strings are null-terminated or contain no control characters (`\\0`, `\\r`, `\\n`, `%`)?
+   - Do they assume strings are null-terminated or contain no control characters (`\0`, `\r`, `\n`, `%`)?
    - Do they assume integer arithmetic (`+`, `-`, `*`) will never wrap or underflow?
+   - Do they assume bit-depth, pixel component size, or format conversions (e.g. 16-bit to 8-bit, interlaced parsing) match output buffer allocations?
+   - Do they assume integer type casts (e.g. uint16_t to uint8_t) will never truncate scale factors or buffer strides?
    - Do they assume memory allocations (`malloc`, `calloc`) never return NULL or 0-sized blocks?
    - Do they assume pointers are valid before dereferencing?
    - Do they assume state variables or multi-step operations complete in exact order?
 
 3. CREATIVE VULNERABILITY & BOUNDARY DISCOVERY:
-   - Identify ANY flaw, memory corruption, logic bug, off-by-one, type confusion, unhandled return code, or state machine desynchronization.
+   - Identify ANY flaw, memory corruption, logic bug, off-by-one, type confusion, bit-depth/format mismatch, unhandled return code, or state machine desynchronization.
 
 4. INPUT DELIVERY MODE:
    - Standard input reading (`fgets`, `gets`, `read(0, ...)`, `scanf`, `cin >>`) -> "stdin"
