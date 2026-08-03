@@ -496,9 +496,15 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 ghidra_bin = ""
             decomp_res = decompile_binary(source_path, ghidra_bin, all_functions=decompile_all, decompiler=decompiler, decompiler_path=decompiler_path)
             source_code = decomp_res.pseudo_source or "// Binary decompilation produced no symbols."
+            is_bin_flag = True
+            decompiler_name = decomp_res.decompiler_used
+            arch_name = decomp_res.architecture
         else:
             with open(source_path, encoding="utf-8", errors="ignore") as f:
                 source_code = f.read()
+            is_bin_flag = False
+            decompiler_name = ""
+            arch_name = ""
 
         orchestrator = AgentOrchestrator(
             target_path=source_path,
@@ -508,6 +514,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             compiler=gcc_path,
             delivery_mode=delivery_mode
         )
+        orchestrator.context.is_binary = is_bin_flag
+        orchestrator.context.decompiler_used = decompiler_name
+        orchestrator.context.architecture = arch_name
 
         try:
             loop = asyncio.get_event_loop()

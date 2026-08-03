@@ -44,6 +44,16 @@ class TriageAgent(BaseAgent):
                 graph_summary = f"\n\nPROJECT WORKSPACE CONTEXT:\n{graph_text}\n"
 
         prompt = get_triage_prompt(context.language, focused_code)
+        if context.is_binary:
+            binary_context = (
+                f"\n\n[REVERSE ENGINEERING ANALYSIS CONTEXT]\n"
+                f"- Decompiler Used: {context.decompiler_used or 'Ghidra'}\n"
+                f"- Target Architecture: {context.architecture or 'Unknown'}\n"
+                f"- Note: The source code above is pseudo-C generated via automated decompiler decompilation.\n"
+                f"- Pay special attention to decompiled pointer arithmetic, type casts (undefined/uint), symbol cross-references, and function signature recovery errors.\n"
+            )
+            prompt += binary_context
+
         if graph_summary:
             prompt += graph_summary
 
