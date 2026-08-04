@@ -1,8 +1,9 @@
-import os
 import json
+import os
 import tempfile
-from mutagen.state import ProgramContext, CrashPayload, VulnerabilityDetail
+
 from mutagen.reporter import save_crash_report
+from mutagen.state import CrashPayload, ProgramContext, VulnerabilityDetail
 
 
 def test_agent_mode_reporting_mismatch_fix():
@@ -50,7 +51,7 @@ def test_agent_mode_reporting_mismatch_fix():
                 static_only=True
             )
             assert os.path.exists(json_file)
-            with open(json_file, "r") as f:
+            with open(json_file) as f:
                 report_data = json.load(f)
 
             assert report_data["total_crashes_found"] == 0

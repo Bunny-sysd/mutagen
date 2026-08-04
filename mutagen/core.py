@@ -609,7 +609,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""
         exploit_text = f"  Exploit generated:[magenta]{exploit_file}[/magenta]\n" if exploit_file else ""
-        
+
         if context.verification_status == "VERIFIED_SECURE":
             verification_text = "  Verification:     [bold green]VERIFIED SECURE[/bold green]\n"
         elif context.verification_status == "REGRESSION_FAILED":

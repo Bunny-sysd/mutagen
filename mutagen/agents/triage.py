@@ -37,6 +37,7 @@ class TriageAgent(BaseAgent):
         graph_summary = ""
         if context.target_path:
             import os
+
             from mutagen.project_graph import summarize_project_graph
             target_dir = os.path.dirname(os.path.abspath(context.target_path))
             graph_text = summarize_project_graph(target_dir)

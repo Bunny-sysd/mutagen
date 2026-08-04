@@ -5,11 +5,8 @@ Forwards decompilation calls to mutagen.decompiler.
 """
 
 from mutagen.decompiler import (
-    DecompilationError,
-    DecompilationResult,
     decompile_binary,
     find_ghidra,
-    is_binary_target,
 )
 
 

@@ -1,4 +1,4 @@
-from mutagen.static_analyzer import analyze_source, DANGEROUS_CALLS
+from mutagen.static_analyzer import DANGEROUS_CALLS, analyze_source
 
 
 def test_static_analyzer_preserves_context_for_medium_files():

@@ -1,6 +1,7 @@
 import pytest
-from mutagen.state import ProgramContext, VulnerabilityDetail
+
 from mutagen.agents.synthesizer import PayloadSynthesizerAgent
+from mutagen.state import ProgramContext, VulnerabilityDetail
 
 
 @pytest.mark.anyio
@@ -33,7 +34,8 @@ async def test_synthesizer_prevents_empty_payload_args():
     )
 
     agent = PayloadSynthesizerAgent(api_key="dummy_key")
-    
+    assert agent.name == "Payload Synthesizer Agent"
+
     # Mock engine response that produces a payload item with reasoning but empty args/input_data
     mock_dict = {
         "payloads": [
@@ -45,7 +47,7 @@ async def test_synthesizer_prevents_empty_payload_args():
             }
         ]
     }
-    
+
     # Verify auto-recovery logic in process method
     data = mock_dict
     payloads = data.get("payloads", [])
@@ -53,7 +55,6 @@ async def test_synthesizer_prevents_empty_payload_args():
         args = p.get("args", [])
         input_data = p.get("input_data", "")
         raw_bytes_hex = p.get("raw_bytes_hex")
-        reason = p.get("reason", "")
 
         is_empty_payload = (not args or len(args) == 0) and (not input_data or not str(input_data).strip()) and not raw_bytes_hex
         if is_empty_payload:
