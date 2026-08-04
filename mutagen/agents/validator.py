@@ -4,15 +4,17 @@ import tempfile
 from mutagen.agents.base import BaseAgent
 from mutagen.ast_validator import validate_c_source
 from mutagen.compiler import compile_target
+from mutagen.constants import DEFAULT_EXEC_TIMEOUT, DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER
 from mutagen.executor import execute_payload
 from mutagen.state import ProgramContext
 
 
 class StructuralValidatorAgent(BaseAgent):
-    def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", compiler_path: str = "gcc", delivery_mode: str = "args", api_key: str = None):
+    def __init__(self, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, compiler_path: str = "gcc", delivery_mode: str = "args", api_key: str = None, execution_timeout: int = DEFAULT_EXEC_TIMEOUT):
         super().__init__("Structural Validator Agent", model_provider, model_name, api_key)
         self.compiler_path = compiler_path
         self.delivery_mode = delivery_mode
+        self.execution_timeout = execution_timeout
 
     async def process(self, context: ProgramContext) -> ProgramContext:
         context.logs.append("[StructuralValidatorAgent] Running structural validation checks...")
@@ -80,7 +82,7 @@ class StructuralValidatorAgent(BaseAgent):
                     args=crash.args,
                     input_data=input_data,
                     delivery_mode=self.delivery_mode,
-                    timeout=5
+                    timeout=self.execution_timeout
                 )
 
                 # Check if it still crashes using the executor's oracle-resolved crashed flag

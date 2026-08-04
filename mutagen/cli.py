@@ -6,6 +6,7 @@ import sys
 from rich.console import Console
 from rich.panel import Panel
 
+from mutagen.constants import GCC_CANDIDATES_WINDOWS
 from mutagen.core import run_fuzzer
 from mutagen.decompiler import is_binary_target
 
@@ -201,15 +202,11 @@ def main():
         sys.exit(1)
 
     # --- FIND GCC (Standard C/C++ Fallback) ------------------------------
-    gcc_candidates = [
-        r"C:\msys64\ucrt64\bin\gcc.exe",
-        r"C:\msys64\mingw64\bin\gcc.exe",
-        r"C:\msys64\mingw32\bin\gcc.exe",
-        r"C:\MinGW\bin\gcc.exe",
-        r"C:\TDM-GCC-64\bin\gcc.exe",
-        "gcc",  # Fall back to PATH
-        os.path.join(workspace_dir, "tcc", "tcc", "tcc.exe"),  # TCC as final fallback
-    ]
+    # Build gcc candidate list: constants list + TCC bundled fallback
+    tcc_fallback = os.path.join(workspace_dir, "tcc", "tcc", "tcc.exe")
+    gcc_candidates = list(GCC_CANDIDATES_WINDOWS)
+    if tcc_fallback not in gcc_candidates:
+        gcc_candidates.append(tcc_fallback)
 
     gcc_path = None
     for candidate in gcc_candidates:

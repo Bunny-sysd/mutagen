@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from mutagen.agents.base import BaseAgent
 from mutagen.agents.prompts import get_synthesizer_rules
+from mutagen.constants import DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER, SYNTHESIZER_TEMPERATURE
 from mutagen.engines import get_engine
 from mutagen.poc_finder import get_cwe_poc_intelligence
 from mutagen.safety import GEMINI_SAFETY_OFF
@@ -118,7 +119,7 @@ def _generate_file_mode_fallback_payloads() -> list[dict]:
 
 
 class PayloadSynthesizerAgent(BaseAgent):
-    def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", api_key: str = None):
+    def __init__(self, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, api_key: str = None):
         super().__init__("Payload Synthesizer Agent", model_provider, model_name, api_key)
         self.engine = get_engine(model_provider, self.api_key, model_name)
 
@@ -175,7 +176,7 @@ RULES:
                     model=self.model_name,
                     contents=prompt,
                     config={
-                        "temperature": 0.5,
+                        "temperature": SYNTHESIZER_TEMPERATURE,
                         "response_mime_type": "application/json",
                         "response_schema": PayloadList,
                         "safety_settings": GEMINI_SAFETY_OFF,

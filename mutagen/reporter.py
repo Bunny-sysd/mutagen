@@ -3,6 +3,7 @@ import html
 import json
 import os
 
+from mutagen import __version__ as _mutagen_version
 from mutagen.compliance import map_cwe_to_compliance
 
 VULN_CAPABILITIES = {
@@ -73,7 +74,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     crash_rate_str = f"{(total_crashes_count / total_tested * 100):.1f}%" if (total_tested and not static_only) else "0%"
 
     report = {
-        "tool": "Mutagen v2.0",
+        "tool": f"Mutagen v{_mutagen_version}",
         "target": target_name,
         "analysis_mode": "binary_decompilation" if binary_mode else "source_code",
         "profile": profile,

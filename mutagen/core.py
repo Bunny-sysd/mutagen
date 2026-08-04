@@ -12,6 +12,7 @@ from rich.text import Text
 
 from mutagen.ast_validator import format_validation_errors, validate_c_source
 from mutagen.compiler import CompilationError, compile_target
+from mutagen.constants import DEFAULT_MODEL_GEMINI
 from mutagen.decompiler import (
     DecompilationError,
 )
@@ -510,9 +511,11 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             target_path=source_path,
             source_code=source_code,
             provider=provider,
-            model=model if model else ("gemini-2.5-flash" if provider == "gemini" else ""),
+            model=model if model else (DEFAULT_MODEL_GEMINI if provider == "gemini" else ""),
             compiler=gcc_path,
-            delivery_mode=delivery_mode
+            delivery_mode=delivery_mode,
+            max_patch_retries=max_patch_retries,
+            execution_timeout=timeout,
         )
         orchestrator.context.is_binary = is_bin_flag
         orchestrator.context.decompiler_used = decompiler_name

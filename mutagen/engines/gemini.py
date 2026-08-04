@@ -4,6 +4,13 @@ import time
 from google import genai
 from rich.console import Console
 
+from mutagen.constants import (
+    GEMINI_HTTP_CONNECT_TIMEOUT,
+    GEMINI_HTTP_READ_TIMEOUT,
+    GEMINI_HTTP_TIMEOUT,
+    GEMINI_HTTP_WRITE_TIMEOUT,
+    GEMINI_RATE_LIMIT_WAIT,
+)
 from mutagen.engines.base import BaseEngine
 from mutagen.safety import GEMINI_SAFETY_OFF
 
@@ -17,7 +24,12 @@ class GeminiEngine(BaseEngine):
         self.client = genai.Client(api_key=self.api_key)
         # Override internal HTTP clients with custom timeouts to bypass connect/handshake timeout errors in this environment
         import httpx
-        custom_timeout = httpx.Timeout(15.0, connect=5.0, read=10.0, write=10.0)
+        custom_timeout = httpx.Timeout(
+            GEMINI_HTTP_TIMEOUT,
+            connect=GEMINI_HTTP_CONNECT_TIMEOUT,
+            read=GEMINI_HTTP_READ_TIMEOUT,
+            write=GEMINI_HTTP_WRITE_TIMEOUT,
+        )
         self.client._http_client = httpx.Client(timeout=custom_timeout, http2=False)
         self.client._async_http_client = httpx.AsyncClient(timeout=custom_timeout, http2=False)
 
@@ -44,9 +56,8 @@ class GeminiEngine(BaseEngine):
 
         # 3. Check for 429 Resource Exhausted (Rate Limit / Quota)
         if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str or "QUOTA" in err_str:
-            wait_time = 20
-            console.print(f"[yellow]  Rate limit (429 RESOURCE_EXHAUSTED) hit. Waiting {wait_time}s to cool down API quota...[/yellow]")
-            return "retry", wait_time
+            console.print(f"[yellow]  Rate limit (429 RESOURCE_EXHAUSTED) hit. Waiting {GEMINI_RATE_LIMIT_WAIT}s to cool down API quota...[/yellow]")
+            return "retry", GEMINI_RATE_LIMIT_WAIT
 
         # 4. Check for 404 Not Found (Model not supported or not found)
         if "NOT_FOUND" in err_str or "404" in err_str or "NOT FOUND" in err_str:

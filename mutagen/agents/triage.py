@@ -1,9 +1,11 @@
 import json
+import os
 
 from pydantic import BaseModel
 
 from mutagen.agents.base import BaseAgent
 from mutagen.agents.prompts import get_triage_prompt
+from mutagen.constants import DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER, TRIAGE_TEMPERATURE
 from mutagen.engines import get_engine
 from mutagen.safety import GEMINI_SAFETY_OFF
 from mutagen.state import ProgramContext, VulnerabilityDetail
@@ -22,7 +24,7 @@ class TriageResult(BaseModel):
     suggested_delivery_mode: str  # Must be "args", "stdin", "file", "tcp", or "http"
 
 class TriageAgent(BaseAgent):
-    def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", api_key: str = None):
+    def __init__(self, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, api_key: str = None):
         super().__init__("Triage Agent", model_provider, model_name, api_key)
         self.engine = get_engine(model_provider, self.api_key, model_name)
 
@@ -36,8 +38,6 @@ class TriageAgent(BaseAgent):
         # Enrich prompt with multi-file workspace call graph summary if available
         graph_summary = ""
         if context.target_path:
-            import os
-
             from mutagen.project_graph import summarize_project_graph
             target_dir = os.path.dirname(os.path.abspath(context.target_path))
             graph_text = summarize_project_graph(target_dir)
@@ -64,7 +64,7 @@ class TriageAgent(BaseAgent):
                     model=self.model_name,
                     contents=prompt,
                     config={
-                        "temperature": 0.1,
+                        "temperature": TRIAGE_TEMPERATURE,
                         "response_mime_type": "application/json",
                         "response_schema": TriageResult,
                         "safety_settings": GEMINI_SAFETY_OFF,

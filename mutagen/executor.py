@@ -1,6 +1,8 @@
 import os
 import subprocess
 
+from mutagen.constants import DOCKER_CPU_LIMIT, DOCKER_MEMORY_LIMIT
+
 _DOCKER_WARNED = False
 
 def _check_docker_functional() -> bool:
@@ -89,8 +91,8 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
 
         docker_args = [
             "docker", "run", "--rm", "-i",
-            "--memory=512m",
-            "--cpus=1.0",
+            f"--memory={DOCKER_MEMORY_LIMIT}",
+            f"--cpus={DOCKER_CPU_LIMIT}",
             "-v", f"{exe_dir}:/target:ro",
             "-w", "/target"
         ]

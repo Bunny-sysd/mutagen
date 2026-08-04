@@ -1,11 +1,12 @@
 import os
 from abc import ABC, abstractmethod
 
+from mutagen.constants import DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER
 from mutagen.state import ProgramContext
 
 
 class BaseAgent(ABC):
-    def __init__(self, name: str, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", api_key: str = None):
+    def __init__(self, name: str, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, api_key: str = None):
         self.name = name
         self.model_provider = model_provider
         self.model_name = model_name

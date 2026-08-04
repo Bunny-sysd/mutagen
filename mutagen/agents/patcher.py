@@ -1,10 +1,11 @@
 from mutagen.agents.base import BaseAgent
+from mutagen.constants import DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER
 from mutagen.engines import get_engine
 from mutagen.state import ProgramContext
 
 
 class PatchEngineerAgent(BaseAgent):
-    def __init__(self, model_provider: str = "gemini", model_name: str = "gemini-2.5-flash", api_key: str = None):
+    def __init__(self, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, api_key: str = None):
         super().__init__("Patch Engineer Agent", model_provider, model_name, api_key)
         self.engine = get_engine(model_provider, self.api_key, model_name)
 
@@ -28,12 +29,22 @@ class PatchEngineerAgent(BaseAgent):
         if context.notepad:
             reasoning += "\nPrevious Swarm Notepad Notes:\n" + "\n".join(f"- {note}" for note in context.notepad)
 
+        # Resolve CWE: prefer the matched triage finding for this crash, fall back to CWE-120
+        matched_cwe = "CWE-120"
+        for v in context.vulnerabilities:
+            if matched_cwe != "CWE-120":
+                break
+            if v.cwe and v.cwe != "CWE-120":
+                matched_cwe = v.cwe
+            elif v.cwe:
+                matched_cwe = v.cwe
+
         crash_data = {
             "vuln_type": crash.crash_type,
             "args": crash.args,
             "input_data": crash.input_data,
             "raw_bytes_hex": crash.raw_bytes_hex,
-            "cwe": "CWE-120",
+            "cwe": matched_cwe,
             "severity": "critical",
             "reason": reasoning
         }

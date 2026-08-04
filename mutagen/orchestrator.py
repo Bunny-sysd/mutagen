@@ -8,14 +8,32 @@ from mutagen.agents.supervisor import FuzzingSupervisorAgent
 from mutagen.agents.synthesizer import PayloadSynthesizerAgent
 from mutagen.agents.triage import TriageAgent
 from mutagen.agents.validator import StructuralValidatorAgent
+from mutagen.constants import (
+    DEFAULT_EXEC_TIMEOUT,
+    DEFAULT_MAX_PATCH_RETRIES,
+    DEFAULT_MODEL_GEMINI,
+    DEFAULT_PROVIDER,
+)
 from mutagen.state import ProgramContext
 
 console = Console(force_terminal=True)
 
 class AgentOrchestrator:
-    def __init__(self, target_path: str, source_code: str, provider: str = "gemini", model: str = "gemini-2.5-flash", compiler: str = "gcc", delivery_mode: str = "args", api_key: str = None):
+    def __init__(
+        self,
+        target_path: str,
+        source_code: str,
+        provider: str = DEFAULT_PROVIDER,
+        model: str = DEFAULT_MODEL_GEMINI,
+        compiler: str = "gcc",
+        delivery_mode: str = "args",
+        api_key: str = None,
+        max_patch_retries: int = DEFAULT_MAX_PATCH_RETRIES,
+        execution_timeout: int = DEFAULT_EXEC_TIMEOUT,
+    ):
         platform = sys.platform
         self.default_delivery_mode = delivery_mode
+        self.max_patch_retries = max_patch_retries
         ext = target_path.lower().split(".")[-1] if "." in target_path else ""
         lang_map = {
             "c": "c",
@@ -37,12 +55,26 @@ class AgentOrchestrator:
             delivery_mode=delivery_mode
         )
 
-        # Initialize micro-agents
+        # Initialize micro-agents — threading execution_timeout through supervisor and validator
         self.triage_agent = TriageAgent(model_provider=provider, model_name=model, api_key=api_key)
         self.synthesizer_agent = PayloadSynthesizerAgent(model_provider=provider, model_name=model, api_key=api_key)
-        self.supervisor_agent = FuzzingSupervisorAgent(model_provider=provider, model_name=model, compiler_path=compiler, delivery_mode=delivery_mode, api_key=api_key)
+        self.supervisor_agent = FuzzingSupervisorAgent(
+            model_provider=provider,
+            model_name=model,
+            compiler_path=compiler,
+            delivery_mode=delivery_mode,
+            api_key=api_key,
+            execution_timeout=execution_timeout,
+        )
         self.patch_agent = PatchEngineerAgent(model_provider=provider, model_name=model, api_key=api_key)
-        self.validator_agent = StructuralValidatorAgent(model_provider=provider, model_name=model, compiler_path=compiler, delivery_mode=delivery_mode, api_key=api_key)
+        self.validator_agent = StructuralValidatorAgent(
+            model_provider=provider,
+            model_name=model,
+            compiler_path=compiler,
+            delivery_mode=delivery_mode,
+            api_key=api_key,
+            execution_timeout=execution_timeout,
+        )
 
     async def run(self) -> ProgramContext:
         console.print(Panel(
@@ -94,14 +126,14 @@ class AgentOrchestrator:
 
         console.print(f"[bold red]💥 {len(active_crashes)} Crash(es) Reproduced! Launching Self-Healing Loop...[/bold red]")
 
-        # 4. Self-Healing Loop: Patch & Verify
-        for attempt in range(1, 4):
+        # 4. Self-Healing Loop: Patch & Verify — uses the configured max_patch_retries
+        for attempt in range(1, self.max_patch_retries + 1):
             console.print(Panel(
-                f"[bold green]PHASE 4/4 [100%]: SELF-HEALING LOOP (Attempt {attempt}/3)[/bold green]\n"
+                f"[bold green]PHASE 4/4 [100%]: SELF-HEALING LOOP (Attempt {attempt}/{self.max_patch_retries})[/bold green]\n"
                 "[dim]PatchEngineerAgent generating patch & StructuralValidatorAgent re-testing...[/dim]",
                 border_style="green"
             ))
-            self.context.logs.append(f"[Orchestrator] Healing loop attempt {attempt}/3")
+            self.context.logs.append(f"[Orchestrator] Healing loop attempt {attempt}/{self.max_patch_retries}")
 
             # Run Patch Engineer
             self.context = await self.patch_agent.process(self.context)
