@@ -61,7 +61,7 @@ VULN_CAPABILITIES = {
     }
 }
 
-def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = "", webhook_url: str = "", webhook_secret: str = "", webhook_headers: list[str] = None):
+def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = "", webhook_url: str = "", webhook_secret: str = "", webhook_headers: list[str] = None, sandboxed: bool = False, user_confirmed_unsandboxed: bool = False, docker_available: bool = False):
     """Save all crash-causing payloads to a JSON report file and generate a premium HTML dashboard."""
     os.makedirs("crashes", exist_ok=True)
 
@@ -79,6 +79,9 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         "analysis_mode": "binary_decompilation" if binary_mode else "source_code",
         "profile": profile,
         "static_only": static_only,
+        "sandboxed": sandboxed,
+        "user_confirmed_unsandboxed": user_confirmed_unsandboxed,
+        "docker_available": docker_available,
         "timestamp": timestamp,
         "total_payloads_tested": total_tested,
         "total_crashes_found": total_crashes_count,
@@ -359,17 +362,17 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
       </div>
     </div>"""
 
-    # Build subtitle based on analysis mode (computed BEFORE the f-string)
+    sandbox_badge = '<code style="color: #51cf66; font-size: 0.85rem; padding: 0.2rem 0.4rem;">DOCKER (Sandboxed)</code>' if sandboxed else '<code style="color: #ff6b6b; font-size: 0.85rem; padding: 0.2rem 0.4rem;">HOST (Unsandboxed)</code>'
     if binary_mode:
         arch_info = ""
         if decompilation_info:
             arch_info = f" | Arch: {html.escape(decompilation_info.architecture)} | Functions: {html.escape(str(decompilation_info.functions_found))}"
         analysis_label = "STATIC TRIAGE" if static_only else "BINARY DECOMPILATION"
-        subtitle_line = f'Target: <strong style="color: #ffffff;">{target_name}</strong> | Mode: <code style="color: #ff6b6b; font-size: 0.85rem; padding: 0.2rem 0.4rem;">{analysis_label}</code>{arch_info} | {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+        subtitle_line = f'Target: <strong style="color: #ffffff;">{target_name}</strong> | Mode: <code style="color: #ff6b6b; font-size: 0.85rem; padding: 0.2rem 0.4rem;">{analysis_label}</code> | Sandbox: {sandbox_badge}{arch_info} | {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
         report_subtitle = f"Binary Analysis Report — {profile.upper()} Profile"
     else:
         analysis_label = "STATIC SCAN" if static_only else "AI-Powered Zero-Day Fuzzer &amp; Auto-Patcher"
-        subtitle_line = f'Target: <strong style="color: #ffffff;">{target_name}.{language}</strong> &nbsp;&bull;&nbsp; Mode: <code style="color: #00ccff; font-size: 0.85rem; padding: 0.2rem 0.4rem;">{analysis_label}</code> &nbsp;&bull;&nbsp; {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+        subtitle_line = f'Target: <strong style="color: #ffffff;">{target_name}.{language}</strong> &nbsp;&bull;&nbsp; Mode: <code style="color: #00ccff; font-size: 0.85rem; padding: 0.2rem 0.4rem;">{analysis_label}</code> &nbsp;&bull;&nbsp; Sandbox: {sandbox_badge} &nbsp;&bull;&nbsp; {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
         report_subtitle = f"Source Code Audit — {profile.upper()} Profile"
 
     html_content = f"""<!DOCTYPE html>

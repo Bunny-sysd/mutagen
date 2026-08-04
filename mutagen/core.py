@@ -521,6 +521,10 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         orchestrator.context.decompiler_used = decompiler_name
         orchestrator.context.architecture = arch_name
 
+        # --- UPFRONT SAFETY GATE & DOCKER DETECTION ---
+        is_no_sandbox = (sandbox == "none")
+        orchestrator.gate_docker_sandbox_safety(force_no_sandbox=is_no_sandbox)
+
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -608,6 +612,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             webhook_url=webhook_url,
             webhook_secret=webhook_secret,
             webhook_headers=webhook_headers,
+            sandboxed=context.sandboxed,
+            user_confirmed_unsandboxed=context.user_confirmed_unsandboxed,
+            docker_available=context.docker_available,
         )
 
         patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""

@@ -6,9 +6,13 @@ from mutagen.constants import DOCKER_CPU_LIMIT, DOCKER_MEMORY_LIMIT
 _DOCKER_WARNED = False
 
 def _check_docker_functional() -> bool:
+    """
+    Verifies that the Docker CLI binary is present AND the Docker daemon API socket is responsive.
+    Uses 'docker info' with a 3s timeout to catch disconnected or non-running daemon states.
+    """
     global _DOCKER_WARNED
     try:
-        res = subprocess.run(["docker", "ps"], capture_output=True, text=True, timeout=2)
+        res = subprocess.run(["docker", "info"], capture_output=True, text=True, timeout=3)
         if res.returncode == 0:
             return True
     except Exception:
@@ -18,8 +22,7 @@ def _check_docker_functional() -> bool:
         try:
             from rich.console import Console
             console = Console(force_terminal=True, force_jupyter=False)
-            console.print("[yellow][!] Warning: Docker sandbox requested but Docker is not installed or daemon is offline.[/yellow]")
-            console.print("[yellow]  Falling back to host direct execution.[/yellow]")
+            console.print("[yellow][!] Warning: Docker daemon is unreachable or non-responsive.[/yellow]")
         except Exception:
             pass
         _DOCKER_WARNED = True

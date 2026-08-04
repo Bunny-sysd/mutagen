@@ -76,6 +76,64 @@ class AgentOrchestrator:
             execution_timeout=execution_timeout,
         )
 
+    def gate_docker_sandbox_safety(self, ci_mode: bool = False, force_no_sandbox: bool = False) -> None:
+        """
+        CROSS-CUTTING SAFETY GATE:
+        Detects Docker daemon availability upfront using 'docker info'.
+        If Docker is available and sandboxing is requested/defaulted, enables container execution.
+        If Docker is UN-available:
+          - Non-interactive / CI mode: ABORTS immediately before compiling/executing binaries.
+          - Interactive TTY mode: Prompts user explicitly to confirm unsandboxed host execution.
+        """
+        import os
+        from mutagen.executor import _check_docker_functional
+        docker_available = _check_docker_functional()
+        self.context.docker_available = docker_available
+        self.context.ci_mode = ci_mode or bool(os.environ.get("CI")) or not sys.stdin.isatty()
+
+        if force_no_sandbox:
+            self.context.sandboxed = False
+            self.context.user_confirmed_unsandboxed = True
+            self.context.logs.append("[SafetyGate] Explicit --no-sandbox flag provided. Proceeding unsandboxed.")
+            return
+
+        if docker_available:
+            self.context.sandboxed = True
+            self.context.user_confirmed_unsandboxed = False
+            self.context.logs.append("[SafetyGate] Docker daemon responsive. Executing in isolated container sandbox.")
+            return
+
+        # Docker is NOT available:
+        if self.context.ci_mode:
+            console.print("[bold red]❌ SAFETY ERROR: Docker daemon is unavailable, and Mutagen is running in non-interactive/CI mode.[/bold red]")
+            console.print("[bold red]Unsandboxed execution in non-interactive CI environments is disabled for host safety. Aborting.[/bold red]")
+            self.context.logs.append("[SafetyGate] ABORTED: Docker unavailable in non-interactive/CI mode.")
+            sys.exit(1)
+
+        # Interactive TTY Mode Prompt:
+        console.print("\n[bold yellow]⚠️  DOCKER NOT AVAILABLE[/bold yellow]")
+        console.print("[yellow]Mutagen could not connect to a responsive Docker daemon.[/yellow]")
+        console.print("[yellow]Fuzzing payloads are specifically designed to trigger crashes and memory corruption.[/yellow]")
+        console.print("[yellow]Running them without container isolation means they will execute directly against this machine's real filesystem and process space.\n[/yellow]")
+        console.print("Do you want to:")
+        console.print("  [1] Proceed anyway, UNSANDBOXED, on this host (not recommended)")
+        console.print("  [2] Abort and fix Docker first\n")
+
+        try:
+            choice = input("[?] Selection [1/2]: ").strip().lower()
+            if choice in ("1", "y", "yes"):
+                self.context.sandboxed = False
+                self.context.user_confirmed_unsandboxed = True
+                self.context.logs.append("[SafetyGate] User explicitly confirmed unsandboxed host execution.")
+                console.print("[yellow][!] Proceeding with UNSANDBOXED host execution (user confirmed).[/yellow]\n")
+            else:
+                console.print("[bold red]Aborting run. Please start your Docker daemon and try again.[/bold red]")
+                self.context.logs.append("[SafetyGate] ABORTED: User declined unsandboxed host execution.")
+                sys.exit(1)
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[bold red]Aborted by user.[/bold red]")
+            sys.exit(1)
+
     async def run(self) -> ProgramContext:
         console.print(Panel(
             "[bold cyan]PHASE 1/4 [25%]: TRIAGE & AST AUDIT[/bold cyan]\n"

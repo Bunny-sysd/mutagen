@@ -53,8 +53,6 @@ def main():
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-    console.print(Panel.fit("[bold green]MUTAGEN v2.0[/bold green]\nAgentic AI-Powered Fuzzer", border_style="green"))
-
     parser = argparse.ArgumentParser(
         description="Mutagen: AI-Powered Zero-Day Fuzzer",
         formatter_class=argparse.RawTextHelpFormatter
@@ -77,7 +75,7 @@ def main():
     parser.add_argument("--profile", default="legacy-audit", choices=["legacy-audit", "supply-chain", "malware-triage"], help="Security profile for analysis (default: legacy-audit)")
     parser.add_argument("--static-only", action="store_true", help="Enable static-only analysis, skipping dynamic fuzzer execution")
     parser.add_argument("--webhook-url", default="", help="Custom automation webhook endpoint to post scanning payloads to (e.g. n8n, Jira, Slack)")
-    parser.add_argument("--sandbox", default="none", choices=["none", "docker"], help="Isolation sandbox engine to execute target binaries in (default: none)")
+    parser.add_argument("--sandbox", default="docker", choices=["none", "docker"], help="Isolation sandbox engine to execute target binaries in (default: docker)")
     parser.add_argument("--no-sandbox", action="store_true", help="Explicitly opt out of container isolation (execute directly on host)")
     parser.add_argument("--coverage", action="store_true", help="Enable coverage-guided hybrid fuzzing (default: False)")
     parser.add_argument("--webhook-secret", default=os.environ.get("MUTAGEN_WEBHOOK_SECRET", ""), help="Shared secret key to sign webhook payloads using HMAC-SHA256")
@@ -92,6 +90,17 @@ def main():
 
     if args.no_sandbox:
         args.sandbox = "none"
+
+    from mutagen.executor import _check_docker_functional
+    docker_ok = _check_docker_functional()
+    if args.sandbox == "docker" and docker_ok:
+        exec_mode_str = "Execution mode: Docker (sandboxed)"
+    elif args.no_sandbox:
+        exec_mode_str = "Execution mode: HOST (unsandboxed — explicit --no-sandbox)"
+    else:
+        exec_mode_str = "Execution mode: HOST (unsandboxed)"
+
+    console.print(Panel.fit(f"[bold green]MUTAGEN v2.0[/bold green]\nAgentic AI-Powered Fuzzer\n[dim]{exec_mode_str}[/dim]", border_style="green"))
 
     # Safety logic: force static-only if performing malware triage
     if args.profile == "malware-triage":

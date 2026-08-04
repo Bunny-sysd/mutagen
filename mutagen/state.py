@@ -53,3 +53,7 @@ class ProgramContext(BaseModel):
     architecture: str = ""
     notepad: list[str] = Field(default_factory=list)
     logs: list[str] = Field(default_factory=list)
+    docker_available: bool = False
+    sandboxed: bool = False
+    user_confirmed_unsandboxed: bool = False
+    ci_mode: bool = False
