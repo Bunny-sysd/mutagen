@@ -251,7 +251,8 @@ Vulnerability details:
 - Vuln: {crash_data.get("vuln_type")}
 - Reason: {crash_data.get("reason")}
 
-Provide the ENTIRE patched {self.lang_name} code file. No markdown block formatting, return raw {self.lang_name} code only."""
+Provide the ENTIRE patched {self.lang_name} code file.
+IMPORTANT: Return ONLY valid, raw {self.lang_name} code starting directly on Line 1. Do NOT include markdown code fences (like ```), markdown formatting, or preamble text."""
         try:
             response = self._create_chat_completion(
                 model=self.model,
@@ -259,13 +260,8 @@ Provide the ENTIRE patched {self.lang_name} code file. No markdown block formatt
                 temperature=0.2
             )
             text = response.choices[0].message.content.strip()
-            for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
-                if text.lower().startswith(prefix):
-                    text = text[len(prefix):]
-                    break
-            if text.endswith("```"):
-                text = text[:-3]
-            return text.strip()
+            from mutagen.engines.output_parser import strip_code_fences
+            return strip_code_fences(text)
         except Exception as e:
             if debug:
                 console.print(f"[red]OpenAI patch failed: {e}[/red]")
@@ -302,9 +298,8 @@ FAILURE DETAILS:
 {error_message}
 
 Please analyze the failure details and correct the patch code.
-Provide the ENTIRE corrected {self.lang_name} source code file.
-DO NOT use markdown formatting outside of the code block.
-Return ONLY the raw {self.lang_name} code. DO NOT wrap it in ```{self.lang_ext} and ```."""
+Provide the ENTIRE corrected {self.lang_name} source code file, grounded in the ORIGINAL SOURCE CODE baseline while fixing the reported failure details.
+IMPORTANT: Return ONLY valid, raw {self.lang_name} code starting directly on Line 1. Do NOT include markdown code fences (like ```), markdown formatting, or preamble text."""
         try:
             response = self._create_chat_completion(
                 model=self.model,
@@ -312,13 +307,8 @@ Return ONLY the raw {self.lang_name} code. DO NOT wrap it in ```{self.lang_ext} 
                 temperature=0.2
             )
             text = response.choices[0].message.content.strip()
-            for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
-                if text.lower().startswith(prefix):
-                    text = text[len(prefix):]
-                    break
-            if text.endswith("```"):
-                text = text[:-3]
-            return text.strip()
+            from mutagen.engines.output_parser import strip_code_fences
+            return strip_code_fences(text)
         except Exception as e:
             if debug:
                 console.print(f"[red]OpenAI refine_patch failed: {e}[/red]")

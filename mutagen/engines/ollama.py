@@ -218,15 +218,11 @@ Generate 2-3 refined payloads in a JSON list (containing both "args" and "input_
 Vulnerability: {crash_data.get("vuln_type")}
 Args: {crash_data.get("args")}
 
-Return only the updated {self.lang_name} source code file. Do not include markdown blocks, explanations, or backticks."""
+Return only the updated {self.lang_name} source code file.
+IMPORTANT: Return ONLY valid, raw {self.lang_name} code starting directly on Line 1. Do NOT include markdown code fences (like ```), markdown formatting, or preamble text."""
         text = self._generate(prompt)
-        for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
-            if text.lower().startswith(prefix):
-                text = text[len(prefix):]
-                break
-        if text.endswith("```"):
-            text = text[:-3]
-        return text.strip()
+        from mutagen.engines.output_parser import strip_code_fences
+        return strip_code_fences(text)
 
     def refine_patch(self, source_code: str, bad_patch: str, error_message: str, crash_data: dict, debug: bool = False) -> str:
         import sys
@@ -251,17 +247,11 @@ FAILURE DETAILS:
 {error_message}
 
 Please analyze the failure details and correct the patch code.
-Provide the ENTIRE corrected {self.lang_name} source code file.
-DO NOT use markdown formatting outside of the code block.
-Return ONLY the raw {self.lang_name} code. DO NOT wrap it in ```{self.lang_ext} and ```."""
+Provide the ENTIRE corrected {self.lang_name} source code file, grounded in the ORIGINAL SOURCE CODE baseline while fixing the reported failure details.
+IMPORTANT: Return ONLY valid, raw {self.lang_name} code starting directly on Line 1. Do NOT include markdown code fences (like ```), markdown formatting, or preamble text."""
         text = self._generate(prompt)
-        for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
-            if text.lower().startswith(prefix):
-                text = text[len(prefix):]
-                break
-        if text.endswith("```"):
-            text = text[:-3]
-        return text.strip()
+        from mutagen.engines.output_parser import strip_code_fences
+        return strip_code_fences(text)
 
     def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
         prompt = f"""Write a standalone Python 3 script reproducing the crash in '{exe_path}' where input delivery is via '{delivery_mode}'.

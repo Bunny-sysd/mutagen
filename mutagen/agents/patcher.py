@@ -54,6 +54,8 @@ class PatchEngineerAgent(BaseAgent):
 
         if bad_patch and context.verification_status != "VERIFIED_SECURE":
             context.logs.append("[PatchEngineerAgent] Refining previous failed patch...")
+            from mutagen.engines.output_parser import strip_code_fences
+            clean_bad_patch = strip_code_fences(bad_patch)
             # Retrieve last log or compilation error
             error_message = context.logs[-1] if context.logs else "Unknown verification error"
             if context.notepad:
@@ -61,7 +63,7 @@ class PatchEngineerAgent(BaseAgent):
 
             patched_code = self.engine.refine_patch(
                 source_code=context.source_code,
-                bad_patch=bad_patch,
+                bad_patch=clean_bad_patch,
                 error_message=error_message,
                 crash_data=crash_data,
                 debug=True

@@ -30,6 +30,15 @@ class StructuralValidatorAgent(BaseAgent):
             result = validate_c_source(patched_code)
             if not result.is_valid:
                 err_msg = ", ".join(f"line {e.line}: {e.message}" for e in result.errors)
+                try:
+                    import time
+                    os.makedirs("logs", exist_ok=True)
+                    log_file = f"logs/ast_failure_raw_{int(time.time())}.log"
+                    with open(log_file, "w", encoding="utf-8") as lf:
+                        lf.write(f"--- AST VALIDATION FAILURE RAW PATCH DUMP ---\n{err_msg}\n\nRAW PATCH CONTENT:\n{patched_code}\n")
+                    context.logs.append(f"[StructuralValidatorAgent] Raw patch dumped to {log_file}")
+                except Exception:
+                    pass
                 context.logs.append(f"[StructuralValidatorAgent] AST Validation failed: {err_msg}")
                 context.verification_status = "REGRESSION_FAILED"
                 return context

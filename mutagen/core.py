@@ -846,10 +846,17 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 attempt += 1
                 continue
 
-            # AST Pre-check
             ast_result = validate_c_source(patch_code)
             if not ast_result.is_valid:
                 error_details = format_validation_errors(ast_result)
+                try:
+                    import time
+                    os.makedirs("logs", exist_ok=True)
+                    log_file = f"logs/ast_failure_raw_{int(time.time())}.log"
+                    with open(log_file, "w", encoding="utf-8") as lf:
+                        lf.write(f"--- AST VALIDATION FAILURE RAW PATCH DUMP ---\n{error_details}\n\nRAW PATCH CONTENT:\n{patch_code}\n")
+                except Exception:
+                    pass
                 console.print(f"[yellow]    ⚡ AST Pre-Check: {len(ast_result.errors)} error(s) detected. Skipping submission.[/yellow]")
                 patch_code = ""
                 attempt += 1

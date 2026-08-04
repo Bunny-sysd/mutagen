@@ -239,16 +239,12 @@ Vulnerability: {crash_data.get("vuln_type")}
 Reason: {crash_data.get("reason")}
 Args: {crash_data.get("args")}
 
-Return the ENTIRE updated {self.lang_name} source code file. Do not include markdown blocks, explanations, or backticks."""
+        Return the ENTIRE updated {self.lang_name} source code file.
+IMPORTANT: Return ONLY valid, raw {self.lang_name} code starting directly on Line 1. Do NOT include markdown blocks, code fences (like ```), or explanations."""
 
-        text = self._generate(prompt, system=f"You are a senior {self.lang_name} developer. Output only the {self.lang_name} code. No markup, no markdown formatting, no backticks, no comments outside {self.lang_name}.")
-        for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
-            if text.lower().startswith(prefix):
-                text = text[len(prefix):]
-                break
-        if text.endswith("```"):
-            text = text[:-3]
-        return text.strip()
+        text = self._generate(prompt, system=f"You are a senior {self.lang_name} developer. Output only the raw {self.lang_name} code. No markup, no markdown formatting, no backticks, no comments outside {self.lang_name}.")
+        from mutagen.engines.output_parser import strip_code_fences
+        return strip_code_fences(text)
 
     def refine_patch(self, source_code: str, bad_patch: str, error_message: str, crash_data: dict, debug: bool = False) -> str:
         import sys
@@ -271,16 +267,12 @@ FAILURE DETAILS:
 Vulnerability: {crash_data.get("vuln_type")}
 Args: {crash_data.get("args")}
 
-Return the ENTIRE corrected {self.lang_name} source code file. Do not include markdown blocks, explanations, or backticks."""
+        Return the ENTIRE corrected {self.lang_name} source code file, grounded in the ORIGINAL CODE baseline while fixing the reported failure details.
+IMPORTANT: Return ONLY valid, raw {self.lang_name} code starting directly on Line 1. Do NOT include markdown blocks, code fences (like ```), or explanations."""
 
-        text = self._generate(prompt, system=f"You are a senior {self.lang_name} developer. Output only the corrected {self.lang_name} code. No markup, no markdown formatting, no backticks, no comments outside {self.lang_name}.")
-        for prefix in (f"```{self.lang_ext}", "```rust", "```c", "```"):
-            if text.lower().startswith(prefix):
-                text = text[len(prefix):]
-                break
-        if text.endswith("```"):
-            text = text[:-3]
-        return text.strip()
+        text = self._generate(prompt, system=f"You are a senior {self.lang_name} developer. Output only the corrected raw {self.lang_name} code. No markup, no markdown formatting, no backticks, no comments outside {self.lang_name}.")
+        from mutagen.engines.output_parser import strip_code_fences
+        return strip_code_fences(text)
 
     def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
         prompt = f"""Write a Python 3 script replicating the crash in '{exe_path}' (delivery via '{delivery_mode}').

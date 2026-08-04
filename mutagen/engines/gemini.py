@@ -349,9 +349,7 @@ CRASH TYPE:
 
 Your task is to securely patch the vulnerability.
 Provide the ENTIRE updated {self.lang_name} source code file that fixes the issue.
-DO NOT use markdown formatting outside of the code block.
-Return ONLY the raw {self.lang_name} code. DO NOT wrap it in ```{self.lang_ext} and ```.
-If you must use markdown, the parser will try to strip it, but please try to return just the code."""
+IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown formatting, markdown code fences (like ```), or conversational preamble/explanations. Output raw source code starting directly on Line 1."""
 
         models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"])
         response = None
@@ -386,15 +384,8 @@ If you must use markdown, the parser will try to strip it, but please try to ret
         if response is None or response.text is None:
             return ""
 
-        text = response.text.strip()
-        for prefix in (f"```{self.lang_ext}", "```python", "```rust", "```c", "```"):
-            if text.lower().startswith(prefix):
-                text = text[len(prefix):]
-                break
-        if text.endswith("```"):
-            text = text[:-3]
-
-        return text.strip()
+        from mutagen.engines.output_parser import strip_code_fences
+        return strip_code_fences(response.text)
 
     def refine_patch(self, source_code: str, bad_patch: str, error_message: str, crash_data: dict, debug: bool = False) -> str:
         import sys
@@ -427,10 +418,8 @@ FAILURE DETAILS:
 {error_message}
 
 Please analyze the failure details and correct the patch code.
-Provide the ENTIRE corrected {self.lang_name} source code file.
-DO NOT use markdown formatting outside of the code block.
-Return ONLY the raw {self.lang_name} code. DO NOT wrap it in ```{self.lang_ext} and ```.
-If you must use markdown, the parser will try to strip it, but please try to return just the code."""
+Provide the ENTIRE corrected {self.lang_name} source code file, grounded in the ORIGINAL SOURCE CODE baseline while fixing the reported failure details.
+IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown formatting, markdown code fences (like ```), or conversational preamble/explanations. Output raw source code starting directly on Line 1."""
 
         models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"])
         response = None
@@ -465,15 +454,8 @@ If you must use markdown, the parser will try to strip it, but please try to ret
         if response is None or response.text is None:
             return ""
 
-        text = response.text.strip()
-        for prefix in (f"```{self.lang_ext}", "```python", "```rust", "```c", "```"):
-            if text.lower().startswith(prefix):
-                text = text[len(prefix):]
-                break
-        if text.endswith("```"):
-            text = text[:-3]
-
-        return text.strip()
+        from mutagen.engines.output_parser import strip_code_fences
+        return strip_code_fences(response.text)
 
     def generate_exploit(self, source_code: str, crash_data: dict, exe_path: str, delivery_mode: str, debug: bool = False) -> str:
         prompt = f"""You are a Senior Security QA Engineer writing a regression test.

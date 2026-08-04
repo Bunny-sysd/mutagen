@@ -565,7 +565,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     <div id="dashboard-tab" class="tab-content active">
       <div class="stats">
         <div class="stat-card info"><div class="value">{total_tested}</div><div class="label">Payloads Tested</div></div>
-        <div class="stat-card danger"><div class="value">{len(crashes)}</div><div class="label">Crashes Found</div></div>
+        <div class="stat-card danger"><div class="value">{total_crashes_count}</div><div class="label">Crashes Found</div></div>
         <div class="stat-card warn"><div class="value">{crash_rate:.0f}%</div><div class="label">Crash Rate</div></div>
         <div class="stat-card success"><div class="value">{len(vuln_types)}</div><div class="label">Vuln Types</div></div>
       </div>

@@ -172,17 +172,24 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 else:
                     input_bytes = b"A" * 64
 
+                file_args = list(args) if args else []
+                extension = ".bin"
+                for arg in file_args:
+                    for ext in [".png", ".jpg", ".gif", ".pdf", ".txt", ".json", ".xml", ".dat"]:
+                        if arg.lower().endswith(ext):
+                            extension = ext
+                            break
+
                 # Determine temporary directory for host or docker sandbox
                 exe_dir = os.path.dirname(os.path.abspath(exe_path)) if os.path.exists(exe_path) else os.getcwd()
                 import uuid
-                temp_filename = f"mutagen_payload_{uuid.uuid4().hex[:8]}.bin"
+                temp_filename = f"mutagen_payload_{uuid.uuid4().hex[:8]}{extension}"
                 temp_file_path = os.path.join(exe_dir, temp_filename)
 
                 try:
                     with open(temp_file_path, "wb") as f:
                         f.write(input_bytes)
 
-                    file_args = list(args) if args else []
                     target_file_param = temp_filename if (sandbox == "docker" and _check_docker_functional()) else temp_file_path
                     if not file_args:
                         file_args = [target_file_param]

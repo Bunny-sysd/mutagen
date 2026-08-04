@@ -236,6 +236,10 @@ RULES:
                         args = ["A" * 64]
                     else: # stdin, tcp, http
                         input_data = "A" * 64
+                elif context.delivery_mode == "file" and (not args or len(args) == 0):
+                    ext = ".png" if "png" in context.target_path.lower() else ".bin"
+                    args = [f"payload_poc{ext}"]
+                    context.logs.append(f"[PayloadSynthesizerAgent] Info: Auto-populated missing args filename for file delivery mode.")
 
                 crash_payload = CrashPayload(
                     args=args,

@@ -121,3 +121,55 @@ def parse_payloads(raw: str) -> list[dict]:
     """
     items = extract_json_array(raw)
     return validate_payload_list(items)
+
+
+def strip_code_fences(raw: str) -> str:
+    """
+    Robustly strip markdown code fences, language identifiers, and preamble/postamble text
+    from raw LLM code outputs.
+
+    Handles:
+    - Standard markdown fences: ```c ... ```, ```cpp ... ```, ```rust ... ```, ```python ... ```
+    - Preamble text before ``` or postamble text after ```
+    - Unclosed opening fences: ```c ... (end of string)
+    - Indented code fences
+    """
+    if not raw or not raw.strip():
+        return ""
+
+    text = raw.strip()
+
+    # Strategy 1: Match code inside triple backtick block with optional language specifier
+    # e.g., optional preamble ... ```c\nCODE\n``` ... optional postamble
+    fence_pattern = r"```(?:[a-zA-Z0-9_+-]+)?\s*\n?([\s\S]*?)(?:```|$)"
+    matches = list(re.finditer(fence_pattern, text))
+
+    if matches:
+        # Pick the largest code block if multiple exist
+        best_code = max(matches, key=lambda m: len(m.group(1).strip())).group(1)
+        cleaned = best_code.strip()
+        if cleaned:
+            return cleaned
+
+    # Strategy 2: Line-by-line cleanup if no backtick matches (or fallback)
+    lines = text.splitlines()
+    filtered_lines = []
+    in_fence = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        filtered_lines.append(line)
+
+    result = "\n".join(filtered_lines).strip()
+
+    # Final cleanup of any lingering isolated backticks
+    if result.startswith("```"):
+        result = re.sub(r"^```[a-zA-Z0-9_+-]*\s*\n?", "", result)
+    if result.endswith("```"):
+        result = re.sub(r"\n?```\s*$", "", result)
+
+    return result.strip()
+
