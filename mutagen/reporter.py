@@ -73,6 +73,10 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     total_crashes_count = len(actual_crashes) if not static_only else 0
     crash_rate_str = f"{(total_crashes_count / total_tested * 100):.1f}%" if (total_tested and not static_only) else "0%"
 
+    container_ids = [c.get("container_id") for c in crashes if c.get("container_id")]
+    container_images = [c.get("container_image") for c in crashes if c.get("container_image")]
+    container_digests = [c.get("container_image_digest") for c in crashes if c.get("container_image_digest")]
+
     report = {
         "tool": f"Mutagen v{_mutagen_version}",
         "target": target_name,
@@ -82,6 +86,14 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         "sandboxed": sandboxed,
         "user_confirmed_unsandboxed": user_confirmed_unsandboxed,
         "docker_available": docker_available,
+        "sandbox_details": {
+            "sandboxed": sandboxed,
+            "user_confirmed_unsandboxed": user_confirmed_unsandboxed,
+            "docker_available": docker_available,
+            "container_ids": list(set(container_ids)),
+            "image": container_images[0] if container_images else "",
+            "image_digest": container_digests[0] if container_digests else "",
+        },
         "timestamp": timestamp,
         "total_payloads_tested": total_tested,
         "total_crashes_found": total_crashes_count,

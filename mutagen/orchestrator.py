@@ -157,6 +157,8 @@ class AgentOrchestrator:
 
         self.supervisor_agent.delivery_mode = active_mode
         self.validator_agent.delivery_mode = active_mode
+        self.supervisor_agent.sandbox = "docker" if self.context.sandboxed else "none"
+        self.validator_agent.sandbox = "docker" if self.context.sandboxed else "none"
 
         console.print(Panel(
             f"[bold yellow]PHASE 2/4 [50%]: PAYLOAD SYNTHESIS[/bold yellow]\n"

@@ -19,6 +19,9 @@ class CrashPayload(BaseModel):
     crash_type: str | None = None
     stdout: str | None = None
     stderr: str | None = None
+    container_id: str | None = None
+    container_image: str | None = None
+    container_image_digest: str | None = None
 
     @property
     def payload_bytes(self) -> bytes:

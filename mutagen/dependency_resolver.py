@@ -43,30 +43,61 @@ def detect_build_system(target_dir: str) -> str | None:
             return "dotnet"
     return None
 
-def build_with_native_tool(build_system: str, target_dir: str) -> str | None:
+def _select_best_binary(candidates: list[str], target_hint: str = "") -> str | None:
+    """Selects the best executable candidate from build artifacts based on target name heuristics."""
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    hint_stem = ""
+    if target_hint:
+        hint_stem = os.path.splitext(os.path.basename(target_hint))[0].lower()
+
+    scored = []
+    for cand in candidates:
+        cand_name = os.path.splitext(os.path.basename(cand))[0].lower()
+        score = 0
+        if hint_stem:
+            if cand_name == hint_stem:
+                score += 100
+            elif hint_stem in cand_name or cand_name in hint_stem:
+                score += 50
+        if "test" in cand_name and "valid" not in cand_name:
+            score += 20
+        elif "valid" in cand_name or "check" in cand_name:
+            score -= 20
+        scored.append((score, cand))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored[0][1]
+
+def build_with_native_tool(build_system: str, target_dir: str, target_hint: str = "") -> str | None:
     """Invokes native build tools to build a project and returns the output binary path if successful."""
     console.print(f"[cyan]  [+] Native build system detected: '{build_system}'. Building project...[/cyan]")
     env = os.environ.copy()
 
     try:
+        candidates = []
         if build_system == "cmake":
             build_dir = os.path.join(target_dir, "build")
             subprocess.run(["cmake", "-B", build_dir, "-S", target_dir], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
             subprocess.run(["cmake", "--build", build_dir], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
-            # Find built binary
             for root, _, files in os.walk(build_dir):
                 for f in files:
                     if not f.endswith((".o", ".obj", ".a", ".lib", ".so", ".dll", ".dylib", ".cmake")):
                         path = os.path.join(root, f)
                         if os.access(path, os.X_OK) or f.endswith(".exe"):
-                            return path
+                            candidates.append(path)
+            return _select_best_binary(candidates, target_hint)
 
         elif build_system == "make":
             subprocess.run(["make"], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
             for f in os.listdir(target_dir):
                 path = os.path.join(target_dir, f)
                 if os.path.isfile(path) and (os.access(path, os.X_OK) or f.endswith(".exe")) and not f.endswith((".c", ".cpp", ".o", ".h", ".md")):
-                    return path
+                    candidates.append(path)
+            return _select_best_binary(candidates, target_hint)
 
         elif build_system == "cargo":
             subprocess.run(["cargo", "build"], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
@@ -75,7 +106,8 @@ def build_with_native_tool(build_system: str, target_dir: str) -> str | None:
                 for f in os.listdir(target_out):
                     path = os.path.join(target_out, f)
                     if os.path.isfile(path) and (os.access(path, os.X_OK) or f.endswith(".exe")) and not f.endswith((".d", ".rlib")):
-                        return path
+                        candidates.append(path)
+            return _select_best_binary(candidates, target_hint)
 
         elif build_system == "go":
             out_bin = os.path.join(target_dir, "app.exe" if os.name == 'nt' else "app.out")
@@ -89,7 +121,8 @@ def build_with_native_tool(build_system: str, target_dir: str) -> str | None:
                 for root, _, files in os.walk(bin_dir):
                     for f in files:
                         if f.endswith(".exe") or (os.access(os.path.join(root, f), os.X_OK) and not f.endswith((".dll", ".json"))):
-                            return os.path.join(root, f)
+                            candidates.append(os.path.join(root, f))
+            return _select_best_binary(candidates, target_hint)
     except Exception as e:
         console.print(f"[yellow]  [!] Native build system '{build_system}' failed or missing: {e}. Falling back to direct compilation.[/yellow]")
 

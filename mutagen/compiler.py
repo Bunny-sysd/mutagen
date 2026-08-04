@@ -140,7 +140,7 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
 
     build_sys = detect_build_system(target_dir)
     if build_sys and not coverage:
-        native_out = build_with_native_tool(build_sys, target_dir)
+        native_out = build_with_native_tool(build_sys, target_dir, target_hint=source_path)
         if native_out and os.path.exists(native_out):
             return native_out
 

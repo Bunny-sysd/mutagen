@@ -7,11 +7,12 @@ from mutagen.state import ProgramContext
 
 
 class FuzzingSupervisorAgent(BaseAgent):
-    def __init__(self, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, compiler_path: str = "gcc", delivery_mode: str = "args", api_key: str = None, execution_timeout: int = DEFAULT_EXEC_TIMEOUT):
+    def __init__(self, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, compiler_path: str = "gcc", delivery_mode: str = "args", api_key: str = None, execution_timeout: int = DEFAULT_EXEC_TIMEOUT, sandbox: str = "none"):
         super().__init__("Fuzzing Supervisor Agent", model_provider, model_name, api_key)
         self.compiler_path = compiler_path
         self.delivery_mode = delivery_mode
         self.execution_timeout = execution_timeout
+        self.sandbox = sandbox
 
     async def process(self, context: ProgramContext) -> ProgramContext:
         context.logs.append("[FuzzingSupervisorAgent] Compiling target file...")
@@ -25,7 +26,11 @@ class FuzzingSupervisorAgent(BaseAgent):
             return context
 
         # 2. Run synthesized payloads against the compiled target
-        context.logs.append(f"[FuzzingSupervisorAgent] Executing {len(context.active_payloads)} payloads using delivery mode: {self.delivery_mode}...")
+        current_sandbox = getattr(self, "sandbox", "none")
+        if current_sandbox == "none" and context.sandboxed:
+            current_sandbox = "docker"
+
+        context.logs.append(f"[FuzzingSupervisorAgent] Executing {len(context.active_payloads)} payloads using delivery mode: {self.delivery_mode} (Sandbox: {current_sandbox})...")
         for payload in context.active_payloads:
             # For stdin mode, ensure the payload string is passed as input_data if args is set but input_data is empty
             input_data = payload.input_data
@@ -44,13 +49,17 @@ class FuzzingSupervisorAgent(BaseAgent):
                 args=payload.args,
                 input_data=input_data,
                 delivery_mode=self.delivery_mode,
-                timeout=self.execution_timeout
+                timeout=self.execution_timeout,
+                sandbox=current_sandbox
             )
 
-            # Map execution results
+            # Map execution results & verifiable container metadata
             payload.exit_code = result.get("return_code")
             payload.stdout = result.get("stdout", "")
             payload.stderr = result.get("stderr", "")
+            payload.container_id = result.get("container_id", "")
+            payload.container_image = result.get("container_image", "")
+            payload.container_image_digest = result.get("container_image_digest", "")
 
             # If WDAC/AppLocker blocked, result might contain a DELIVERY_ERROR:
             exec_err = result.get("crash_type", "")

@@ -86,14 +86,31 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         run_cmd = [sys.executable, exe_path]
     else:
         run_cmd = [exe_path]
+
+    container_id = ""
+    container_name = ""
+    image = ""
+    image_digest = ""
+
     if sandbox != "none" and _check_docker_functional():
+        import uuid
         abs_exe_path = os.path.abspath(exe_path)
         exe_dir = os.path.dirname(abs_exe_path)
         exe_name = os.path.basename(abs_exe_path)
         image = os.environ.get("MUTAGEN_SANDBOX_IMAGE", "ubuntu:latest")
 
-        docker_args = [
-            "docker", "run", "--rm", "-i",
+        try:
+            inspect_img = subprocess.run(["docker", "inspect", "--format", "{{index .RepoDigests 0}}", image], capture_output=True, text=True, timeout=5)
+            if inspect_img.returncode == 0 and inspect_img.stdout.strip():
+                image_digest = inspect_img.stdout.strip()
+        except Exception:
+            pass
+
+        container_name = f"mutagen_sandbox_{uuid.uuid4().hex[:8]}"
+        create_cmd = [
+            "docker", "create",
+            "--name", container_name,
+            "-i",
             f"--memory={DOCKER_MEMORY_LIMIT}",
             f"--cpus={DOCKER_CPU_LIMIT}",
             "-v", f"{exe_dir}:/target:ro",
@@ -102,12 +119,18 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
 
         if delivery_mode.startswith("tcp:"):
             port = int(delivery_mode.split(":")[1])
-            docker_args.extend(["-p", f"{port}:{port}"])
+            create_cmd.extend(["-p", f"{port}:{port}"])
         else:
-            docker_args.append("--network=none")
+            create_cmd.append("--network=none")
 
-        docker_args.extend([image, f"./{exe_name}"])
-        run_cmd = docker_args
+        create_cmd.extend([image, f"./{exe_name}"])
+
+        create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
+        if create_res.returncode == 0:
+            container_id = create_res.stdout.strip()[:12]
+            run_cmd = ["docker", "start", "-a", "-i", container_name]
+        else:
+            container_name = ""
 
 
     """
@@ -507,21 +530,38 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         crashed = False
                         crash_type = "none"
 
-        return {
+        res_dict = {
             "crashed": crashed,
             "crash_type": crash_type,
             "return_code": result.returncode,
             "stdout": result.stdout[:200] if result.stdout else "",
             "stderr": result.stderr[:200] if result.stderr else "",
             "coverage": coverage,
+            "container_id": container_id,
+            "container_image": image if container_id else "",
+            "container_image_digest": image_digest if container_id else "",
         }
+        if container_name:
+            try:
+                subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True, timeout=5)
+            except Exception:
+                pass
+        return res_dict
 
     except subprocess.TimeoutExpired:
+        if container_name:
+            try:
+                subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True, timeout=5)
+            except Exception:
+                pass
         return {
             "crashed": True,
             "crash_type": "TIMEOUT (possible infinite loop / hang)",
             "return_code": -1,
             "stdout": "",
             "stderr": "Process killed after timeout",
-            "coverage": []
+            "coverage": [],
+            "container_id": container_id,
+            "container_image": image if container_id else "",
+            "container_image_digest": image_digest if container_id else "",
         }

@@ -10,11 +10,12 @@ from mutagen.state import ProgramContext
 
 
 class StructuralValidatorAgent(BaseAgent):
-    def __init__(self, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, compiler_path: str = "gcc", delivery_mode: str = "args", api_key: str = None, execution_timeout: int = DEFAULT_EXEC_TIMEOUT):
+    def __init__(self, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, compiler_path: str = "gcc", delivery_mode: str = "args", api_key: str = None, execution_timeout: int = DEFAULT_EXEC_TIMEOUT, sandbox: str = "none"):
         super().__init__("Structural Validator Agent", model_provider, model_name, api_key)
         self.compiler_path = compiler_path
         self.delivery_mode = delivery_mode
         self.execution_timeout = execution_timeout
+        self.sandbox = sandbox
 
     async def process(self, context: ProgramContext) -> ProgramContext:
         context.logs.append("[StructuralValidatorAgent] Running structural validation checks...")
@@ -72,6 +73,10 @@ class StructuralValidatorAgent(BaseAgent):
                 context.notepad.append("Validator: Verification passed (no active crashes recorded).")
                 return context
 
+            current_sandbox = getattr(self, "sandbox", "none")
+            if current_sandbox == "none" and context.sandboxed:
+                current_sandbox = "docker"
+
             all_secured = True
             for crash in active_crashes:
                 # For stdin mode, ensure the payload string is passed as input_data if args is set but input_data is empty
@@ -91,7 +96,8 @@ class StructuralValidatorAgent(BaseAgent):
                     args=crash.args,
                     input_data=input_data,
                     delivery_mode=self.delivery_mode,
-                    timeout=self.execution_timeout
+                    timeout=self.execution_timeout,
+                    sandbox=current_sandbox
                 )
 
                 # Check if it still crashes using the executor's oracle-resolved crashed flag
