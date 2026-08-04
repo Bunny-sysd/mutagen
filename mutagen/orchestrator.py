@@ -101,6 +101,8 @@ class AgentOrchestrator:
             self.context.sandboxed = True
             self.context.user_confirmed_unsandboxed = False
             self.context.logs.append("[SafetyGate] Docker daemon responsive. Executing in isolated container sandbox.")
+            from mutagen.executor import ensure_docker_image_ready
+            ensure_docker_image_ready()
             return
 
         # Docker is NOT available:

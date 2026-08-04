@@ -668,17 +668,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
     # --- UPFRONT DOCKER IMAGE PULLING -------------------------------------
     if sandbox == "docker" and _check_docker_functional():
-        import subprocess
-        image = os.environ.get("MUTAGEN_SANDBOX_IMAGE", "ubuntu:latest")
-        console.print(f"[cyan]>> Docker sandbox mode active. Pulling image '{image}' upfront to prevent timeouts...[/cyan]")
-        try:
-            res = subprocess.run(["docker", "pull", image], capture_output=True, text=True, timeout=120)
-            if res.returncode == 0:
-                console.print(f"[green]>> Successfully pulled/verified image '{image}'[/green]")
-            else:
-                console.print(f"[yellow][!] Warning: docker pull returned code {res.returncode}: {res.stderr.strip()}[/yellow]")
-        except Exception as e:
-            console.print(f"[yellow][!] Warning: Failed to pull Docker image '{image}': {e}[/yellow]")
+        from mutagen.executor import ensure_docker_image_ready
+        ensure_docker_image_ready()
 
     # Detect language dynamically
     ext = os.path.splitext(source_path)[1].lower()

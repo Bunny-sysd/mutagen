@@ -28,6 +28,57 @@ def _check_docker_functional() -> bool:
         _DOCKER_WARNED = True
     return False
 
+def ensure_docker_image_ready(image: str = None) -> None:
+    """
+    Displays container specifications and tracks Docker sandbox image verification & pulling with a rich progress bar.
+    """
+    if not image:
+        image = os.environ.get("MUTAGEN_SANDBOX_IMAGE", "ubuntu:latest")
+
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+
+    console = Console(force_terminal=True, force_jupyter=False)
+
+    console.print(Panel(
+        f"[bold cyan]🐳 DOCKER SANDBOX SPECIFICATIONS[/bold cyan]\n"
+        f"  [bold white]Image:[/bold white]          [green]{image}[/green]\n"
+        f"  [bold white]Memory Limit:[/bold white]   {DOCKER_MEMORY_LIMIT}\n"
+        f"  [bold white]CPU Limit:[/bold white]      {DOCKER_CPU_LIMIT} Core(s)\n"
+        f"  [bold white]Network Policy:[/bold white] Isolated (`--network=none`)\n"
+        f"  [bold white]Mount Mode:[/bold white]     Read-Only Host Directory (`/target:ro`)",
+        border_style="cyan"
+    ))
+
+    try:
+        with Progress(
+            SpinnerColumn("dots", style="cyan"),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=35, style="blue", complete_style="green"),
+            TimeElapsedColumn(),
+            console=console
+        ) as progress:
+            task = progress.add_task(f"[cyan]Verifying & pulling sandbox image '{image}'...", total=100)
+
+            proc = subprocess.Popen(["docker", "pull", image], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            import time
+            step = 0
+            while proc.poll() is None:
+                time.sleep(0.1)
+                step += 4
+                if step < 90:
+                    progress.update(task, completed=step)
+
+            if proc.returncode == 0:
+                progress.update(task, completed=100, description=f"[bold green]✓ Docker image '{image}' verified & ready[/bold green]")
+            else:
+                stderr_out = proc.stderr.read() if proc.stderr else ""
+                progress.update(task, completed=100, description=f"[yellow]! Pull image warning: {stderr_out.strip()[:60]}[/yellow]")
+    except Exception:
+        pass
+
 def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: str, timeout: int, sandbox: str = "none") -> dict:
     # Coerce input_data to string
     if isinstance(input_data, dict):
