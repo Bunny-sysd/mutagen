@@ -222,19 +222,20 @@ def analyze_source(code: str) -> PreTargetingResult:
     dangerous_func_nodes: dict[str, object] = {}  # func_name → AST node (deduped)
 
     _walk_for_calls(root, code_bytes, source_lines, dangerous_names, findings, dangerous_func_nodes)
+    _ensure_main_included(root, code_bytes, dangerous_func_nodes)
 
     result.findings = findings
 
-    if result.original_line_count <= 1500 or not findings:
-        # For files under 1500 lines, return full source code so complex state machines,
-        # bit-depth transformers, and logic functions (like png_image_finish_read) are preserved.
+    # Populate focused_functions map for extracted dangerous functions (including main)
+    for func_name, func_node in dangerous_func_nodes.items():
+        result.focused_functions[func_name] = _node_text(func_node, code_bytes)
+
+    if result.original_line_count <= 20 or not findings:
+        # For small files (under 20 lines), preserve full source code.
         result.focused_code = code
         result.focused_line_count = result.original_line_count
         result.reduction_percent = 0.0
         return result
-
-    # Also include `main` if it exists (entry point is always relevant)
-    _ensure_main_included(root, code_bytes, dangerous_func_nodes)
 
     # Extract preamble (includes, structs, typedefs, globals)
     preamble = _extract_preamble(root, code_bytes)
