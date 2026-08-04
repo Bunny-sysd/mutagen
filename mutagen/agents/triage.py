@@ -16,43 +16,9 @@ from mutagen.static_analyzer import analyze_source
 def _normalize_finding(item: Any) -> VulnerabilityDetail:
     """
     Normalizes a finding from either LLM JSON dict response or StaticFinding dataclass
-    into a standardized VulnerabilityDetail object without throwing AttributeError.
+    into a standardized VulnerabilityDetail object using state boundary adapters.
     """
-    if isinstance(item, dict):
-        return VulnerabilityDetail(
-            vuln_type=item.get("vuln_type", "Memory Corruption"),
-            cwe=item.get("cwe", "CWE-120"),
-            severity=item.get("severity", "critical"),
-            line_number=int(item.get("line_number", item.get("line", 1))),
-            code_snippet=item.get("code_snippet", item.get("context_snippet", item.get("snippet", ""))),
-            metadata={"reason": item.get("reason", "")}
-        )
-    elif hasattr(item, "call_name") or hasattr(item, "cwe"):
-        call_name = getattr(item, "call_name", getattr(item, "name", "unknown"))
-        cwe = getattr(item, "cwe", "CWE-120")
-        severity = getattr(item, "severity", "medium")
-        line_num = getattr(item, "line", getattr(item, "line_number", 1))
-        snippet = getattr(item, "context_snippet", getattr(item, "code_snippet", getattr(item, "snippet", "")))
-        pattern_type = getattr(item, "pattern_type", "Potential Danger")
-        vuln_type = f"Static Finding ({call_name})" if call_name != "unknown" else f"Static Finding ({pattern_type})"
-
-        return VulnerabilityDetail(
-            vuln_type=vuln_type,
-            cwe=cwe,
-            severity=severity,
-            line_number=line_num,
-            code_snippet=snippet,
-            metadata={"reason": f"Dangerous call '{call_name}' identified by static analyzer"}
-        )
-    else:
-        return VulnerabilityDetail(
-            vuln_type=getattr(item, "vuln_type", "Potential Danger"),
-            cwe=getattr(item, "cwe", "CWE-120"),
-            severity=getattr(item, "severity", "medium"),
-            line_number=getattr(item, "line_number", getattr(item, "line", 1)),
-            code_snippet=getattr(item, "code_snippet", getattr(item, "snippet", "")),
-            metadata={"reason": str(item)}
-        )
+    return VulnerabilityDetail.from_any(item)
 
 
 class TriageResult(BaseModel):
@@ -146,8 +112,7 @@ class TriageAgent(BaseAgent):
 
             vulns = data.get("vulnerabilities", [])
             for item in vulns:
-                detail = _normalize_finding(item)
-                context.vulnerabilities.append(detail)
+                detail = context.add_vulnerability(item)
                 context.logs.append(f"[TriageAgent] Identified {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
                 context.notepad.append(f"Triage: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
 
@@ -160,8 +125,7 @@ class TriageAgent(BaseAgent):
             # Fallback to static analyzer findings if LLM fails
             if pretarget.findings:
                 for finding in pretarget.findings:
-                    detail = _normalize_finding(finding)
-                    context.vulnerabilities.append(detail)
+                    detail = context.add_vulnerability(finding)
                     context.logs.append(f"[TriageAgent Fallback] Identified {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
                     context.notepad.append(f"Triage fallback: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
 

@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class VulnerabilityDetail(BaseModel):
@@ -11,10 +11,56 @@ class VulnerabilityDetail(BaseModel):
     code_snippet: str
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @classmethod
+    def from_any(cls, obj: Any) -> "VulnerabilityDetail":
+        """
+        Universal factory method that coerces dicts, StaticFinding dataclasses, Pydantic objects,
+        or raw strings into a strictly validated VulnerabilityDetail canonical model.
+        Fails loudly with TypeError if obj cannot be converted.
+        """
+        if isinstance(obj, VulnerabilityDetail):
+            return obj
+        if isinstance(obj, dict):
+            return cls(
+                vuln_type=str(obj.get("vuln_type", "Memory Corruption")),
+                cwe=str(obj.get("cwe", "CWE-120")),
+                severity=str(obj.get("severity", "critical")),
+                line_number=int(obj.get("line_number", obj.get("line", 1))),
+                code_snippet=str(obj.get("code_snippet", obj.get("context_snippet", obj.get("snippet", "")))),
+                metadata=dict(obj.get("metadata", {"reason": str(obj.get("reason", ""))}))
+            )
+        if hasattr(obj, "call_name") or hasattr(obj, "cwe"):
+            # StaticFinding dataclass or similar AST object
+            call_name = str(getattr(obj, "call_name", getattr(obj, "name", "unknown")))
+            cwe = str(getattr(obj, "cwe", "CWE-120"))
+            severity = str(getattr(obj, "severity", "medium"))
+            line_num = int(getattr(obj, "line", getattr(obj, "line_number", 1)))
+            snippet = str(getattr(obj, "context_snippet", getattr(obj, "code_snippet", getattr(obj, "snippet", ""))))
+            pattern_type = str(getattr(obj, "pattern_type", "Potential Danger"))
+            vuln_type = f"Static Finding ({call_name})" if call_name != "unknown" else f"Static Finding ({pattern_type})"
+
+            return cls(
+                vuln_type=vuln_type,
+                cwe=cwe,
+                severity=severity,
+                line_number=line_num,
+                code_snippet=snippet,
+                metadata={"reason": f"Dangerous call '{call_name}' identified by static analyzer"}
+            )
+        if hasattr(obj, "dict") and callable(getattr(obj, "dict")):
+            return cls.from_any(obj.dict())
+
+        raise TypeError(
+            f"[StateBoundaryError] Cannot convert object of type '{type(obj).__name__}' to VulnerabilityDetail. "
+            f"Expected dict, StaticFinding, or VulnerabilityDetail. Received: {obj!r}"
+        )
+
+
 class CrashPayload(BaseModel):
     args: list[str] = Field(default_factory=list)
     input_data: str = ""
     raw_bytes_hex: str | None = None
+    reason: str | None = None
     exit_code: int | None = None
     crash_type: str | None = None
     stdout: str | None = None
@@ -22,6 +68,43 @@ class CrashPayload(BaseModel):
     container_id: str | None = None
     container_image: str | None = None
     container_image_digest: str | None = None
+
+    @classmethod
+    def from_any(cls, obj: Any) -> "CrashPayload":
+        """
+        Universal factory method that coerces dicts, strings, bytes, or payload objects
+        into a strictly validated CrashPayload canonical model.
+        Fails loudly with TypeError if obj cannot be converted.
+        """
+        if isinstance(obj, CrashPayload):
+            return obj
+        if isinstance(obj, dict):
+            raw_args = obj.get("args", [])
+            args_list = [str(a) for a in raw_args] if isinstance(raw_args, list) else [str(raw_args)]
+            return cls(
+                args=args_list,
+                input_data=str(obj.get("input_data", "")),
+                raw_bytes_hex=obj.get("raw_bytes_hex"),
+                reason=obj.get("reason"),
+                exit_code=obj.get("exit_code"),
+                crash_type=obj.get("crash_type"),
+                stdout=obj.get("stdout"),
+                stderr=obj.get("stderr"),
+                container_id=obj.get("container_id"),
+                container_image=obj.get("container_image"),
+                container_image_digest=obj.get("container_image_digest")
+            )
+        if isinstance(obj, str):
+            return cls(args=[obj], input_data=obj, reason="Raw string payload")
+        if isinstance(obj, bytes):
+            return cls(args=[], input_data="", raw_bytes_hex=obj.hex(), reason="Raw bytes payload")
+        if hasattr(obj, "dict") and callable(getattr(obj, "dict")):
+            return cls.from_any(obj.dict())
+
+        raise TypeError(
+            f"[StateBoundaryError] Cannot convert object of type '{type(obj).__name__}' to CrashPayload. "
+            f"Expected dict, str, bytes, or CrashPayload. Received: {obj!r}"
+        )
 
     @property
     def payload_bytes(self) -> bytes:
@@ -39,6 +122,15 @@ class CrashPayload(BaseModel):
             except Exception:
                 return self.input_data.encode('utf-8')
         return b""
+
+
+class PatchProposal(BaseModel):
+    patch_id: str = "primary_patch"
+    patched_code: str
+    revision: int = 1
+    verification_status: str = "UNVERIFIED"
+    error_message: str | None = None
+
 
 class ProgramContext(BaseModel):
     target_path: str
@@ -60,3 +152,37 @@ class ProgramContext(BaseModel):
     sandboxed: bool = False
     user_confirmed_unsandboxed: bool = False
     ci_mode: bool = False
+
+    @field_validator("vulnerabilities", mode="before")
+    @classmethod
+    def validate_vulnerabilities(cls, v: Any) -> list[VulnerabilityDetail]:
+        if not isinstance(v, list):
+            raise TypeError(f"[StateBoundaryError] vulnerabilities must be a list, got {type(v).__name__}")
+        return [VulnerabilityDetail.from_any(item) for item in v]
+
+    @field_validator("active_payloads", mode="before")
+    @classmethod
+    def validate_active_payloads(cls, v: Any) -> list[CrashPayload]:
+        if not isinstance(v, list):
+            raise TypeError(f"[StateBoundaryError] active_payloads must be a list, got {type(v).__name__}")
+        return [CrashPayload.from_any(item) for item in v]
+
+    def add_vulnerability(self, item: Any) -> VulnerabilityDetail:
+        """Helper to append and validate a vulnerability detail object to context."""
+        detail = VulnerabilityDetail.from_any(item)
+        self.vulnerabilities.append(detail)
+        return detail
+
+    def add_payload(self, item: Any) -> CrashPayload:
+        """Helper to append and validate a crash payload object to context."""
+        payload = CrashPayload.from_any(item)
+        self.active_payloads.append(payload)
+        return payload
+
+    def get_primary_patch(self) -> str | None:
+        """Returns primary patch code string if available."""
+        return self.proposed_patches.get("primary_patch")
+
+    def set_primary_patch(self, code: str) -> None:
+        """Sets primary patch code string."""
+        self.proposed_patches["primary_patch"] = code

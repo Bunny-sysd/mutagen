@@ -20,7 +20,7 @@ class StructuralValidatorAgent(BaseAgent):
     async def process(self, context: ProgramContext) -> ProgramContext:
         context.logs.append("[StructuralValidatorAgent] Running structural validation checks...")
 
-        patched_code = context.proposed_patches.get("primary_patch")
+        patched_code = context.get_primary_patch()
         if not patched_code:
             context.logs.append("[StructuralValidatorAgent] No proposed patch found to validate.")
             context.verification_status = "REGRESSION_FAILED"

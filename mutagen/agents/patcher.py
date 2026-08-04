@@ -50,7 +50,7 @@ class PatchEngineerAgent(BaseAgent):
         }
 
         # Check if we have a previous bad patch to refine
-        bad_patch = context.proposed_patches.get("primary_patch")
+        bad_patch = context.get_primary_patch()
 
         if bad_patch and context.verification_status != "VERIFIED_SECURE":
             context.logs.append("[PatchEngineerAgent] Refining previous failed patch...")
@@ -77,7 +77,7 @@ class PatchEngineerAgent(BaseAgent):
             )
 
         if patched_code:
-            context.proposed_patches["primary_patch"] = patched_code
+            context.set_primary_patch(patched_code)
             context.logs.append("[PatchEngineerAgent] Proposed patch saved.")
             context.notepad.append(f"PatchEngineerAgent: Proposed secure patch implementation (Revision {len(context.notepad) + 1})")
         else:
