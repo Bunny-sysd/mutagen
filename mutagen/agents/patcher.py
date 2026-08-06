@@ -29,15 +29,13 @@ class PatchEngineerAgent(BaseAgent):
         if context.notepad:
             reasoning += "\nPrevious Swarm Notepad Notes:\n" + "\n".join(f"- {note}" for note in context.notepad)
 
-        # Resolve CWE: prefer the matched triage finding for this crash, fall back to CWE-120
+        # Resolve CWE: use the first specific (non-default) CWE from triage findings, fall back to CWE-120
         matched_cwe = "CWE-120"
         for v in context.vulnerabilities:
-            if matched_cwe != "CWE-120":
-                break
             if v.cwe and v.cwe != "CWE-120":
                 matched_cwe = v.cwe
-            elif v.cwe:
-                matched_cwe = v.cwe
+                break
+
 
         crash_data = {
             "vuln_type": crash.crash_type,

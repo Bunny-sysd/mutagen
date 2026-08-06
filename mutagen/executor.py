@@ -30,7 +30,8 @@ def _check_docker_functional() -> bool:
 
 def ensure_docker_image_ready(image: str = None) -> None:
     """
-    Displays container specifications and tracks Docker sandbox image verification & pulling with a rich progress bar.
+    Displays container specifications and tracks Docker sandbox image verification & pulling
+    with a rich progress bar that parses real `docker pull` layer output for accurate progress.
     """
     if not image:
         image = os.environ.get("MUTAGEN_SANDBOX_IMAGE", "ubuntu:latest")
@@ -61,23 +62,58 @@ def ensure_docker_image_ready(image: str = None) -> None:
         ) as progress:
             task = progress.add_task(f"[cyan]Verifying & pulling sandbox image '{image}'...", total=100)
 
-            proc = subprocess.Popen(["docker", "pull", image], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            # Stream stdout line-by-line to parse real Docker layer progress
+            proc = subprocess.Popen(
+                ["docker", "pull", image],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                bufsize=1  # Line-buffered
+            )
 
-            import time
-            step = 0
-            while proc.poll() is None:
-                time.sleep(0.1)
-                step += 4
-                if step < 90:
-                    progress.update(task, completed=step)
+            layers_seen = set()      # Layer IDs we've encountered
+            layers_done = set()      # Layers that finished (Already exists / Pull complete)
+            last_status = ""
+
+            for line in iter(proc.stdout.readline, ""):
+                line = line.strip()
+                if not line:
+                    continue
+
+                # Docker pull layer lines have format: "<layer_id>: <status>"
+                # e.g. "a1b2c3d4e5f6: Pulling fs layer"
+                #      "a1b2c3d4e5f6: Pull complete"
+                #      "a1b2c3d4e5f6: Already exists"
+                if ": " in line and len(line.split(": ")[0]) >= 8:
+                    parts = line.split(": ", 1)
+                    layer_id = parts[0].strip()
+                    status = parts[1].strip() if len(parts) > 1 else ""
+
+                    layers_seen.add(layer_id)
+                    if status in ("Already exists", "Pull complete"):
+                        layers_done.add(layer_id)
+
+                    last_status = status
+
+                    # Calculate real progress: % of layers completed (reserve last 10% for digest verification)
+                    if layers_seen:
+                        layer_pct = int((len(layers_done) / len(layers_seen)) * 90)
+                        progress.update(task, completed=layer_pct,
+                                        description=f"[cyan]{layer_id[:12]}: {status} ({len(layers_done)}/{len(layers_seen)} layers)[/cyan]")
+                elif "Digest:" in line or "Status:" in line:
+                    progress.update(task, completed=95, description=f"[cyan]{line[:60]}[/cyan]")
+
+            proc.wait()
 
             if proc.returncode == 0:
-                progress.update(task, completed=100, description=f"[bold green]✓ Docker image '{image}' verified & ready[/bold green]")
+                layer_summary = f" ({len(layers_done)} layers)" if layers_done else ""
+                progress.update(task, completed=100,
+                                description=f"[bold green]✓ Docker image '{image}' verified & ready{layer_summary}[/bold green]")
             else:
                 stderr_out = proc.stderr.read() if proc.stderr else ""
-                progress.update(task, completed=100, description=f"[yellow]! Pull image warning: {stderr_out.strip()[:60]}[/yellow]")
+                progress.update(task, completed=100,
+                                description=f"[yellow]! Pull image warning: {stderr_out.strip()[:60]}[/yellow]")
     except Exception:
         pass
+
 
 def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: str, timeout: int, sandbox: str = "none") -> dict:
     # Coerce input_data to string
