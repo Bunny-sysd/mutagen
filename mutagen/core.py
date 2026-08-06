@@ -538,8 +538,19 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         dynamic_crashes = []
         unique_dynamic_crashes = []
+        seen_signatures = set()
         for p in context.active_payloads:
             if p.crash_type is not None:
+                # Resolve vuln_type/cwe from matched vulnerability findings (CrashPayload doesn't carry these)
+                matched_vuln_type = "Memory Corruption"
+                matched_cwe = "CWE-120"
+                matched_severity = "critical"
+                for v in context.vulnerabilities:
+                    matched_vuln_type = v.vuln_type
+                    matched_cwe = v.cwe
+                    matched_severity = v.severity
+                    break
+
                 crash_dict = {
                     "args": p.args,
                     "input_data": p.input_data,
@@ -547,12 +558,16 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     "crash_type": p.crash_type,
                     "stdout": p.stdout,
                     "stderr": p.stderr,
-                    "vuln_type": getattr(p, "vuln_type", "Memory Corruption"),
-                    "cwe": getattr(p, "cwe", "CWE-120"),
-                    "severity": getattr(p, "severity", "critical")
+                    "vuln_type": matched_vuln_type,
+                    "cwe": matched_cwe,
+                    "severity": matched_severity
                 }
                 dynamic_crashes.append(crash_dict)
-                unique_dynamic_crashes.append(crash_dict)
+                sig = _crash_signature(crash_dict)
+                if sig not in seen_signatures:
+                    seen_signatures.add(sig)
+                    unique_dynamic_crashes.append(crash_dict)
+
 
         static_findings = []
         if context.vulnerabilities:
