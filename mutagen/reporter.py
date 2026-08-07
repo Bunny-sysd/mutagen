@@ -61,7 +61,7 @@ VULN_CAPABILITIES = {
     }
 }
 
-def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = "", webhook_url: str = "", webhook_secret: str = "", webhook_headers: list[str] = None, sandboxed: bool = False, user_confirmed_unsandboxed: bool = False, docker_available: bool = False, extra_container_ids: list[str] = None, extra_container_images: list[str] = None, extra_container_digests: list[str] = None):
+def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = "", webhook_url: str = "", webhook_secret: str = "", webhook_headers: list[str] = None, sandboxed: bool = False, user_confirmed_unsandboxed: bool = False, docker_available: bool = False, extra_container_ids: list[str] = None, extra_container_images: list[str] = None, extra_container_digests: list[str] = None, reachability_status: str = "CONFIRMED", reachability_message: str = ""):
     """Save all crash-causing payloads to a JSON report file and generate a premium HTML dashboard."""
     os.makedirs("crashes", exist_ok=True)
 
@@ -93,6 +93,8 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         "sandboxed": sandboxed,
         "user_confirmed_unsandboxed": user_confirmed_unsandboxed,
         "docker_available": docker_available,
+        "reachability_status": reachability_status,
+        "reachability_message": reachability_message,
         "sandbox_details": {
             "sandboxed": sandboxed,
             "user_confirmed_unsandboxed": user_confirmed_unsandboxed,

@@ -40,7 +40,7 @@ class CompilationError(Exception):
     """Exception raised when C compilation fails."""
     pass
 
-def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> str:
+def compile_target(source_path: str, gcc_path: str, coverage: bool = False, vuln_function: str = None) -> str:
     """Compile C/C++ or Rust target file using the provided compiler path."""
     ext = os.path.splitext(source_path)[1].lower()
 
@@ -140,7 +140,7 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False) -> s
 
     build_sys = detect_build_system(target_dir)
     if build_sys and not coverage:
-        native_out = build_with_native_tool(build_sys, target_dir, target_hint=source_path)
+        native_out = build_with_native_tool(build_sys, target_dir, target_hint=source_path, vuln_function=vuln_function)
         if native_out and os.path.exists(native_out):
             return native_out
 

@@ -51,11 +51,13 @@ int main(int argc, char** argv) {
             return subprocess.CompletedProcess(cmd, returncode=0, stdout="OK\n", stderr="")
         elif cmd[0] == "docker" and cmd[1] == "rm":
             return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
-        elif cmd[0] == "gcc":
+        elif cmd[0] in ("gcc", "clang"):
             dummy_exe = tmp_path / ("target_vuln.exe" if os.name == 'nt' else "target_vuln.out")
-            dummy_exe.write_text("binary")
+            dummy_exe.write_text("binary_with_main_function")
             return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
-        return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+        elif cmd[0] in ("nm", "objdump", "readelf", "strings"):
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout="main\nstrcpy\n", stderr="")
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout="main\nstrcpy\n", stderr="")
 
     with patch.dict(os.environ, {"GEMINI_API_KEY": "mock_api_key_123456789"}):
         with patch("mutagen.executor._check_docker_functional", return_value=True):

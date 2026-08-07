@@ -86,7 +86,7 @@ def _select_best_binary(candidates: list[str], target_hint: str = "") -> str | N
         console.print(f"[cyan]  [Target Selection] Found {len(filtered)} candidate binaries: {[os.path.basename(c) for c in filtered]}. Selected best target: '{os.path.basename(selected)}'[/cyan]")
     return selected
 
-def build_with_native_tool(build_system: str, target_dir: str, target_hint: str = "") -> str | None:
+def build_with_native_tool(build_system: str, target_dir: str, target_hint: str = "", vuln_function: str = None) -> str | None:
     """Invokes native build tools to build a project and returns the output binary path if successful."""
     console.print(f"[cyan]  [+] Native build system detected: '{build_system}'. Building project...[/cyan]")
     env = os.environ.copy()
@@ -105,7 +105,9 @@ def build_with_native_tool(build_system: str, target_dir: str, target_hint: str 
                         path = os.path.join(root, f)
                         if os.access(path, os.X_OK) or f.endswith(".exe"):
                             candidates.append(path)
-            return _select_best_binary(candidates, target_hint)
+            from mutagen.reachability_checker import select_best_reachable_binary
+            selected, status = select_best_reachable_binary(candidates, target_hint, vuln_function)
+            return selected
 
         elif build_system == "make":
             subprocess.run(["make"], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
@@ -113,7 +115,9 @@ def build_with_native_tool(build_system: str, target_dir: str, target_hint: str 
                 path = os.path.join(target_dir, f)
                 if os.path.isfile(path) and (os.access(path, os.X_OK) or f.endswith(".exe")) and not f.endswith((".c", ".cpp", ".o", ".h", ".md")):
                     candidates.append(path)
-            return _select_best_binary(candidates, target_hint)
+            from mutagen.reachability_checker import select_best_reachable_binary
+            selected, status = select_best_reachable_binary(candidates, target_hint, vuln_function)
+            return selected
 
         elif build_system == "cargo":
             subprocess.run(["cargo", "build"], capture_output=True, text=True, check=True, cwd=target_dir, env=env)

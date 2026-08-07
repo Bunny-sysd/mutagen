@@ -1,4 +1,5 @@
 
+import os
 from mutagen.agents.base import BaseAgent
 from mutagen.compiler import compile_target
 from mutagen.constants import DEFAULT_EXEC_TIMEOUT, DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER
@@ -12,15 +13,25 @@ class FuzzingSupervisorAgent(BaseAgent):
         self.compiler_path = compiler_path
         self.delivery_mode = delivery_mode
         self.execution_timeout = execution_timeout
-        self.sandbox = sandbox
-
     async def process(self, context: ProgramContext) -> ProgramContext:
         context.logs.append("[FuzzingSupervisorAgent] Compiling target file...")
 
-        # 1. Compile target executable
+        # 1. Extract target function from triage vulnerabilities if available
+        target_vuln_func = None
+        if context.vulnerabilities:
+            v0 = context.vulnerabilities[0]
+            from mutagen.reachability_checker import extract_vulnerable_function_name
+            target_vuln_func = extract_vulnerable_function_name(context.target_path, v0.line_number)
+
         try:
-            exe_path = compile_target(context.target_path, self.compiler_path)
-            context.logs.append(f"[FuzzingSupervisorAgent] Compiled target successfully to: {exe_path}")
+            exe_path = compile_target(context.target_path, self.compiler_path, vuln_function=target_vuln_func)
+            if exe_path and os.path.exists(exe_path):
+                context.logs.append(f"[FuzzingSupervisorAgent] Compiled target successfully to: {exe_path}")
+            else:
+                setattr(context, "reachability_status", "UNREACHABLE_NO_TARGET")
+                setattr(context, "reachability_message", f"Static finding in '{target_vuln_func or 'target'}' could not be dynamically verified: no build target exercises this code path")
+                context.logs.append(f"[FuzzingSupervisorAgent] No build target reaches vulnerable code path '{target_vuln_func}'")
+                return context
         except Exception as e:
             context.logs.append(f"[FuzzingSupervisorAgent] Compilation failed: {e}")
             return context

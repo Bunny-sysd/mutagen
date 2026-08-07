@@ -628,6 +628,8 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         # Generate report for all runs
         has_crashes = len(dynamic_crashes) > 0
+        reach_status = getattr(context, "reachability_status", "CONFIRMED")
+        reach_msg = getattr(context, "reachability_message", "")
         json_file, html_file = save_crash_report(
             crashes, target_name, len(context.active_payloads), patch_code, exploit_code,
             language=patch_ext, profile=profile, static_only=not has_crashes,
@@ -641,12 +643,16 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             extra_container_ids=extra_cids,
             extra_container_images=extra_imgs,
             extra_container_digests=extra_digs,
+            reachability_status=reach_status,
+            reachability_message=reach_msg,
         )
 
         patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""
         exploit_text = f"  Exploit generated:[magenta]{exploit_file}[/magenta]\n" if exploit_file else ""
 
-        if context.verification_status == "VERIFIED_SECURE":
+        if reach_status == "UNREACHABLE_NO_TARGET":
+            verification_text = "  Verification:     [bold yellow]UNCONFIRMED (No build target reaches vulnerable code)[/bold yellow]\n"
+        elif context.verification_status == "VERIFIED_SECURE":
             verification_text = "  Verification:     [bold green]VERIFIED SECURE[/bold green]\n"
         elif context.verification_status == "REGRESSION_FAILED":
             verification_text = "  Verification:     [bold red]FAILED[/bold red]\n"
