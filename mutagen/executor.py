@@ -214,8 +214,15 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
 
         create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
         if create_res.returncode == 0:
-            container_id = create_res.stdout.strip()[:12]
+            raw_stdout = create_res.stdout.strip()
+            container_id = raw_stdout[:12]
             run_cmd = ["docker", "start", "-a", "-i", container_name]
+            try:
+                from rich.console import Console
+                c_out = Console(force_terminal=True, force_jupyter=False)
+                c_out.print(f"[bold cyan]🐳 [Docker Sandbox] Container Created! Raw `docker create` stdout: '{raw_stdout}' | Short ID: '{container_id}'[/bold cyan]")
+            except Exception:
+                pass
         else:
             container_name = ""
 
@@ -629,18 +636,34 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             "container_image_digest": image_digest if container_id else "",
         }
         if container_name:
-            try:
-                subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True, timeout=5)
-            except Exception:
-                pass
+            if os.environ.get("MUTAGEN_KEEP_CONTAINERS") == "1":
+                try:
+                    from rich.console import Console
+                    Console(force_terminal=True, force_jupyter=False).print(f"[bold yellow]🐳 [Docker Sandbox] MUTAGEN_KEEP_CONTAINERS=1: Preserving container '{container_name}' (ID: {container_id}) for manual inspection.[/bold yellow]")
+                except Exception:
+                    pass
+            else:
+                try:
+                    subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True, timeout=5)
+                    from rich.console import Console
+                    Console(force_terminal=True, force_jupyter=False).print(f"[dim cyan]🐳 [Docker Sandbox] Cleaned up container '{container_name}' (ID: {container_id}) via `docker rm -f`.[/dim cyan]")
+                except Exception:
+                    pass
         return res_dict
 
     except subprocess.TimeoutExpired:
         if container_name:
-            try:
-                subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True, timeout=5)
-            except Exception:
-                pass
+            if os.environ.get("MUTAGEN_KEEP_CONTAINERS") == "1":
+                try:
+                    from rich.console import Console
+                    Console(force_terminal=True, force_jupyter=False).print(f"[bold yellow]🐳 [Docker Sandbox] MUTAGEN_KEEP_CONTAINERS=1: Preserving container '{container_name}' (ID: {container_id}) for manual inspection.[/bold yellow]")
+                except Exception:
+                    pass
+            else:
+                try:
+                    subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True, timeout=5)
+                except Exception:
+                    pass
         return {
             "crashed": True,
             "crash_type": "TIMEOUT (possible infinite loop / hang)",
