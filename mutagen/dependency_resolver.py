@@ -45,17 +45,28 @@ def detect_build_system(target_dir: str) -> str | None:
 
 def _select_best_binary(candidates: list[str], target_hint: str = "") -> str | None:
     """Selects the best executable candidate from build artifacts based on target name heuristics."""
-    if not candidates:
+    # Exclude CMake internal artifacts and probe binaries
+    filtered = []
+    for cand in candidates:
+        norm_path = cand.replace("\\", "/").lower()
+        if any(ignored in norm_path for ignored in ["/cmakefiles/", "/cmaketmp/", "compileridc", "compileridcxx"]):
+            continue
+        filtered.append(cand)
+
+    if not filtered:
+        filtered = candidates
+
+    if not filtered:
         return None
-    if len(candidates) == 1:
-        return candidates[0]
+    if len(filtered) == 1:
+        return filtered[0]
 
     hint_stem = ""
     if target_hint:
         hint_stem = os.path.splitext(os.path.basename(target_hint))[0].lower()
 
     scored = []
-    for cand in candidates:
+    for cand in filtered:
         cand_name = os.path.splitext(os.path.basename(cand))[0].lower()
         score = 0
         if hint_stem:
@@ -70,7 +81,10 @@ def _select_best_binary(candidates: list[str], target_hint: str = "") -> str | N
         scored.append((score, cand))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    return scored[0][1]
+    selected = scored[0][1]
+    if len(filtered) > 1:
+        console.print(f"[cyan]  [Target Selection] Found {len(filtered)} candidate binaries: {[os.path.basename(c) for c in filtered]}. Selected best target: '{os.path.basename(selected)}'[/cyan]")
+    return selected
 
 def build_with_native_tool(build_system: str, target_dir: str, target_hint: str = "") -> str | None:
     """Invokes native build tools to build a project and returns the output binary path if successful."""
@@ -83,9 +97,11 @@ def build_with_native_tool(build_system: str, target_dir: str, target_hint: str 
             build_dir = os.path.join(target_dir, "build")
             subprocess.run(["cmake", "-B", build_dir, "-S", target_dir], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
             subprocess.run(["cmake", "--build", build_dir], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
-            for root, _, files in os.walk(build_dir):
+            for root, dirs, files in os.walk(build_dir):
+                # Skip internal CMake directories during traversal
+                dirs[:] = [d for d in dirs if d.lower() not in ("cmakefiles", "cmaketmp", "testing")]
                 for f in files:
-                    if not f.endswith((".o", ".obj", ".a", ".lib", ".so", ".dll", ".dylib", ".cmake")):
+                    if not f.endswith((".o", ".obj", ".a", ".lib", ".so", ".dll", ".dylib", ".cmake", ".txt", ".ninja")):
                         path = os.path.join(root, f)
                         if os.access(path, os.X_OK) or f.endswith(".exe"):
                             candidates.append(path)

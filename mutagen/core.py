@@ -560,7 +560,10 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     "stderr": p.stderr,
                     "vuln_type": matched_vuln_type,
                     "cwe": matched_cwe,
-                    "severity": matched_severity
+                    "severity": matched_severity,
+                    "container_id": getattr(p, "container_id", ""),
+                    "container_image": getattr(p, "container_image", ""),
+                    "container_image_digest": getattr(p, "container_image_digest", ""),
                 }
                 dynamic_crashes.append(crash_dict)
                 sig = _crash_signature(crash_dict)
@@ -588,6 +591,11 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
         crashes = dynamic_crashes if dynamic_crashes else static_findings
         unique_crashes = unique_dynamic_crashes if dynamic_crashes else static_findings
+
+        # Extract container metadata across all payloads (crashing and non-crashing)
+        extra_cids = [getattr(p, "container_id", "") for p in context.active_payloads if getattr(p, "container_id", "")]
+        extra_imgs = [getattr(p, "container_image", "") for p in context.active_payloads if getattr(p, "container_image", "")]
+        extra_digs = [getattr(p, "container_image_digest", "") for p in context.active_payloads if getattr(p, "container_image_digest", "")]
 
         patch_file = ""
         exploit_file = ""
@@ -630,6 +638,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             sandboxed=context.sandboxed,
             user_confirmed_unsandboxed=context.user_confirmed_unsandboxed,
             docker_available=context.docker_available,
+            extra_container_ids=extra_cids,
+            extra_container_images=extra_imgs,
+            extra_container_digests=extra_digs,
         )
 
         patch_text = f"  Patch generated:  [cyan]{patch_file}[/cyan]\n" if patch_file else ""

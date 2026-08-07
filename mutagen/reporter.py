@@ -61,7 +61,7 @@ VULN_CAPABILITIES = {
     }
 }
 
-def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = "", webhook_url: str = "", webhook_secret: str = "", webhook_headers: list[str] = None, sandboxed: bool = False, user_confirmed_unsandboxed: bool = False, docker_available: bool = False):
+def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, patch_code: str = "", exploit_code: str = "", language: str = "c", binary_mode: bool = False, decompilation_info=None, profile: str = "legacy-audit", static_only: bool = False, raw_decompiled_code: str = "", clean_source_code: str = "", webhook_url: str = "", webhook_secret: str = "", webhook_headers: list[str] = None, sandboxed: bool = False, user_confirmed_unsandboxed: bool = False, docker_available: bool = False, extra_container_ids: list[str] = None, extra_container_images: list[str] = None, extra_container_digests: list[str] = None):
     """Save all crash-causing payloads to a JSON report file and generate a premium HTML dashboard."""
     os.makedirs("crashes", exist_ok=True)
 
@@ -76,6 +76,13 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     container_ids = [c.get("container_id") for c in crashes if c.get("container_id")]
     container_images = [c.get("container_image") for c in crashes if c.get("container_image")]
     container_digests = [c.get("container_image_digest") for c in crashes if c.get("container_image_digest")]
+
+    if extra_container_ids:
+        container_ids.extend([cid for cid in extra_container_ids if cid])
+    if extra_container_images:
+        container_images.extend([img for img in extra_container_images if img])
+    if extra_container_digests:
+        container_digests.extend([dig for dig in extra_container_digests if dig])
 
     report = {
         "tool": f"Mutagen v{_mutagen_version}",
