@@ -70,10 +70,69 @@ def extract_vulnerable_function_name(source_path: str, line_number: int) -> str 
     return None
 
 
-def verify_binary_reachability(candidate_binary: str, vuln_function: str, candidate_source: str = None) -> dict:
+def get_expanded_reachability_set(target_path_or_dir: str, vuln_function: str) -> set[str]:
+    """
+    Scans project header/source files to discover macro aliases (#define MACRO ... vuln_function)
+    and parent caller functions, returning an expanded set of target symbols.
+    """
+    clean_func = vuln_function.strip()
+    reachability_set = {clean_func}
+
+    if not target_path_or_dir:
+        return reachability_set
+
+    search_dir = target_path_or_dir if os.path.isdir(target_path_or_dir) else os.path.dirname(target_path_or_dir)
+    if not search_dir or not os.path.exists(search_dir):
+        return reachability_set
+
+    # 1. Macro Alias Resolution (#define ALIAS ... TARGET_FUNC ...)
+    macro_regex = re.compile(r'#\s*define\s+([a-zA-Z_][a-zA-Z0-9_]*)\b')
+    func_def_regex = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_*\s]+\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^;]*$')
+
+    for root, _, files in os.walk(search_dir):
+        if any(ignored in root.lower() for ignored in ["build", "cmakefiles", "cmaketmp"]):
+            continue
+        for file in files:
+            if file.endswith((".h", ".hpp", ".c", ".cpp")):
+                fpath = os.path.join(root, file)
+                try:
+                    with open(fpath, encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+
+                    # Check for macro aliases
+                    for sym in list(reachability_set):
+                        if sym in content:
+                            for line in content.splitlines():
+                                line_str = line.strip()
+                                if line_str.startswith("#define") and sym in line_str:
+                                    match = macro_regex.match(line_str)
+                                    if match:
+                                        alias_name = match.group(1)
+                                        if alias_name != sym:
+                                            reachability_set.add(alias_name)
+
+                            # Scan for caller function definitions in this source file
+                            if file.endswith((".c", ".cpp")):
+                                curr_func = None
+                                for line in content.splitlines():
+                                    line_str = line.strip()
+                                    m_func = func_def_regex.match(line_str)
+                                    if m_func:
+                                        fname = m_func.group(1)
+                                        if fname.lower() not in ("if", "while", "for", "switch", "return", "main", "winmain", "dllmain", "_start"):
+                                            curr_func = fname
+                                    elif curr_func and sym in line_str:
+                                        reachability_set.add(curr_func)
+                except Exception:
+                    pass
+
+    return reachability_set
+
+
+def verify_binary_reachability(candidate_binary: str, vuln_function: str, candidate_source: str = None, target_dir: str = None) -> dict:
     """
     Inspects candidate_binary symbols (via nm, objdump, readelf, or binary strings)
-    and candidate_source (if available) to determine if vuln_function is reachable.
+    and candidate_source/target_dir to determine if vuln_function (or macro alias/caller) is reachable.
 
     Returns dict:
     {
@@ -86,17 +145,20 @@ def verify_binary_reachability(candidate_binary: str, vuln_function: str, candid
         return {"reachable": False, "confidence": "UNCONFIRMED", "reason": "Missing binary or target function name"}
 
     clean_func = vuln_function.strip()
+    search_scope_path = target_dir or (os.path.dirname(candidate_source) if candidate_source else os.path.dirname(candidate_binary))
+    target_symbols = get_expanded_reachability_set(search_scope_path, clean_func)
 
     # 1. Direct Binary Byte/String Read (Fast, 0ms check)
     try:
         with open(candidate_binary, "rb") as f:
             content_bytes = f.read()
-        if clean_func.encode("utf-8") in content_bytes:
-            return {
-                "reachable": True,
-                "confidence": "HIGH",
-                "reason": f"Function signature string '{clean_func}' found in binary image"
-            }
+        for sym in target_symbols:
+            if sym.encode("utf-8") in content_bytes:
+                return {
+                    "reachable": True,
+                    "confidence": "HIGH",
+                    "reason": f"Function/alias symbol '{sym}' found in binary image"
+                }
     except Exception:
         pass
 
@@ -105,12 +167,13 @@ def verify_binary_reachability(candidate_binary: str, vuln_function: str, candid
         try:
             with open(candidate_source, encoding="utf-8", errors="ignore") as f:
                 src_content = f.read()
-            if clean_func in src_content:
-                return {
-                    "reachable": True,
-                    "confidence": "MEDIUM",
-                    "reason": f"Target function '{clean_func}' explicitly called in binary source '{os.path.basename(candidate_source)}'"
-                }
+            for sym in target_symbols:
+                if sym in src_content:
+                    return {
+                        "reachable": True,
+                        "confidence": "MEDIUM",
+                        "reason": f"Function/alias symbol '{sym}' called in binary source '{os.path.basename(candidate_source)}'"
+                    }
         except Exception:
             pass
 
@@ -122,19 +185,20 @@ def verify_binary_reachability(candidate_binary: str, vuln_function: str, candid
         try:
             res = subprocess.run(tool_cmd, capture_output=True, text=True, timeout=1)
             if res.returncode == 0 and res.stdout:
-                if clean_func in res.stdout:
-                    return {
-                        "reachable": True,
-                        "confidence": "HIGH",
-                        "reason": f"Function symbol '{clean_func}' found in binary symbol table via {tool_name}"
-                    }
+                for sym in target_symbols:
+                    if sym in res.stdout:
+                        return {
+                            "reachable": True,
+                            "confidence": "HIGH",
+                            "reason": f"Function/alias symbol '{sym}' found in binary symbol table via {tool_name}"
+                        }
         except Exception:
             pass
 
     return {
         "reachable": False,
         "confidence": "HIGH",
-        "reason": f"Target function '{clean_func}' absent in candidate binary '{os.path.basename(candidate_binary)}' symbol table and source code"
+        "reason": f"Target function '{clean_func}' (and aliases {target_symbols}) absent in candidate binary '{os.path.basename(candidate_binary)}' symbol table and source code"
     }
 
 
@@ -184,7 +248,7 @@ def select_best_reachable_binary(candidates: list[str], target_hint: str = "", v
     for score, cand in scored_candidates:
         cand_stem = os.path.splitext(cand)[0]
         cand_source = cand_stem + ".c" if not cand.endswith((".c", ".cpp")) else cand
-        check_res = verify_binary_reachability(cand, vuln_function, cand_source)
+        check_res = verify_binary_reachability(cand, vuln_function, cand_source, target_dir=target_hint)
         cand_name = os.path.basename(cand)
         if check_res["reachable"]:
             console.print(f"[bold green]  [TargetVerification] Verified candidate binary '{cand_name}' reaches vulnerable function '{vuln_function}' ({check_res['reason']})[/bold green]")
