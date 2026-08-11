@@ -21,6 +21,56 @@ def _normalize_finding(item: Any) -> VulnerabilityDetail:
     return VulnerabilityDetail.from_any(item)
 
 
+def validate_and_sanitize_delivery_mode(source_code: str, requested_mode: str, logs: list[str] = None) -> str:
+    """
+    Globally validates requested_mode against actual I/O primitives found in source_code.
+    If requested_mode has zero supporting I/O primitives in the target codebase,
+    sanitizes and falls back to a verified mode ('file', 'stdin', or 'args') and logs why.
+    """
+    mode = (requested_mode or "args").lower().strip()
+    src_lower = (source_code or "").lower()
+
+    tcp_primitives = [
+        "socket(", "bind(", "listen(", "accept(", "connect(", "recv(", "recvfrom(",
+        "tcplistener", "tcpstream", "net.listen", "net.dial", "socket.socket", "asyncio.open_connection"
+    ]
+    http_primitives = [
+        "http", "flask", "fastapi", "express", "actix-web", "axum", "net/http",
+        "httplib", "mg_start", "microhttpd", "web.app", "router.get", "app.get("
+    ]
+    file_primitives = [
+        "fopen(", "fread(", "open(", "readfile(", "parse_file(", "file.read",
+        "std::fs::", "os.open(", "fs.readfile", "ifstream", "file_get_contents",
+        "png_create_read_struct", "png_init_io", "stbi_load", "image_begin_read"
+    ]
+    stdin_primitives = [
+        "fgets(", "gets(", "read(0,", "scanf(", "cin >>", "sys.stdin",
+        "std::io::stdin", "os.stdin", "readline("
+    ]
+
+    has_tcp = any(p in src_lower for p in tcp_primitives)
+    has_http = any(p in src_lower for p in http_primitives)
+    has_file = any(p in src_lower for p in file_primitives)
+    has_stdin = any(p in src_lower for p in stdin_primitives)
+
+    # 1. Reject TCP/HTTP if zero network primitives exist in target codebase
+    if mode in ("tcp", "http") and not (has_tcp or has_http):
+        fallback = "file" if has_file else ("stdin" if has_stdin else "args")
+        msg = f"[TriageAgent SanityCheck] Requested delivery mode '{mode}' lacks network I/O primitives in target codebase. Correcting to '{fallback}' mode."
+        if logs is not None:
+            logs.append(msg)
+        return fallback
+
+    # 2. Upgrade args/none to file if target contains explicit file I/O primitives
+    if mode in ("args", "none", "") and has_file:
+        msg = "[TriageAgent SanityCheck] Target codebase contains verified file I/O primitives. Upgrading delivery mode to 'file'."
+        if logs is not None:
+            logs.append(msg)
+        return "file"
+
+    return mode if mode in ("args", "stdin", "file", "tcp", "http") else "args"
+
+
 class TriageResult(BaseModel):
     class VulnItem(BaseModel):
         vuln_type: str
@@ -95,18 +145,11 @@ class TriageAgent(BaseAgent):
                 else:
                     data = {"vulnerabilities": [], "suggested_delivery_mode": "args"}
 
-            # Save detected delivery mode
-            detected_mode = data.get("suggested_delivery_mode", "args").lower()
-            if detected_mode in ("args", "stdin", "file", "tcp", "http"):
-                context.delivery_mode = detected_mode
-            else:
-                context.delivery_mode = "args"
-
-            # Heuristic check: if code opens/reads files, auto-upgrade to 'file' mode
-            source_lower = context.source_code.lower()
-            file_indicators = ["fopen(", "fread(", "fscanf(", "readfile(", "parse_file(", "open("]
-            if context.delivery_mode == "args" and any(ind in source_lower for ind in file_indicators):
-                context.delivery_mode = "file"
+            # Save detected delivery mode & apply global I/O primitive validation
+            raw_detected_mode = data.get("suggested_delivery_mode", "args")
+            context.delivery_mode = validate_and_sanitize_delivery_mode(
+                context.source_code, raw_detected_mode, context.logs
+            )
 
             context.logs.append(f"[TriageAgent] Dynamically detected input delivery mode: {context.delivery_mode}")
 

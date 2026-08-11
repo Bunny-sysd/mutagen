@@ -1,12 +1,10 @@
+import glob
 import json
 import os
-import glob
 import subprocess
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import MagicMock, patch
 
 from mutagen.core import run_fuzzer
-from mutagen.executor import _check_docker_functional
 
 
 def test_docker_report_sandbox_details_end_to_end(tmp_path):
@@ -92,7 +90,7 @@ int main(int argc, char** argv) {
                         assert len(report_files) > 0, "Expected crash report JSON file to be generated"
                         latest_report = max(report_files, key=os.path.getctime)
 
-                        with open(latest_report, "r", encoding="utf-8") as f:
+                        with open(latest_report, encoding="utf-8") as f:
                             report_data = json.load(f)
 
                         # 3. Assert sandboxed is True and container_ids is a non-empty list
@@ -109,7 +107,7 @@ int main(int argc, char** argv) {
                         # Confirm docker inspect on valid container ID succeeds vs fabricated ID which fails distinctly
                         valid_inspect = side_effect(["docker", "inspect", cid])
                         assert valid_inspect.returncode == 0
-                        
+
                         fabricated_inspect = side_effect(["docker", "inspect", "fabricated_id"])
                         assert fabricated_inspect.returncode != 0
                         assert "No such object" in fabricated_inspect.stderr

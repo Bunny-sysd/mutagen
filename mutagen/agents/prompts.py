@@ -30,8 +30,9 @@ Do NOT limit your analysis to basic buffer overflows or known function names. An
    - Identify ANY flaw, memory corruption, logic bug, off-by-one, type confusion, bit-depth/format mismatch, unhandled return code, or state machine desynchronization.
 
 4. INPUT DELIVERY MODE:
+   - File reading / parsing (`fopen`, `fread`, `open`, `parse_file`, `fdopen`, `.png`/`.jpg`/`.pdf` file streams) -> "file"
    - Standard input reading (`fgets`, `gets`, `read(0, ...)`, `scanf`, `cin >>`) -> "stdin"
-   - Socket functions (`socket`, `bind`, `listen`, `accept`) -> "tcp"
+   - Socket functions (`socket`, `bind`, `listen`, `accept`, `recv`) -> "tcp"
    - HTTP/Web server libraries -> "http"
    - Otherwise -> "args"
 
@@ -56,6 +57,7 @@ Do NOT limit your analysis to standard checklists. Analyze the target Rust sourc
    - Identify ANY flaw, panic trigger, memory safety violation, resource exhaustion, or logic error.
 
 4. INPUT DELIVERY MODE:
+   - File reading (`std::fs::read`, `File::open`, `BufReader`, file parsing) -> "file"
    - Standard input (`std::io::stdin()`, `read_to_string`) -> "stdin"
    - TCP socket (`TcpListener`, `TcpStream`) -> "tcp"
    - Web routes (`actix-web`, `axum`, `rocket`) -> "http"
@@ -81,6 +83,7 @@ Do NOT limit your analysis to simple keyword matches. Analyze the target Python 
    - Identify ANY vulnerability, command injection, path traversal, SSTI, attribute overwrite, or business logic flaw.
 
 4. INPUT DELIVERY MODE:
+   - File reading (`open()`, `Path.read_bytes()`, file parsing) -> "file"
    - Web framework (`Flask`, `FastAPI`, `Django`, `http.server`) -> "http"
    - Standard input (`sys.stdin`, `input()`) -> "stdin"
    - Socket (`socket.socket`, `asyncio`) -> "tcp"
@@ -106,6 +109,7 @@ Do NOT limit your analysis to basic rules. Analyze the target Go source code by 
    - Identify ANY panic condition, memory flaw, command injection, path traversal, or concurrency bug.
 
 4. INPUT DELIVERY MODE:
+   - File reading (`os.Open`, `os.ReadFile`, `bufio.NewReader(file)`) -> "file"
    - Web/HTTP routes (`net/http`, `gin`, `fiber`, `echo`) -> "http"
    - Standard input (`os.Stdin`, `bufio`) -> "stdin"
    - Socket (`net.Listen`, `net.Dial`) -> "tcp"
@@ -130,6 +134,7 @@ Do NOT limit your analysis to standard lists. Analyze the target Node.js/JS sour
    - Identify ANY prototype pollution, command injection, code evaluation, path traversal, or DoS vulnerability.
 
 4. INPUT DELIVERY MODE:
+   - File reading (`fs.readFile`, `fs.open`, file parsing) -> "file"
    - Web routes (`express`, `fastify`, `koa`, `http.createServer`) -> "http"
    - Standard input (`readline`, `process.stdin`) -> "stdin"
    - Sockets (`net.createServer`, `ws`) -> "tcp"

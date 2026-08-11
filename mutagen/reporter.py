@@ -84,6 +84,10 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
     if extra_container_digests:
         container_digests.extend([dig for dig in extra_container_digests if dig])
 
+    unique_cids = sorted(list(set(container_ids)))
+    img_name = container_images[0] if container_images else ""
+    img_dig = container_digests[0] if container_digests else ""
+
     report = {
         "tool": f"Mutagen v{_mutagen_version}",
         "target": target_name,
@@ -93,15 +97,18 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         "sandboxed": sandboxed,
         "user_confirmed_unsandboxed": user_confirmed_unsandboxed,
         "docker_available": docker_available,
+        "container_ids": unique_cids,
+        "image": img_name,
+        "image_digest": img_dig,
         "reachability_status": reachability_status,
         "reachability_message": reachability_message,
         "sandbox_details": {
             "sandboxed": sandboxed,
             "user_confirmed_unsandboxed": user_confirmed_unsandboxed,
             "docker_available": docker_available,
-            "container_ids": list(set(container_ids)),
-            "image": container_images[0] if container_images else "",
-            "image_digest": container_digests[0] if container_digests else "",
+            "container_ids": unique_cids,
+            "image": img_name,
+            "image_digest": img_dig,
         },
         "timestamp": timestamp,
         "total_payloads_tested": total_tested,

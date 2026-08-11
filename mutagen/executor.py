@@ -38,7 +38,7 @@ def ensure_docker_image_ready(image: str = None) -> None:
 
     from rich.console import Console
     from rich.panel import Panel
-    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
     console = Console(force_terminal=True, force_jupyter=False)
 
@@ -71,7 +71,6 @@ def ensure_docker_image_ready(image: str = None) -> None:
 
             layers_seen = set()      # Layer IDs we've encountered
             layers_done = set()      # Layers that finished (Already exists / Pull complete)
-            last_status = ""
 
             for line in iter(proc.stdout.readline, ""):
                 line = line.strip()
@@ -90,8 +89,6 @@ def ensure_docker_image_ready(image: str = None) -> None:
                     layers_seen.add(layer_id)
                     if status in ("Already exists", "Pull complete"):
                         layers_done.add(layer_id)
-
-                    last_status = status
 
                     # Calculate real progress: % of layers completed (reserve last 10% for digest verification)
                     if layers_seen:
@@ -336,7 +333,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                             os.remove(temp_file_path)
                         except Exception:
                             pass
-            elif delivery_mode.startswith("tcp:"):
+            elif delivery_mode == "tcp" or delivery_mode.startswith("tcp:"):
                 # Convert string representations of escapes to raw bytes
                 if isinstance(input_data, str):
                     try:
@@ -346,7 +343,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 else:
                     input_bytes = input_data or b""
 
-                port = int(delivery_mode.split(":")[1])
+                port = int(delivery_mode.split(":")[1]) if ":" in delivery_mode else 8080
                 import socket
                 import time
                 process = subprocess.Popen(
@@ -379,7 +376,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                             process.communicate(timeout=1)
                         except Exception:
                             pass
-            elif delivery_mode == "http":
+            elif delivery_mode == "http" or delivery_mode.startswith("http:"):
                 import json
                 import time
                 import urllib.parse
@@ -451,7 +448,20 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
 
                 result = subprocess.CompletedProcess(process.args, ret_code, stdout_res, stderr_res)
             else:
-                raise ValueError(f"Unknown delivery mode: {delivery_mode}")
+                try:
+                    from rich.console import Console
+                    Console(force_terminal=True, force_jupyter=False).print(
+                        f"[yellow]⚠️  [Executor Warning] Unrecognized delivery mode '{delivery_mode}'. Executing as 'args' mode.[/yellow]"
+                    )
+                except Exception:
+                    pass
+                result = subprocess.run(
+                    run_cmd + args,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    env=env
+                )
 
             # Ensure outputs are decodable strings for the fuzzing oracle checks
             if hasattr(result, "stdout") and isinstance(result.stdout, bytes):

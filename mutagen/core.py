@@ -409,12 +409,21 @@ def _run_session_fuzzer(
                 target_name = target_name[:-len(ext_to_strip)]
                 break
 
+        session_cids = [c.get("container_id", "") for c in unique_crashes if c.get("container_id")]
+        session_imgs = [c.get("container_image", "") for c in unique_crashes if c.get("container_image")]
+        session_digs = [c.get("container_image_digest", "") for c in unique_crashes if c.get("container_image_digest")]
         json_file, html_file = save_crash_report(
             unique_crashes, target_name, len(sequences),
             "", "",
             language=language,
             binary_mode=binary_mode,
             profile=profile,
+            sandboxed=(sandbox == "docker"),
+            user_confirmed_unsandboxed=(sandbox == "none"),
+            docker_available=_check_docker_functional(),
+            extra_container_ids=session_cids,
+            extra_container_images=session_imgs,
+            extra_container_digests=session_digs,
             webhook_url=webhook_url,
             webhook_secret=webhook_secret,
             webhook_headers=webhook_headers,
@@ -937,6 +946,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             [dummy_crash], os.path.basename(target_src_path), len(payloads), patch_code, "",
             language="c", profile=profile, static_only=False,
             clean_source_code=source_code,
+            sandboxed=(sandbox == "docker"),
+            user_confirmed_unsandboxed=(sandbox == "none"),
+            docker_available=_check_docker_functional(),
         )
 
         summary = Panel(
@@ -1194,6 +1206,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             profile=profile, static_only=True,
             raw_decompiled_code=raw_decompiled_code,
             clean_source_code=source_code,
+            sandboxed=(sandbox == "docker"),
+            user_confirmed_unsandboxed=(sandbox == "none"),
+            docker_available=_check_docker_functional(),
             webhook_url=webhook_url,
             webhook_secret=webhook_secret,
             webhook_headers=webhook_headers
@@ -1313,6 +1328,10 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
     # --- Parallel Phase: fire all payloads concurrently ---
     # Deduplicate payloads before execution and track them globally
     executed_payloads = set()
+    executed_container_ids = []
+    executed_container_images = []
+    executed_container_digests = []
+
     unique_payloads = []
     for p in payloads:
         p_args = p.get("args", [])
@@ -1343,6 +1362,16 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             args = fuzz_result["args"]
             input_data = fuzz_result["input_data"]
 
+            cid = result.get("container_id", "")
+            img = result.get("container_image", "")
+            dig = result.get("container_image_digest", "")
+            if cid and cid not in executed_container_ids:
+                executed_container_ids.append(cid)
+            if img and img not in executed_container_images:
+                executed_container_images.append(img)
+            if dig and dig not in executed_container_digests:
+                executed_container_digests.append(dig)
+
             status = "[bold red]CRASH!!" if result["crashed"] else "[green]OK"
             if delivery_mode == "args":
                 preview = " | ".join(a[:15] for a in args)
@@ -1368,6 +1397,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     "stdout": result.get("stdout", ""),
                     "stderr": result.get("stderr", ""),
                     "retries": 0,
+                    "container_id": cid,
+                    "container_image": img,
+                    "container_image_digest": dig,
                 }
                 sig = _crash_signature(crash_entry)
                 with results_lock:
@@ -1479,6 +1511,16 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
                 result = execute_payload(exe_path, r_args, r_input, delivery_mode, timeout, sandbox)
 
+                r_cid = result.get("container_id", "")
+                r_img = result.get("container_image", "")
+                r_dig = result.get("container_image_digest", "")
+                if r_cid and r_cid not in executed_container_ids:
+                    executed_container_ids.append(r_cid)
+                if r_img and r_img not in executed_container_images:
+                    executed_container_images.append(r_img)
+                if r_dig and r_dig not in executed_container_digests:
+                    executed_container_digests.append(r_dig)
+
                 status = "[bold red]CRASH!!" if result["crashed"] else "[green]OK"
                 if delivery_mode == "args":
                     preview = " | ".join(a[:15] for a in r_args)
@@ -1502,6 +1544,9 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                         "stdout": result.get("stdout", ""),
                         "stderr": result.get("stderr", ""),
                         "retries": retry_attempt,
+                        "container_id": r_cid,
+                        "container_image": r_img,
+                        "container_image_digest": r_dig,
                     }
                     sig = _crash_signature(crash_entry)
                     all_crashes.append(crash_entry)
@@ -1707,6 +1752,12 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 profile=profile, static_only=False,
                 raw_decompiled_code=raw_decompiled_code,
                 clean_source_code=source_code,
+                sandboxed=(sandbox == "docker"),
+                user_confirmed_unsandboxed=(sandbox == "none"),
+                docker_available=_check_docker_functional(),
+                extra_container_ids=executed_container_ids,
+                extra_container_images=executed_container_images,
+                extra_container_digests=executed_container_digests,
                 webhook_url=webhook_url,
                 webhook_secret=webhook_secret,
                 webhook_headers=webhook_headers,
@@ -1872,6 +1923,12 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 crashes, target_name, len(payloads), patch_code, exploit_code,
                 language=patch_ext, profile=profile, static_only=False,
                 raw_decompiled_code="", clean_source_code=source_code,
+                sandboxed=(sandbox == "docker"),
+                user_confirmed_unsandboxed=(sandbox == "none"),
+                docker_available=_check_docker_functional(),
+                extra_container_ids=executed_container_ids,
+                extra_container_images=executed_container_images,
+                extra_container_digests=executed_container_digests,
                 webhook_url=webhook_url,
                 webhook_secret=webhook_secret,
                 webhook_headers=webhook_headers,
