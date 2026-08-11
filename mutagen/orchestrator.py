@@ -86,6 +86,7 @@ class AgentOrchestrator:
           - Interactive TTY mode: Prompts user explicitly to confirm unsandboxed host execution.
         """
         import os
+
         from mutagen.executor import _check_docker_functional
         docker_available = _check_docker_functional()
         self.context.docker_available = docker_available

@@ -1,8 +1,8 @@
-import pytest
 import os
-import sys
-from unittest.mock import patch, MagicMock
-from mutagen.state import ProgramContext
+from unittest.mock import patch
+
+import pytest
+
 from mutagen.reporter import save_crash_report
 
 
@@ -97,7 +97,7 @@ def test_crash_report_contains_sandboxed_metadata(tmp_path):
         assert os.path.exists(html_path)
 
         import json
-        with open(json_path, "r", encoding="utf-8") as f:
+        with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
             assert data["sandboxed"] is True
             assert data["user_confirmed_unsandboxed"] is False

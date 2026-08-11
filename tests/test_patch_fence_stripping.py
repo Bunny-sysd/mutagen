@@ -1,6 +1,5 @@
-import pytest
-from mutagen.engines.output_parser import strip_code_fences
 from mutagen.ast_validator import validate_c_source
+from mutagen.engines.output_parser import strip_code_fences
 
 
 def test_strip_code_fences_clean_code():

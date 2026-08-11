@@ -1,6 +1,5 @@
 import asyncio
 from unittest.mock import MagicMock, patch
-import pytest
 
 from mutagen.agents.triage import TriageAgent, _normalize_finding
 from mutagen.state import ProgramContext, VulnerabilityDetail

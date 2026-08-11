@@ -1,6 +1,6 @@
 import os
-import pytest
-from mutagen.reachability_checker import verify_binary_reachability, select_best_reachable_binary
+
+from mutagen.reachability_checker import select_best_reachable_binary, verify_binary_reachability
 
 
 def test_reachability_checker_libpng_classic_vs_simplified_api(tmp_path):
@@ -48,7 +48,7 @@ int main() {
     # 3. Test selection when both are candidates for low-level vulnerability
     candidates = [str(pngstest_bin), str(pngtest_bin)]
     selected, status = select_best_reachable_binary(candidates, target_hint="pngread.c", vuln_function="png_read_IDAT_data")
-    
+
     assert selected == str(pngtest_bin)
     assert status["reachable"] is True
 

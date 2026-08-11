@@ -1,8 +1,10 @@
-import pytest
 import os
 import subprocess
-from mutagen.executor import execute_payload, _check_docker_functional
+
+import pytest
+
 from mutagen.dependency_resolver import _select_best_binary
+from mutagen.executor import _check_docker_functional, execute_payload
 
 
 def test_binary_selection_prioritizes_target_hint():

@@ -239,9 +239,9 @@ RULES:
                 elif context.delivery_mode == "file" and (not args or len(args) == 0):
                     ext = ".png" if "png" in context.target_path.lower() else ".bin"
                     args = [f"payload_poc{ext}"]
-                    context.logs.append(f"[PayloadSynthesizerAgent] Info: Auto-populated missing args filename for file delivery mode.")
+                    context.logs.append("[PayloadSynthesizerAgent] Info: Auto-populated missing args filename for file delivery mode.")
 
-                crash_payload = context.add_payload({
+                context.add_payload({
                     "args": args,
                     "input_data": input_data,
                     "raw_bytes_hex": raw_bytes_hex,

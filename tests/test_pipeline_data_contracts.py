@@ -1,15 +1,13 @@
 import asyncio
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from mutagen.agents.patcher import PatchEngineerAgent
-from mutagen.agents.supervisor import FuzzingSupervisorAgent
 from mutagen.agents.synthesizer import PayloadSynthesizerAgent
 from mutagen.agents.triage import TriageAgent
-from mutagen.agents.validator import StructuralValidatorAgent
-from mutagen.state import CrashPayload, PatchProposal, ProgramContext, VulnerabilityDetail
+from mutagen.state import CrashPayload, ProgramContext, VulnerabilityDetail
 from mutagen.static_analyzer import StaticFinding
-
 
 # ============================================================================
 # 1. State Model Adapter & Boundary Enforcement Unit Tests

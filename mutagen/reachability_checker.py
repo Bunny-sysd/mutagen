@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+
 from rich.console import Console
 
 console = Console(force_terminal=True, force_jupyter=False)
@@ -29,7 +30,7 @@ def extract_vulnerable_function_name(source_path: str, line_number: int) -> str 
 
             target_line = max(0, line_number - 1)
             if target_line < len(lines):
-                target_bytes_offset = sum(len(l.encode("utf-8")) + 1 for l in lines[:target_line])
+                target_bytes_offset = sum(len(line_str.encode("utf-8")) + 1 for line_str in lines[:target_line])
                 node = tree.root_node.descendant_for_byte_range(target_bytes_offset, target_bytes_offset + 1)
                 curr = node
                 while curr:
@@ -146,8 +147,7 @@ def select_best_reachable_binary(candidates: list[str], target_hint: str = "", v
         return None, {"reachable": False, "reason": "No candidate binaries supplied"}
 
     # Sort candidates by heuristic score first
-    from mutagen.dependency_resolver import _select_best_binary
-    
+
     scored_candidates = []
     hint_stem = os.path.splitext(os.path.basename(target_hint))[0].lower() if target_hint else ""
 
