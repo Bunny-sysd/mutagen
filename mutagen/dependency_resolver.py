@@ -6,6 +6,12 @@ from rich.console import Console
 
 console = Console(force_terminal=True, force_jupyter=False)
 
+SHARED_LIB_PATTERN = re.compile(r"\.(so|dylib)(\.\d+)*$|\.(dll|a|lib|o|obj|cmake|txt|ninja|d|rlib)$", re.IGNORECASE)
+
+def _is_shared_library_or_build_artifact(filename: str) -> bool:
+    """Returns True if the filename represents a shared library, archive, or non-executable build artifact."""
+    return bool(SHARED_LIB_PATTERN.search(filename))
+
 # Common C/C++ header to library flag mapping
 COMMON_HEADER_LIB_MAP = {
     "curl/curl.h": ["-lcurl"],
@@ -101,7 +107,7 @@ def build_with_native_tool(build_system: str, target_dir: str, target_hint: str 
                 # Skip internal CMake directories during traversal
                 dirs[:] = [d for d in dirs if d.lower() not in ("cmakefiles", "cmaketmp", "testing")]
                 for f in files:
-                    if not f.endswith((".o", ".obj", ".a", ".lib", ".so", ".dll", ".dylib", ".cmake", ".txt", ".ninja")):
+                    if not _is_shared_library_or_build_artifact(f):
                         path = os.path.join(root, f)
                         if os.access(path, os.X_OK) or f.endswith(".exe"):
                             candidates.append(path)
