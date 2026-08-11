@@ -30,21 +30,22 @@ int main(int argc, char** argv) {
 }
 """)
 
-    fake_container_id = "a1b2c3d4e5f6"
-    fake_digest = "ubuntu@sha256:9876543210fedcba9876543210fedcba"
+    fake_short_id = "4bf33b9512d7"
+    full_container_hex = "4bf33b9512d704aec8f635e98213b73059438012674e14234057891234567890"
+    fake_digest = "ubuntu@sha256:9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba"
 
     def side_effect(cmd, *args, **kwargs):
         if cmd[0] == "docker" and cmd[1] == "inspect":
             if len(cmd) > 2 and cmd[2] == "--format":
                 return subprocess.CompletedProcess(cmd, returncode=0, stdout=fake_digest + "\n", stderr="")
-            elif len(cmd) > 2 and cmd[2] == fake_container_id:
+            elif len(cmd) > 2 and cmd[2] == fake_short_id:
                 # Docker inspect on valid/existed container ID
-                return subprocess.CompletedProcess(cmd, returncode=0, stdout=json.dumps([{"Id": fake_container_id}]), stderr="")
+                return subprocess.CompletedProcess(cmd, returncode=0, stdout=json.dumps([{"Id": full_container_hex}]), stderr="")
             elif len(cmd) > 2 and "fabricated" in cmd[2]:
                 # Docker inspect on fabricated ID fails distinctly
                 return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="Error: No such object: fabricated_id")
         elif cmd[0] == "docker" and cmd[1] == "create":
-            return subprocess.CompletedProcess(cmd, returncode=0, stdout=fake_container_id + "7890\n", stderr="")
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout=full_container_hex + "\n", stderr="")
         elif cmd[0] == "docker" and cmd[1] == "start":
             return subprocess.CompletedProcess(cmd, returncode=0, stdout="OK\n", stderr="")
         elif cmd[0] == "docker" and cmd[1] == "rm":
@@ -102,7 +103,7 @@ int main(int argc, char** argv) {
 
                         # 4. Take container_ids[0] and inspect it, asserting it returned a valid container ID
                         cid = container_ids[0]
-                        assert cid == fake_container_id
+                        assert cid == fake_short_id
 
                         # Confirm docker inspect on valid container ID succeeds vs fabricated ID which fails distinctly
                         valid_inspect = side_effect(["docker", "inspect", cid])
