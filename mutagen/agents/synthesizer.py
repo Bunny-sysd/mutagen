@@ -21,7 +21,7 @@ class PayloadList(BaseModel):
     payloads: list[PayloadItem]
 
 def robust_json_parse(raw: str) -> dict:
-    """Sanitizes raw LLM output, strips markdown, handles unescaped characters, and uses regex/dict fallbacks."""
+    """Sanitizes raw LLM output, strips markdown, handles unescaped control chars/trailing commas, and uses regex/array fallbacks."""
     if not raw or not raw.strip():
         return {"payloads": [{"args": [], "input_data": "", "raw_bytes_hex": None, "reason": "Fallback due to empty response"}]}
 
@@ -39,6 +39,8 @@ def robust_json_parse(raw: str) -> dict:
         data = json.loads(cleaned)
         if isinstance(data, dict):
             return data
+        if isinstance(data, list):
+            return {"payloads": [x for x in data if isinstance(x, dict)]}
     except Exception:
         pass
 
@@ -47,11 +49,29 @@ def robust_json_parse(raw: str) -> dict:
         data = json.loads(cleaned, strict=False)
         if isinstance(data, dict):
             return data
+        if isinstance(data, list):
+            return {"payloads": [x for x in data if isinstance(x, dict)]}
     except Exception:
         pass
 
-    # Attempt 3: Regex match for outermost JSON object { ... }
-    import re
+    # Attempt 3: Fix common trailing commas before closing braces/brackets
+    fixed_syntax = re.sub(r',\s*([\]}])', r'\1', cleaned)
+    try:
+        data = json.loads(fixed_syntax, strict=False)
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list):
+            return {"payloads": [x for x in data if isinstance(x, dict)]}
+    except Exception:
+        pass
+
+    # Attempt 4: Use centralized output_parser extract_json_array
+    from mutagen.engines.output_parser import extract_json_array
+    extracted_items = extract_json_array(cleaned)
+    if extracted_items:
+        return {"payloads": extracted_items}
+
+    # Attempt 5: Regex match for outermost JSON object { ... }
     match = re.search(r'\{.*\}', cleaned, re.DOTALL)
     if match:
         try:
@@ -164,10 +184,11 @@ RULES:
 1. Provide argument arrays, raw text/hex byte buffers, or structured input data to trigger the crash.
 2. IMPORTANT: Keep all input data and argument strings under 1000 characters. Use short inputs that demonstrate the logic flow.
 3. DO NOT prepend the program/target executable name to the 'args' list.
-4. For 'file' delivery mode, provide raw structured bytes in 'input_data' or as a hex string in 'raw_bytes_hex' (e.g., "41414141...").
-5. For logical vulnerabilities (like command injection), synthesize payloads that execute commands echoing known success strings (e.g., "echo vuln_triggered", "echo exploit_success", or "echo PWNED") or calling system status commands (e.g., "whoami", "id", or "systeminfo").
+4. For 'file' delivery mode, specify 'raw_bytes_hex' as a valid hex-encoded string (e.g. "89504e470d0a1a0a...") or provide short safe ASCII strings in 'input_data'. Always provide 'args': ["overflow_poc.png"] for filename arguments.
+5. Escape all special characters and quotes cleanly inside JSON strings. Do not include raw unescaped newlines inside string literals.
+6. For logical vulnerabilities (like command injection), synthesize payloads that execute commands echoing known success strings (e.g., "echo vuln_triggered", "echo exploit_success", or "echo PWNED") or calling system status commands (e.g., "whoami", "id", or "systeminfo").
 {lang_rules}
-7. Return the results matching the requested JSON schema.
+8. Output MUST be valid JSON adhering strictly to the schema.
 """
 
         try:
