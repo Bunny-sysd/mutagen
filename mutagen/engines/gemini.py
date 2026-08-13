@@ -5,6 +5,7 @@ from google import genai
 from rich.console import Console
 
 from mutagen.constants import (
+    DEFAULT_MODEL_GEMINI,
     GEMINI_HTTP_CONNECT_TIMEOUT,
     GEMINI_HTTP_READ_TIMEOUT,
     GEMINI_HTTP_TIMEOUT,

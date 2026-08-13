@@ -140,3 +140,25 @@ async def test_supervisor_compilation_failure_exception_handling():
         assert res_ctx.reachability_status == "COMPILATION_FAILED"
         assert "gcc not found" in res_ctx.reachability_message
         assert any("Compilation failed" in log for log in res_ctx.logs)
+
+
+def test_gemini_engine_patch_generation_model_resolution():
+    """
+    Ensures GeminiEngine patch methods resolve model lists without NameError.
+    """
+    from unittest.mock import MagicMock, patch
+    from mutagen.engines.gemini import GeminiEngine
+
+    with patch("google.genai.Client"):
+        engine = GeminiEngine(api_key="test_key", model="gemini-2.5-flash")
+        models = engine._get_models(["default_model"])
+        assert "gemini-2.5-flash" in models
+
+        # Mock generate_content
+        mock_resp = MagicMock()
+        mock_resp.text = "int main() { return 0; }"
+        engine.client.models.generate_content.return_value = mock_resp
+
+        patch_res = engine.generate_patch("int main() {}", {"args": ["test"], "vuln_type": "overflow"})
+        assert patch_res == "int main() { return 0; }"
+
