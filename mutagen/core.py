@@ -490,7 +490,7 @@ def _normalize_sequences(raw_payloads) -> list[dict]:
     return sequences
 
 
-def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = "", sandbox: str = "none", coverage: bool = False, webhook_secret: str = "", webhook_headers: list[str] = None, decompiler: str = "ghidra", decompiler_path: str = "", defects4c_url: str = "", defects4c_mount_dir: str = "", mode: str = "pipeline"):
+def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = "", sandbox: str = "none", coverage: bool = False, webhook_secret: str = "", webhook_headers: list[str] = None, decompiler: str = "ghidra", decompiler_path: str = "", defects4c_url: str = "", defects4c_mount_dir: str = "", mode: str = "pipeline", skip_flagged_findings: bool = False):
     """Main fuzzer orchestration function."""
     if mode == "agents":
         import asyncio
@@ -529,6 +529,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         orchestrator.context.is_binary = is_bin_flag
         orchestrator.context.decompiler_used = decompiler_name
         orchestrator.context.architecture = arch_name
+        orchestrator.context.skip_flagged_findings = skip_flagged_findings
 
         # --- UPFRONT SAFETY GATE & DOCKER DETECTION ---
         is_no_sandbox = (sandbox == "none")
@@ -673,6 +674,12 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         else:
             verification_text = "  Verification:     [dim]N/A (No active crashes to verify)[/dim]\n"
 
+        flagged_count = sum(1 for v in static_findings if v.get("is_false_positive_risk") or v.get("confidence") == "LOW" or v.get("verification_status") in ("LIKELY_FALSE_POSITIVE", "UNGROUNDED_FINDING"))
+        if flagged_count > 0:
+            static_finding_text = f"  Static findings:  [magenta]{len(static_findings)}[/magenta] ([yellow]{flagged_count} likely false positive per verification[/yellow])\n"
+        else:
+            static_finding_text = f"  Static findings:  [magenta]{len(static_findings)}[/magenta]\n" if static_findings else ""
+
         if dynamic_crashes:
             total_payloads_cnt = len(context.active_payloads) if context.active_payloads else 1
             calculated_crash_rate = min(100.0, (len(dynamic_crashes) / total_payloads_cnt) * 100)
@@ -681,6 +688,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 f"  Payloads tested:  [cyan]{len(context.active_payloads)}[/cyan]\n"
                 f"  Unique crashes:   [bold red]{len(unique_dynamic_crashes)}[/bold red]\n"
                 f"  Crash rate:       [yellow]{calculated_crash_rate:.0f}%[/yellow]\n"
+                f"{static_finding_text}"
                 f"  JSON report:      [dim]{json_file}[/dim]\n"
                 f"  HTML report:      [yellow]{html_file}[/yellow]\n"
                 f"{patch_text}"
@@ -691,7 +699,6 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                 box=box.HEAVY,
             )
         else:
-            static_finding_text = f"  Static findings:  [magenta]{len(static_findings)}[/magenta]\n" if static_findings else ""
             summary = Panel(
                 f"[bold yellow]FUZZING COMPLETE (Multi-Agent Swarm)[/bold yellow]\n\n"
                 f"  Payloads tested:  [cyan]{len(context.active_payloads)}[/cyan]\n"

@@ -152,19 +152,30 @@ class PayloadSynthesizerAgent(BaseAgent):
             context.logs.append("[PayloadSynthesizerAgent] No vulnerabilities to synthesize payloads for.")
             return context
 
+        candidate_vulns = context.vulnerabilities
+        if getattr(context, "skip_flagged_findings", False):
+            candidate_vulns = [v for v in context.vulnerabilities if not (v.is_false_positive_risk or v.confidence == "LOW" or v.verification_status in ("LIKELY_FALSE_POSITIVE", "UNGROUNDED_FINDING"))]
+            if not candidate_vulns:
+                context.logs.append(f"[PayloadSynthesizerAgent] Skipping payload synthesis: all {len(context.vulnerabilities)} finding(s) flagged as likely false positive / ungrounded (--skip-flagged-findings enabled).")
+                return context
+
         # Query Token-Efficient Vulnerability Intelligence Engine (Single Highest-Impact Signature)
         from mutagen.intelligence import get_token_efficient_signature
         intel_hints = []
-        for v in context.vulnerabilities[:2]:
+        for v in candidate_vulns[:2]:
             intel = get_token_efficient_signature(v.cwe, v.vuln_type)
             hint_str = f"Signature [{intel['selected_cwe']}] (CVSS {intel['cvss_score']} {intel['severity']}): {intel['signature_hint']}"
             intel_hints.append(hint_str)
             context.notepad.append(f"[Intelligence] {hint_str}")
 
-        vuln_descriptions = [
-            f"- {v.vuln_type} at line {v.line_number} ({v.cwe}): {v.metadata.get('reason', '')}"
-            for v in context.vulnerabilities
-        ]
+        vuln_descriptions = []
+        for v in candidate_vulns:
+            v_annot_note = ""
+            if v.is_false_positive_risk or v.confidence == "LOW":
+                v_annot_note = f" [VERIFICATION NOTE: Flagged {v.verification_status} - {v.verification_annotation}]"
+            vuln_descriptions.append(
+                f"- {v.vuln_type} at line {v.line_number} ({v.cwe}){v_annot_note}: {v.metadata.get('reason', '')}"
+            )
 
         joined_vuln_desc = "\n".join(vuln_descriptions)
         lang_rules = get_synthesizer_rules(context.language)

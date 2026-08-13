@@ -9,6 +9,10 @@ class VulnerabilityDetail(BaseModel):
     severity: str
     line_number: int
     code_snippet: str
+    verification_status: str = "UNCONFIRMED_RISK"  # "VERIFIED_SAFE" | "LIKELY_FALSE_POSITIVE" | "UNGROUNDED_FINDING" | "UNCONFIRMED_RISK" | "VERIFIED_RISK"
+    verification_annotation: str = ""
+    confidence: str = "HIGH"                       # "HIGH" | "MEDIUM" | "LOW"
+    is_false_positive_risk: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
@@ -24,15 +28,27 @@ class VulnerabilityDetail(BaseModel):
             meta = dict(obj.get("metadata", {}))
             if "reason" not in meta and "reason" in obj:
                 meta["reason"] = str(obj.get("reason", ""))
-            for k in ("verification_status", "verification_annotation", "confidence", "is_false_positive_risk"):
-                if k in obj:
-                    meta[k] = obj[k]
+            
+            v_stat = obj.get("verification_status", meta.get("verification_status", "UNCONFIRMED_RISK"))
+            v_annot = obj.get("verification_annotation", meta.get("verification_annotation", ""))
+            v_conf = obj.get("confidence", meta.get("confidence", "HIGH"))
+            v_fp = obj.get("is_false_positive_risk", meta.get("is_false_positive_risk", False))
+            
+            meta["verification_status"] = v_stat
+            meta["verification_annotation"] = v_annot
+            meta["confidence"] = v_conf
+            meta["is_false_positive_risk"] = v_fp
+
             return cls(
                 vuln_type=str(obj.get("vuln_type", "Memory Corruption")),
                 cwe=str(obj.get("cwe", "CWE-120")),
                 severity=str(obj.get("severity", "critical")),
                 line_number=int(obj.get("line_number", obj.get("line", 1))),
                 code_snippet=str(obj.get("code_snippet", obj.get("context_snippet", obj.get("snippet", "")))),
+                verification_status=str(v_stat),
+                verification_annotation=str(v_annot),
+                confidence=str(v_conf),
+                is_false_positive_risk=bool(v_fp),
                 metadata=meta
             )
         if hasattr(obj, "call_name") or hasattr(obj, "cwe"):
@@ -158,6 +174,7 @@ class ProgramContext(BaseModel):
     sandboxed: bool = False
     user_confirmed_unsandboxed: bool = False
     ci_mode: bool = False
+    skip_flagged_findings: bool = False
 
     @field_validator("vulnerabilities", mode="before")
     @classmethod

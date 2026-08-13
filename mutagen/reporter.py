@@ -204,18 +204,27 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         safe_pci = html.escape(comp.get("PCI-DSS", ""))
         safe_soc2 = html.escape(comp.get("SOC2", ""))
 
+        v_stat = c.get("verification_status") or c.get("metadata", {}).get("verification_status", "UNCONFIRMED_RISK")
         v_annot = c.get("verification_annotation") or c.get("metadata", {}).get("verification_annotation", "")
+        is_fp = c.get("is_false_positive_risk", c.get("metadata", {}).get("is_false_positive_risk", False)) or v_stat in ("LIKELY_FALSE_POSITIVE", "UNGROUNDED_FINDING")
+        
+        flagged_badge = ""
+        if is_fp or v_stat == "UNGROUNDED_FINDING":
+            badge_text = "UNGROUNDED" if v_stat == "UNGROUNDED_FINDING" else "LIKELY FALSE POSITIVE"
+            flagged_badge = f'<span style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.7rem; margin-left: 0.4rem; font-weight: bold;">{badge_text}</span>'
+            conf_val = min(conf_val, 2)
+            conf_color = "#f59e0b"
+
         safe_v_annot_html = ""
         if v_annot:
-            is_fp = c.get("is_false_positive_risk", c.get("metadata", {}).get("is_false_positive_risk", False))
             badge_color = "#f59e0b" if is_fp else "#3b82f6"
-            safe_v_annot_html = f'<div style="margin-top: 0.4rem; padding: 0.3rem 0.5rem; background: rgba(245, 158, 11, 0.1); border-left: 3px solid {badge_color}; font-size: 0.8rem; color: #fbbf24;"><strong>Type Verification:</strong> {html.escape(v_annot)}</div>'
+            safe_v_annot_html = f'<div style="margin-top: 0.4rem; padding: 0.3rem 0.5rem; background: rgba(245, 158, 11, 0.1); border-left: 3px solid {badge_color}; font-size: 0.8rem; color: #fbbf24;"><strong>Verification Status ({html.escape(v_stat)}):</strong> {html.escape(v_annot)}</div>'
 
         crash_rows += f"""
         <tr>
             <td>{i+1}</td>
             <td><span class="badge {safe_class}">{safe_sev}</span></td>
-            <td>{safe_vuln}</td>
+            <td>{safe_vuln}{flagged_badge}</td>
             <td>{safe_cwe}</td>
             <td><strong style="color: {conf_color}; font-family: 'JetBrains Mono', monospace;">{conf_val}/10</strong></td>
             <td><code>{safe_args}</code></td>

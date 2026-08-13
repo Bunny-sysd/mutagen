@@ -183,3 +183,142 @@ void png_start_read_image(png_structrp png_ptr) {
     assert res_ungrounded.is_false_positive_risk is True
     assert "UNGROUNDED FINDING" in res_ungrounded.annotation
     assert res_ungrounded.confidence == "LOW"
+
+
+import pytest
+from mutagen.state import ProgramContext, VulnerabilityDetail
+from mutagen.agents.synthesizer import PayloadSynthesizerAgent
+
+
+@pytest.mark.asyncio
+async def test_pipeline_orchestration_c_libpng_downgrade(tmp_path):
+    """
+    Verifies that C/libpng findings with widening macro casts are structured with
+    LIKELY_FALSE_POSITIVE and can be skipped with skip_flagged_findings.
+    """
+    png_h = tmp_path / "png.h"
+    png_h.write_text("""
+#ifndef PNG_H
+#define PNG_H
+typedef unsigned long png_size_t;
+#define PNG_ROWBYTES(pixel_depth, width) ((png_size_t)(width) * (png_size_t)(pixel_depth) + 7) >> 3
+#endif
+""")
+    pngread_c = tmp_path / "pngread.c"
+    src_content = """#include "png.h"
+void png_read_row_demo(int width, int pixel_depth) {
+    size_t rowbytes = PNG_ROWBYTES(pixel_depth, width);
+    char *buf = malloc(rowbytes);
+}
+"""
+    pngread_c.write_text(src_content)
+
+    res = verify_finding_type_safety(
+        source_code=src_content,
+        line_number=3,
+        cwe="CWE-190",
+        vuln_type="Heap Buffer Overflow",
+        language="c",
+        target_path=str(pngread_c)
+    )
+
+    detail = VulnerabilityDetail(
+        vuln_type="Heap Buffer Overflow",
+        cwe="CWE-190",
+        severity="high",
+        line_number=3,
+        code_snippet="size_t rowbytes = PNG_ROWBYTES(pixel_depth, width);",
+        verification_status=res.verification_status,
+        verification_annotation=res.annotation,
+        confidence=res.confidence,
+        is_false_positive_risk=res.is_false_positive_risk
+    )
+    assert detail.verification_status == "LIKELY_FALSE_POSITIVE"
+    assert detail.is_false_positive_risk is True
+    assert detail.confidence == "LOW"
+
+    # Test skip_flagged_findings in synthesizer
+    ctx = ProgramContext(
+        target_path=str(pngread_c),
+        language="c",
+        os_platform="linux",
+        source_code=src_content,
+        vulnerabilities=[detail],
+        skip_flagged_findings=True
+    )
+    synth = PayloadSynthesizerAgent(model_provider="ollama")  # mock offline engine
+    updated_ctx = await synth.process(ctx)
+    assert len(updated_ctx.active_payloads) == 0
+    assert any("Skipping payload synthesis" in log for log in updated_ctx.logs)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_orchestration_rust_checked_mul_downgrade():
+    """
+    Verifies that non-C (Rust) findings using checked_mul are structured with
+    LIKELY_FALSE_POSITIVE and confidence LOW at the pipeline data-structure level.
+    """
+    rust_code = """
+fn calc(width: u32, height: u32) -> Option<u32> {
+    width.checked_mul(height)
+}
+"""
+    res = verify_finding_type_safety(
+        source_code=rust_code,
+        line_number=3,
+        cwe="CWE-190",
+        vuln_type="Integer Overflow",
+        language="rust"
+    )
+
+    detail = VulnerabilityDetail.from_any({
+        "vuln_type": "Integer Overflow",
+        "cwe": "CWE-190",
+        "severity": "high",
+        "line_number": 3,
+        "code_snippet": "width.checked_mul(height)",
+        "verification_status": res.verification_status,
+        "verification_annotation": res.annotation,
+        "confidence": res.confidence,
+        "is_false_positive_risk": res.is_false_positive_risk
+    })
+    assert detail.verification_status == "LIKELY_FALSE_POSITIVE"
+    assert detail.is_false_positive_risk is True
+    assert detail.confidence == "LOW"
+    assert "checked_mul" in detail.verification_annotation
+
+
+@pytest.mark.asyncio
+async def test_pipeline_orchestration_go_safe_bits_downgrade():
+    """
+    Verifies that non-C (Go) findings using math/bits are structured with
+    LIKELY_FALSE_POSITIVE across the pipeline.
+    """
+    go_code = """
+package main
+import "math/bits"
+func safeMul(a, b uint32) (uint32, uint32) {
+    return bits.Mul32(a, b)
+}
+"""
+    res = verify_finding_type_safety(
+        source_code=go_code,
+        line_number=5,
+        cwe="CWE-190",
+        vuln_type="Integer Overflow",
+        language="go"
+    )
+    detail = VulnerabilityDetail.from_any({
+        "vuln_type": "Integer Overflow",
+        "cwe": "CWE-190",
+        "severity": "high",
+        "line_number": 5,
+        "code_snippet": "return bits.Mul32(a, b)",
+        "verification_status": res.verification_status,
+        "verification_annotation": res.annotation,
+        "confidence": res.confidence,
+        "is_false_positive_risk": res.is_false_positive_risk
+    })
+    assert detail.verification_status == "LIKELY_FALSE_POSITIVE"
+    assert detail.is_false_positive_risk is True
+    assert detail.confidence == "LOW"
