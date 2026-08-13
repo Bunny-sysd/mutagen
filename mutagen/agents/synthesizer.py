@@ -8,6 +8,7 @@ from mutagen.agents.prompts import get_synthesizer_rules
 from mutagen.constants import DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER, SYNTHESIZER_TEMPERATURE
 from mutagen.engines import get_engine
 from mutagen.poc_finder import get_cwe_poc_intelligence
+from mutagen.binary_repair import repair_binary_payload
 from mutagen.safety import GEMINI_SAFETY_OFF
 from mutagen.state import CrashPayload, ProgramContext
 
@@ -151,14 +152,14 @@ class PayloadSynthesizerAgent(BaseAgent):
             context.logs.append("[PayloadSynthesizerAgent] No vulnerabilities to synthesize payloads for.")
             return context
 
-        # Query GitHub PoC Intelligence for real-world exploit snippets
-        poc_hints = []
+        # Query Token-Efficient Vulnerability Intelligence Engine (Single Highest-Impact Signature)
+        from mutagen.intelligence import get_token_efficient_signature
+        intel_hints = []
         for v in context.vulnerabilities[:2]:
-            intel = get_cwe_poc_intelligence(v.cwe, v.vuln_type)
-            for poc in intel.get("github_pocs", []):
-                poc_str = f"GitHub PoC ({poc['name']}): {poc['url']} - {poc['description']}"
-                poc_hints.append(poc_str)
-                context.notepad.append(f"[Intelligence] {poc_str}")
+            intel = get_token_efficient_signature(v.cwe, v.vuln_type)
+            hint_str = f"Signature [{intel['selected_cwe']}] (CVSS {intel['cvss_score']} {intel['severity']}): {intel['signature_hint']}"
+            intel_hints.append(hint_str)
+            context.notepad.append(f"[Intelligence] {hint_str}")
 
         vuln_descriptions = [
             f"- {v.vuln_type} at line {v.line_number} ({v.cwe}): {v.metadata.get('reason', '')}"
@@ -167,7 +168,7 @@ class PayloadSynthesizerAgent(BaseAgent):
 
         joined_vuln_desc = "\n".join(vuln_descriptions)
         lang_rules = get_synthesizer_rules(context.language)
-        poc_context_str = ("\nReal-World GitHub PoC Intelligence:\n" + "\n".join(poc_hints)) if poc_hints else ""
+        poc_context_str = ("\nVulnerability Signature Intelligence:\n" + "\n".join(intel_hints)) if intel_hints else ""
 
         prompt = f"""You are an elite offensive security researcher and exploit developer.
 Target System Platform: {context.os_platform} (Language: {context.language}, Delivery Mode: {context.delivery_mode})
@@ -261,6 +262,20 @@ RULES:
                     ext = ".png" if "png" in context.target_path.lower() else ".bin"
                     args = [f"payload_poc{ext}"]
                     context.logs.append("[PayloadSynthesizerAgent] Info: Auto-populated missing args filename for file delivery mode.")
+
+                # Dynamic Post-Synthesis Binary & Kernel Header Repair Pass
+                if raw_bytes_hex:
+                    try:
+                        repaired_bytes = repair_binary_payload(bytes.fromhex(raw_bytes_hex), target_hint=context.target_path)
+                        raw_bytes_hex = repaired_bytes.hex()
+                    except Exception:
+                        pass
+                elif input_data and context.delivery_mode == "file":
+                    try:
+                        repaired_bytes = repair_binary_payload(input_data, target_hint=context.target_path)
+                        raw_bytes_hex = repaired_bytes.hex()
+                    except Exception:
+                        pass
 
                 context.add_payload({
                     "args": args,
