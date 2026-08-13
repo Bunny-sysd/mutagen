@@ -28,12 +28,26 @@ class FuzzingSupervisorAgent(BaseAgent):
             exe_path = compile_target(context.target_path, self.compiler_path, vuln_function=target_vuln_func)
             if exe_path and os.path.exists(exe_path):
                 context.logs.append(f"[FuzzingSupervisorAgent] Compiled target successfully to: {exe_path}")
+                from mutagen.reachability_checker import verify_binary_reachability
+                if target_vuln_func:
+                    reach_info = verify_binary_reachability(exe_path, target_vuln_func, target_dir=context.target_path)
+                    if reach_info.get("reachable"):
+                        setattr(context, "reachability_status", "REACHABLE")
+                        setattr(context, "reachability_message", reach_info.get("reason", f"Symbol '{target_vuln_func}' verified in '{os.path.basename(exe_path)}'"))
+                    else:
+                        setattr(context, "reachability_status", "FALLBACK_TARGET")
+                        setattr(context, "reachability_message", f"Internal symbol '{target_vuln_func}' not exported; using top binary '{os.path.basename(exe_path)}'")
+                else:
+                    setattr(context, "reachability_status", "ACTIVE_BINARY")
+                    setattr(context, "reachability_message", f"Target binary '{os.path.basename(exe_path)}'")
             else:
                 setattr(context, "reachability_status", "UNREACHABLE_NO_TARGET")
                 setattr(context, "reachability_message", f"Static finding in '{target_vuln_func or 'target'}' could not be dynamically verified: no build target exercises this code path")
                 context.logs.append(f"[FuzzingSupervisorAgent] No build target reaches vulnerable code path '{target_vuln_func}'")
                 return context
         except Exception as e:
+            setattr(context, "reachability_status", "COMPILATION_FAILED")
+            setattr(context, "reachability_message", f"Compilation error: {e}")
             context.logs.append(f"[FuzzingSupervisorAgent] Compilation failed: {e}")
             return context
 
@@ -73,13 +87,12 @@ class FuzzingSupervisorAgent(BaseAgent):
             payload.container_image = result.get("container_image", "")
             payload.container_image_digest = result.get("container_image_digest", "")
 
-            # If WDAC/AppLocker blocked, result might contain a DELIVERY_ERROR:
+            # Distinguish infrastructure errors from target crashes and negative clean exits
             exec_err = result.get("crash_type", "")
-            if "DELIVERY_ERROR" in str(exec_err) or "blocked" in str(payload.stderr).lower():
-                context.logs.append(f"[FuzzingSupervisorAgent] Execution blocked/error for payload {payload.args}: {exec_err} | stderr: {payload.stderr}")
-
-            # Identify crash type using the executor's oracle-resolved crashed flag
-            if result.get("crashed"):
+            if exec_err == "EXECUTION_ERROR" or "DELIVERY_ERROR" in str(exec_err) or "blocked" in str(payload.stderr).lower():
+                payload.crash_type = "EXECUTION_ERROR"
+                context.logs.append(f"[FuzzingSupervisorAgent] ❌ Infrastructure/Execution error for payload {payload.args}: {payload.stderr.strip()[:100]}")
+            elif result.get("crashed"):
                 payload.crash_type = result.get("crash_type")
                 context.logs.append(f"[FuzzingSupervisorAgent] Vulnerability triggered! Type: {payload.crash_type} for args: {payload.args}")
             else:

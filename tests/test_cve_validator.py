@@ -122,3 +122,82 @@ def test_evaluate_cve_outcomes():
     assert res_c["category"] == "C"
     assert "PIPELINE GAP" in res_c["status"]
     assert res_c["diagnostic"]["payloads_tested"] == 1
+    # Reachability must not be empty parentheses
+    assert res_c["diagnostic"]["reachability_status"] != ""
+    assert res_c["diagnostic"]["reachability_message"] != ""
+
+
+from unittest.mock import patch, MagicMock
+from mutagen.executor import execute_payload
+
+
+def test_docker_infrastructure_error_classified_as_execution_error():
+    """
+    Simulates Docker CLI returning the exact error:
+    'you cannot start and attach multiple containers at once'
+    and confirms it is returned as EXECUTION_ERROR, not silently as a clean run.
+    """
+    with patch("mutagen.executor._check_docker_functional", return_value=True):
+        # Mock subprocess.run for create and start
+        mock_create = MagicMock()
+        mock_create.returncode = 0
+        mock_create.stdout = "a1b2c3d4e5f67890\n"
+
+        mock_start = MagicMock()
+        mock_start.returncode = 1
+        mock_start.stdout = ""
+        mock_start.stderr = "you cannot start and attach multiple containers at once\n"
+
+        def mock_subp_run(cmd, *args, **kwargs):
+            if "create" in cmd:
+                return mock_create
+            elif "start" in cmd:
+                return mock_start
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=mock_subp_run):
+            res = execute_payload(
+                exe_path="target_app",
+                args=["arg1", "arg2"],
+                input_data=None,
+                delivery_mode="args",
+                timeout=5,
+                sandbox="docker"
+            )
+
+            assert res["crashed"] is False
+            assert res["crash_type"] == "EXECUTION_ERROR"
+            assert "you cannot start and attach" in res["stderr"]
+
+
+@pytest.mark.asyncio
+async def test_supervisor_records_execution_error():
+    """
+    Ensures that when execute_payload returns EXECUTION_ERROR, FuzzingSupervisorAgent
+    sets payload.crash_type = 'EXECUTION_ERROR' and does NOT count it as a clean negative.
+    """
+    from mutagen.agents.supervisor import FuzzingSupervisorAgent
+    ctx = ProgramContext(
+        target_path="dummy.c",
+        language="c",
+        os_platform="linux",
+        source_code="int main() { return 0; }",
+        active_payloads=[CrashPayload(args=["test_input"])]
+    )
+
+    with patch("mutagen.agents.supervisor.compile_target", return_value="dummy.exe"):
+        with patch("os.path.exists", return_value=True):
+            with patch("mutagen.agents.supervisor.execute_payload", return_value={
+                "crashed": False,
+                "crash_type": "EXECUTION_ERROR",
+                "return_code": 1,
+                "stdout": "",
+                "stderr": "you cannot start and attach multiple containers at once",
+                "container_id": "a1b2c3d4e5f6"
+            }):
+                supervisor = FuzzingSupervisorAgent()
+                updated_ctx = await supervisor.process(ctx)
+                p0 = updated_ctx.active_payloads[0]
+                assert p0.crash_type == "EXECUTION_ERROR"
+                assert any("Infrastructure/Execution error" in log for log in updated_ctx.logs)
+

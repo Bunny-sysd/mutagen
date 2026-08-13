@@ -287,31 +287,45 @@ def evaluate_cve_validation_outcome(
     # The target IS within the affected version range, but 0 crashes reproduced.
     # Dump full diagnostic telemetry for root cause analysis.
     payload_dump = []
+    exec_errors = 0
     for i, p in enumerate(context.active_payloads):
+        is_err = getattr(p, "crash_type", "") == "EXECUTION_ERROR"
+        if is_err:
+            exec_errors += 1
         payload_dump.append({
             "index": i + 1,
             "args": p.args,
             "input_data_len": len(p.input_data) if p.input_data else 0,
             "raw_bytes_hex_preview": (p.raw_bytes_hex[:64] + "...") if p.raw_bytes_hex else None,
             "exit_code": p.exit_code,
+            "crash_type": p.crash_type,
+            "is_execution_error": is_err,
             "stdout": p.stdout,
             "stderr": p.stderr,
             "reason": p.reason,
             "container_id": getattr(p, "container_id", None)
         })
 
+    reach_status = getattr(context, "reachability_status", "") or "ACTIVE_BINARY"
+    reach_msg = getattr(context, "reachability_message", "") or "Target binary executed"
+
+    summary_note = f"Target version '{detected_version}' IS affected by {cve_id}, but Mutagen pipeline failed to reproduce a crash."
+    if exec_errors > 0:
+        summary_note += f" ({exec_errors} payload(s) failed at the infrastructure/Docker layer)."
+
     return {
         "category": "C",
         "status": "NOT REPRODUCED — PIPELINE GAP",
         "cve_id": cve_id,
         "cve_name": cve_name,
-        "summary": f"Target version '{detected_version}' IS affected by {cve_id}, but Mutagen pipeline failed to reproduce a crash. Diagnostic telemetry captured.",
+        "summary": summary_note,
         "diagnostic": {
             "target_path": context.target_path,
             "delivery_mode": context.delivery_mode,
-            "reachability_status": getattr(context, "reachability_status", "UNKNOWN"),
-            "reachability_message": getattr(context, "reachability_message", ""),
+            "reachability_status": reach_status,
+            "reachability_message": reach_msg,
             "payloads_tested": len(context.active_payloads),
+            "execution_errors": exec_errors,
             "payload_details": payload_dump,
             "logs": context.logs[-20:],
         }
@@ -345,9 +359,11 @@ def render_cve_validation_panel(result: dict[str, Any]) -> None:
         diag_text += f"  - Target Delivery Mode:  {diag.get('delivery_mode')}\n"
         diag_text += f"  - Reachability Status:   {diag.get('reachability_status')} ({diag.get('reachability_message')})\n"
         diag_text += f"  - Payloads Evaluated:    {diag.get('payloads_tested')}\n"
+        if diag.get("execution_errors", 0) > 0:
+            diag_text += f"  - Infrastructure Errors: [bold red]{diag.get('execution_errors')} error(s)[/bold red]\n"
         if diag.get("payload_details"):
             p0 = diag["payload_details"][0]
-            diag_text += f"  - Payload 1 Return Code: {p0.get('exit_code')} | Args: {p0.get('args')}\n"
+            diag_text += f"  - Payload 1 Return Code: {p0.get('exit_code')} | Crash Type: {p0.get('crash_type') or 'None'} | Args: {p0.get('args')}\n"
             if p0.get("stderr"):
                 diag_text += f"  - Payload 1 Stderr:      {p0.get('stderr').strip()[:120]}\n"
 

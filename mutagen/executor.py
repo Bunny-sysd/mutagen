@@ -175,8 +175,9 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
     container_name = ""
     image = ""
     image_digest = ""
+    is_docker_sandbox = (sandbox != "none" and _check_docker_functional())
 
-    if sandbox != "none" and _check_docker_functional():
+    if is_docker_sandbox:
         import uuid
         abs_exe_path = os.path.abspath(exe_path)
         exe_dir = os.path.dirname(abs_exe_path)
@@ -191,51 +192,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             pass
 
         container_name = f"mutagen_sandbox_{uuid.uuid4().hex[:8]}"
-        create_cmd = [
-            "docker", "create",
-            "--name", container_name,
-            "-i",
-            f"--memory={DOCKER_MEMORY_LIMIT}",
-            f"--cpus={DOCKER_CPU_LIMIT}",
-            "-v", f"{exe_dir}:/target:ro",
-            "-w", "/target"
-        ]
 
-        if delivery_mode.startswith("tcp:"):
-            port = int(delivery_mode.split(":")[1])
-            create_cmd.extend(["-p", f"{port}:{port}"])
-        else:
-            create_cmd.append("--network=none")
-
-        create_cmd.extend([image, f"./{exe_name}"])
-
-        create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
-        if create_res.returncode == 0:
-            raw_stdout = create_res.stdout.strip()
-            container_id = raw_stdout[:12]
-            run_cmd = ["docker", "start", "-a", "-i", container_name]
-            try:
-                from rich.console import Console
-                c_out = Console(force_terminal=True, force_jupyter=False)
-                c_out.print(f"[bold cyan][Docker Sandbox] Container Created! Raw `docker create` stdout: '{raw_stdout}' | Short ID: '{container_id}'[/bold cyan]")
-            except Exception:
-                pass
-        else:
-            container_name = ""
-
-
-    """
-    Run the target program with the given arguments and check if it crashes.
-
-    WHAT THIS DOES:
-    - Launches the compiled program as a child process
-    - Passes args as command-line arguments (for args mode) or pipes input (for stdin/tcp mode)
-    - Waits up to timeout seconds for it to finish (timeout = hung process)
-    - Checks the return code:
-        * Return code 0 = program ran fine (no crash)
-        * Return code != 0 = something went wrong
-        * On Windows, access violation = return code -1073741819
-    """
     try:
         env = os.environ.copy()
         workspace_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -247,13 +204,49 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
 
         try:
             if delivery_mode == "args":
-                result = subprocess.run(
-                    run_cmd + args,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,  # Kill if it hangs
-                    env=env
-                )
+                if is_docker_sandbox:
+                    create_cmd = [
+                        "docker", "create",
+                        "--name", container_name,
+                        "-i",
+                        f"--memory={DOCKER_MEMORY_LIMIT}",
+                        f"--cpus={DOCKER_CPU_LIMIT}",
+                        "-v", f"{exe_dir}:/target:ro",
+                        "-w", "/target",
+                        "--network=none",
+                        image,
+                        f"./{exe_name}"
+                    ] + args
+                    create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
+                    if create_res.returncode == 0:
+                        raw_stdout = create_res.stdout.strip()
+                        container_id = raw_stdout[:12]
+                    else:
+                        return {
+                            "crashed": False,
+                            "crash_type": "EXECUTION_ERROR",
+                            "return_code": create_res.returncode,
+                            "stdout": create_res.stdout,
+                            "stderr": f"Docker create failed: {create_res.stderr.strip()}",
+                            "coverage": [],
+                            "container_id": ""
+                        }
+                    result = subprocess.run(
+                        ["docker", "start", "-a", "-i", container_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        env=env
+                    )
+                else:
+                    result = subprocess.run(
+                        run_cmd + args,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        env=env
+                    )
+
             elif delivery_mode == "stdin":
                 # Convert string representations of escapes to raw bytes
                 if isinstance(input_data, str):
@@ -264,19 +257,55 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 else:
                     input_bytes = input_data or b""
 
-                res_proc = subprocess.run(
-                    run_cmd,
-                    input=input_bytes,
-                    capture_output=True,
-                    timeout=timeout,
-                    env=env
-                )
+                if is_docker_sandbox:
+                    create_cmd = [
+                        "docker", "create",
+                        "--name", container_name,
+                        "-i",
+                        f"--memory={DOCKER_MEMORY_LIMIT}",
+                        f"--cpus={DOCKER_CPU_LIMIT}",
+                        "-v", f"{exe_dir}:/target:ro",
+                        "-w", "/target",
+                        "--network=none",
+                        image,
+                        f"./{exe_name}"
+                    ]
+                    create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
+                    if create_res.returncode == 0:
+                        raw_stdout = create_res.stdout.strip()
+                        container_id = raw_stdout[:12]
+                    else:
+                        return {
+                            "crashed": False,
+                            "crash_type": "EXECUTION_ERROR",
+                            "return_code": create_res.returncode,
+                            "stdout": create_res.stdout,
+                            "stderr": f"Docker create failed: {create_res.stderr.strip()}",
+                            "coverage": [],
+                            "container_id": ""
+                        }
+                    res_proc = subprocess.run(
+                        ["docker", "start", "-a", "-i", container_name],
+                        input=input_bytes,
+                        capture_output=True,
+                        timeout=timeout,
+                        env=env
+                    )
+                else:
+                    res_proc = subprocess.run(
+                        run_cmd,
+                        input=input_bytes,
+                        capture_output=True,
+                        timeout=timeout,
+                        env=env
+                    )
                 class _Res:
                     pass
                 result = _Res()
                 result.returncode = res_proc.returncode
                 result.stdout = res_proc.stdout.decode("utf-8", errors="ignore") if isinstance(res_proc.stdout, bytes) else (res_proc.stdout or "")
                 result.stderr = res_proc.stderr.decode("utf-8", errors="ignore") if isinstance(res_proc.stderr, bytes) else (res_proc.stderr or "")
+
             elif delivery_mode == "file":
                 # Convert string / hex payload to raw byte buffer
                 if isinstance(input_data, bytes):
@@ -307,7 +336,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     with open(temp_file_path, "wb") as f:
                         f.write(input_bytes)
 
-                    target_file_param = temp_filename if (sandbox == "docker" and _check_docker_functional()) else temp_file_path
+                    target_file_param = temp_filename if is_docker_sandbox else temp_file_path
                     if not file_args:
                         file_args = [target_file_param]
                     else:
@@ -320,13 +349,48 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         if not replaced:
                             file_args.append(target_file_param)
 
-                    result = subprocess.run(
-                        run_cmd + file_args,
-                        capture_output=True,
-                        text=True,
-                        timeout=timeout,
-                        env=env
-                    )
+                    if is_docker_sandbox:
+                        create_cmd = [
+                            "docker", "create",
+                            "--name", container_name,
+                            "-i",
+                            f"--memory={DOCKER_MEMORY_LIMIT}",
+                            f"--cpus={DOCKER_CPU_LIMIT}",
+                            "-v", f"{exe_dir}:/target:ro",
+                            "-w", "/target",
+                            "--network=none",
+                            image,
+                            f"./{exe_name}"
+                        ] + file_args
+                        create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
+                        if create_res.returncode == 0:
+                            raw_stdout = create_res.stdout.strip()
+                            container_id = raw_stdout[:12]
+                        else:
+                            return {
+                                "crashed": False,
+                                "crash_type": "EXECUTION_ERROR",
+                                "return_code": create_res.returncode,
+                                "stdout": create_res.stdout,
+                                "stderr": f"Docker create failed: {create_res.stderr.strip()}",
+                                "coverage": [],
+                                "container_id": ""
+                            }
+                        result = subprocess.run(
+                            ["docker", "start", "-a", "-i", container_name],
+                            capture_output=True,
+                            text=True,
+                            timeout=timeout,
+                            env=env
+                        )
+                    else:
+                        result = subprocess.run(
+                            run_cmd + file_args,
+                            capture_output=True,
+                            text=True,
+                            timeout=timeout,
+                            env=env
+                        )
                 finally:
                     if os.path.exists(temp_file_path):
                         try:
@@ -497,6 +561,38 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 cleaned_stdout = re.sub(r'\n?__MUTAGEN_COV__:[0-9,]*\b\n?', '\n', result.stdout).strip()
                 result.stdout = cleaned_stdout
 
+        # --- DOCKER INFRASTRUCTURE ERROR INTERCEPTION ---------------------
+        stderr_str = (result.stderr or "").lower()
+        is_docker_err = any(err_sig in stderr_str for err_sig in [
+            "you cannot start and attach multiple containers at once",
+            "error response from daemon",
+            "no such container",
+            "cannot connect to the docker daemon",
+            "invalid reference format",
+            "container create failed",
+            "error during connect",
+            "driver failed programming external connectivity",
+            "docker: "
+        ])
+        if is_docker_sandbox and is_docker_err and result.returncode != 0:
+            res_dict = {
+                "crashed": False,
+                "crash_type": "EXECUTION_ERROR",
+                "return_code": result.returncode,
+                "stdout": result.stdout[:200] if result.stdout else "",
+                "stderr": result.stderr[:200] if result.stderr else "",
+                "coverage": [],
+                "container_id": container_id,
+                "container_image": image if container_id else "",
+                "container_image_digest": image_digest if container_id else "",
+            }
+            if container_name:
+                try:
+                    subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True, timeout=5)
+                except Exception:
+                    pass
+            return res_dict
+
         # --- CRASH DETECTION -----------------------------------------------
         # On Windows, an "Access Violation" (segfault equivalent)
         # returns -1073741819 (0xC0000005).
@@ -518,16 +614,16 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             # Rust panic exit code
             elif result.returncode == 101:
                 crash_type = "RUST_PANIC (Safety Violation!)"
-            # POSIX Signals (usually negative return codes in Python subprocess)
-            elif result.returncode == -11:
+            # POSIX Signals (negative in native subprocess, 128+N in Docker / Linux shells)
+            elif result.returncode in (-11, 139):
                 crash_type = "SIGSEGV (Segmentation Fault)"
-            elif result.returncode == -6:
+            elif result.returncode in (-6, 134):
                 crash_type = "SIGABRT (Aborted)"
-            elif result.returncode == -4:
+            elif result.returncode in (-4, 132):
                 crash_type = "SIGILL (Illegal Instruction)"
-            elif result.returncode == -8:
+            elif result.returncode in (-8, 136):
                 crash_type = "SIGFPE (Floating Point Exception)"
-            elif result.returncode == -7:
+            elif result.returncode in (-7, 135):
                 crash_type = "SIGBUS (Bus Error)"
             elif result.returncode < 0:
                 crash_type = f"SIGNAL_{abs(result.returncode)}"
