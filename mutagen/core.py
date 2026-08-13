@@ -588,13 +588,18 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     "args": ["N/A"],
                     "input_data": "",
                     "return_code": 0,
-                    "crash_type": "Static Triage Finding (Header/Compilation missing)",
+                    "crash_type": "Static Triage Finding (Unreproduced)",
                     "stdout": "",
                     "stderr": "",
                     "vuln_type": v.vuln_type,
                     "cwe": v.cwe,
                     "severity": v.severity,
-                    "reason": v.metadata.get("reason", "Identified by TriageAgent during static analysis")
+                    "reason": v.metadata.get("reason", "Identified by TriageAgent during static analysis"),
+                    "verification_status": v.metadata.get("verification_status", "UNCONFIRMED_RISK"),
+                    "verification_annotation": v.metadata.get("verification_annotation", ""),
+                    "confidence": v.metadata.get("confidence", "MEDIUM"),
+                    "is_false_positive_risk": v.metadata.get("is_false_positive_risk", False),
+                    "metadata": v.metadata
                 }
                 static_findings.append(finding)
 

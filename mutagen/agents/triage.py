@@ -176,6 +176,9 @@ class TriageAgent(BaseAgent):
                 if v_res.is_false_positive_risk:
                     context.logs.append(f"[TypeVerifier] {v_res.annotation} (Line {detail.line_number})")
                     console.print(f"[bold yellow]  [TypeVerifier] {v_res.annotation} (Line {detail.line_number})[/bold yellow]")
+                else:
+                    context.logs.append(f"[TypeVerifier] Line {detail.line_number} verified: {v_res.annotation}")
+                    console.print(f"[dim]  [TypeVerifier] Line {detail.line_number} verified: {v_res.annotation}[/dim]")
 
                 context.logs.append(f"[TriageAgent] Identified {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
                 context.notepad.append(f"Triage: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
@@ -207,6 +210,9 @@ class TriageAgent(BaseAgent):
                     if v_res.is_false_positive_risk:
                         context.logs.append(f"[TypeVerifier] {v_res.annotation} (Line {detail.line_number})")
                         console.print(f"[bold yellow]  [TypeVerifier] {v_res.annotation} (Line {detail.line_number})[/bold yellow]")
+                    else:
+                        context.logs.append(f"[TypeVerifier] Line {detail.line_number} verified: {v_res.annotation}")
+                        console.print(f"[dim]  [TypeVerifier] Line {detail.line_number} verified: {v_res.annotation}[/dim]")
 
                     context.logs.append(f"[TriageAgent Fallback] Identified {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
                     context.notepad.append(f"Triage fallback: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")

@@ -23,31 +23,37 @@ def _is_arithmetic_cwe(cwe_str: str, vuln_type_str: str) -> bool:
 
 
 def _resolve_macro_definitions(target_dir: str, macro_names: list[str]) -> dict[str, str]:
-    """Scans header files in target_dir for #define MACRO ... definitions."""
+    """Scans header files in target_dir and workspace for #define MACRO ... definitions."""
     definitions = {}
     if not target_dir or not os.path.exists(target_dir):
         return definitions
 
+    search_dirs = [target_dir]
+    parent_dir = os.path.dirname(target_dir)
+    if parent_dir and os.path.exists(parent_dir) and parent_dir != target_dir:
+        search_dirs.append(parent_dir)
+
     macro_pattern = re.compile(r'#\s*define\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(?[^)]*\)?\s+(.*)')
 
-    for root, _, files in os.walk(target_dir):
-        if any(ignored in root.lower() for ignored in ["build", "cmakefiles", "cmaketmp"]):
-            continue
-        for file in files:
-            if file.endswith((".h", ".hpp", ".c", ".cpp", ".inc")):
-                fpath = os.path.join(root, file)
-                try:
-                    with open(fpath, encoding="utf-8", errors="ignore") as f:
-                        for line in f:
-                            line_str = line.strip()
-                            if line_str.startswith("#define"):
-                                m = macro_pattern.match(line_str)
-                                if m:
-                                    name, body = m.group(1), m.group(2)
-                                    if name in macro_names:
-                                        definitions[name] = body
-                except Exception:
-                    pass
+    for s_dir in search_dirs:
+        for root, _, files in os.walk(s_dir):
+            if any(ignored in root.lower() for ignored in ["build", "cmakefiles", "cmaketmp"]):
+                continue
+            for file in files:
+                if file.endswith((".h", ".hpp", ".c", ".cpp", ".inc")):
+                    fpath = os.path.join(root, file)
+                    try:
+                        with open(fpath, encoding="utf-8", errors="ignore") as f:
+                            for line in f:
+                                line_str = line.strip()
+                                if line_str.startswith("#define"):
+                                    m = macro_pattern.match(line_str)
+                                    if m:
+                                        name, body = m.group(1), m.group(2)
+                                        if name in macro_names:
+                                            definitions[name] = body
+                    except Exception:
+                        pass
     return definitions
 
 
@@ -55,7 +61,7 @@ def _verify_c_cpp(snippet: str, surrounding_code: str, target_dir: str = None) -
     combined = f"{snippet}\n{surrounding_code}"
 
     # 1. Macro expansion check (e.g., PNG_ROWBYTES)
-    macro_calls = re.findall(r'\b([A-Z0-9_]{3,})\s*\(', combined)
+    macro_calls = re.findall(r'\b([A-Z0-9_]{3,})\b', combined)
     if macro_calls and target_dir:
         macro_defs = _resolve_macro_definitions(target_dir, macro_calls)
         for m_name, m_body in macro_defs.items():
