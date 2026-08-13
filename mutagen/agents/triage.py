@@ -131,16 +131,18 @@ class TriageAgent(BaseAgent):
         for attempt in range(3):
             try:
                 if self.model_provider == "gemini" and hasattr(self.engine, "client") and hasattr(self.engine.client, "models"):
-                    response = self.engine.client.models.generate_content(
-                        model=self.model_name,
-                        contents=prompt,
-                        config={
-                            "temperature": TRIAGE_TEMPERATURE,
-                            "response_mime_type": "application/json",
-                            "response_schema": TriageResult,
-                            "safety_settings": GEMINI_SAFETY_OFF,
-                        }
-                    )
+                    from mutagen.engines.base import AiActivityHeartbeat
+                    with AiActivityHeartbeat(task_name="triaging code architecture & discovering vulnerabilities"):
+                        response = self.engine.client.models.generate_content(
+                            model=self.model_name,
+                            contents=prompt,
+                            config={
+                                "temperature": TRIAGE_TEMPERATURE,
+                                "response_mime_type": "application/json",
+                                "response_schema": TriageResult,
+                                "safety_settings": GEMINI_SAFETY_OFF,
+                            }
+                        )
                     raw_text = response.text.strip()
                     try:
                         data = json.loads(raw_text)

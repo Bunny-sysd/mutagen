@@ -12,7 +12,7 @@ from mutagen.constants import (
     GEMINI_HTTP_WRITE_TIMEOUT,
     GEMINI_RATE_LIMIT_WAIT,
 )
-from mutagen.engines.base import BaseEngine
+from mutagen.engines.base import BaseEngine, AiActivityHeartbeat
 from mutagen.safety import GEMINI_SAFETY_OFF
 
 console = Console(force_terminal=True, force_jupyter=False)
@@ -361,14 +361,15 @@ IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown
             for attempt in range(2):
                 try:
                     console.print(f"[dim]  [GeminiEngine] Querying AI model '{model_name}' (attempt {attempt + 1}/2)...[/dim]")
-                    response = self.client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config={
-                            "temperature": 0.2,
-                            "safety_settings": GEMINI_SAFETY_OFF,
-                        },
-                    )
+                    with AiActivityHeartbeat(task_name="generating full secure patch"):
+                        response = self.client.models.generate_content(
+                            model=model_name,
+                            contents=prompt,
+                            config={
+                                "temperature": 0.2,
+                                "safety_settings": GEMINI_SAFETY_OFF,
+                            },
+                        )
                     if response and response.text:
                         console.print(f"[dim]  ✓ Received {len(response.text.splitlines())} lines of patch code from '{model_name}'.[/dim]")
                     break
@@ -381,7 +382,9 @@ IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown
                         break
                     elif action == "retry":
                         if wait_time > 0:
-                            time.sleep(wait_time)
+                            for remaining in range(wait_time, 0, -5):
+                                console.print(f"[dim]    Waiting for rate limit cooldown: {remaining}s remaining...[/dim]")
+                                time.sleep(min(5, remaining))
             if response is not None:
                 break
 
@@ -434,14 +437,15 @@ IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown
             for attempt in range(2):
                 try:
                     console.print(f"[dim]  [GeminiEngine] Refining patch with AI model '{model_name}' (attempt {attempt + 1}/2)...[/dim]")
-                    response = self.client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                        config={
-                            "temperature": 0.2,
-                            "safety_settings": GEMINI_SAFETY_OFF,
-                        },
-                    )
+                    with AiActivityHeartbeat(task_name="refining patch implementation"):
+                        response = self.client.models.generate_content(
+                            model=model_name,
+                            contents=prompt,
+                            config={
+                                "temperature": 0.2,
+                                "safety_settings": GEMINI_SAFETY_OFF,
+                            },
+                        )
                     if response and response.text:
                         console.print(f"[dim]  ✓ Received {len(response.text.splitlines())} lines of refined patch code from '{model_name}'.[/dim]")
                     break
@@ -454,7 +458,9 @@ IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown
                         break
                     elif action == "retry":
                         if wait_time > 0:
-                            time.sleep(wait_time)
+                            for remaining in range(wait_time, 0, -5):
+                                console.print(f"[dim]    Waiting for rate limit cooldown: {remaining}s remaining...[/dim]")
+                                time.sleep(min(5, remaining))
             if response is not None:
                 break
 
