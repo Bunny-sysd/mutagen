@@ -32,22 +32,22 @@ class FuzzingSupervisorAgent(BaseAgent):
                 if target_vuln_func:
                     reach_info = verify_binary_reachability(exe_path, target_vuln_func, target_dir=context.target_path)
                     if reach_info.get("reachable"):
-                        setattr(context, "reachability_status", "REACHABLE")
-                        setattr(context, "reachability_message", reach_info.get("reason", f"Symbol '{target_vuln_func}' verified in '{os.path.basename(exe_path)}'"))
+                        context.reachability_status = "REACHABLE"
+                        context.reachability_message = reach_info.get("reason", f"Symbol '{target_vuln_func}' verified in '{os.path.basename(exe_path)}'")
                     else:
-                        setattr(context, "reachability_status", "FALLBACK_TARGET")
-                        setattr(context, "reachability_message", f"Internal symbol '{target_vuln_func}' not exported; using top binary '{os.path.basename(exe_path)}'")
+                        context.reachability_status = "FALLBACK_TARGET"
+                        context.reachability_message = f"Internal symbol '{target_vuln_func}' not exported; using top binary '{os.path.basename(exe_path)}'"
                 else:
-                    setattr(context, "reachability_status", "ACTIVE_BINARY")
-                    setattr(context, "reachability_message", f"Target binary '{os.path.basename(exe_path)}'")
+                    context.reachability_status = "ACTIVE_BINARY"
+                    context.reachability_message = f"Target binary '{os.path.basename(exe_path)}'"
             else:
-                setattr(context, "reachability_status", "UNREACHABLE_NO_TARGET")
-                setattr(context, "reachability_message", f"Static finding in '{target_vuln_func or 'target'}' could not be dynamically verified: no build target exercises this code path")
+                context.reachability_status = "UNREACHABLE_NO_TARGET"
+                context.reachability_message = f"Static finding in '{target_vuln_func or 'target'}' could not be dynamically verified: no build target exercises this code path"
                 context.logs.append(f"[FuzzingSupervisorAgent] No build target reaches vulnerable code path '{target_vuln_func}'")
                 return context
         except Exception as e:
-            setattr(context, "reachability_status", "COMPILATION_FAILED")
-            setattr(context, "reachability_message", f"Compilation error: {e}")
+            context.reachability_status = "COMPILATION_FAILED"
+            context.reachability_message = f"Compilation error: {e}"
             context.logs.append(f"[FuzzingSupervisorAgent] Compilation failed: {e}")
             return context
 

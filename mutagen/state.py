@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class VulnerabilityDetail(BaseModel):
+    model_config = {"extra": "allow"}
+
     vuln_type: str
     cwe: str
     severity: str
@@ -79,12 +81,15 @@ class VulnerabilityDetail(BaseModel):
 
 
 class CrashPayload(BaseModel):
+    model_config = {"extra": "allow"}
+
     args: list[str] = Field(default_factory=list)
     input_data: str = ""
     raw_bytes_hex: str | None = None
     reason: str | None = None
     exit_code: int | None = None
     crash_type: str | None = None
+    is_execution_error: bool = False
     stdout: str | None = None
     stderr: str | None = None
     container_id: str | None = None
@@ -110,6 +115,7 @@ class CrashPayload(BaseModel):
                 reason=obj.get("reason"),
                 exit_code=obj.get("exit_code"),
                 crash_type=obj.get("crash_type"),
+                is_execution_error=bool(obj.get("is_execution_error", False)),
                 stdout=obj.get("stdout"),
                 stderr=obj.get("stderr"),
                 container_id=obj.get("container_id"),
@@ -147,6 +153,8 @@ class CrashPayload(BaseModel):
 
 
 class PatchProposal(BaseModel):
+    model_config = {"extra": "allow"}
+
     patch_id: str = "primary_patch"
     patched_code: str
     revision: int = 1
@@ -155,6 +163,8 @@ class PatchProposal(BaseModel):
 
 
 class ProgramContext(BaseModel):
+    model_config = {"extra": "allow"}
+
     target_path: str
     language: str
     os_platform: str
@@ -177,6 +187,8 @@ class ProgramContext(BaseModel):
     skip_flagged_findings: bool = False
     triage_failed: bool = False
     triage_error: str = ""
+    reachability_status: str = ""
+    reachability_message: str = ""
 
     @field_validator("vulnerabilities", mode="before")
     @classmethod
