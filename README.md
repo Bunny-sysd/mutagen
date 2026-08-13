@@ -98,21 +98,18 @@ graph LR
 
 ## Features
 
-- **AI-Powered Analysis** — Understands code semantics, not just random fuzzing
-- **Agentic Retries** — Learns from `stdout/stderr` to bypass auth checks and complex logic
-- **Auto-Patching** — Generates secure C patches for every vulnerability found
-- **Exploit Generation** — Writes standalone Python PoC scripts for regression testing
-- **Patch Verification** — Proves the patch works by attacking the fixed binary
-- **Beautiful HTML Reports** — Glassmorphism-styled interactive crash reports
-- Multi-LLM Support — Works with Gemini, Anthropic Claude, OpenAI, and local Ollama models
-- **Concurrent Execution** — Parallel payload injection with `ThreadPoolExecutor`
-- **Multiple Delivery Modes** — Args, stdin, and TCP socket fuzzing
-- **Traditional Fallback Mutations** — Classic fuzzing strategies (buffer overflow, format string, integer boundary) kick in automatically when AI is unavailable
-- **Crash Deduplication** — Intelligent signature-based deduplication removes duplicate crash reports
-- **Enterprise Network Safe** — HTTP/1.1 fallback and 5-second connect timeouts bypass TLS proxy hangs in corporate environments
-- **Binary Fuzzing** — Headless Ghidra integration to decompile and fuzz compiled binaries without source
-- **Supply-Chain Auditing** — Detect backdoors, credential leaks, and unauthorized network calls
-- **Malware Triage** — Identify ransomware loops, keyloggers, persistence mechanisms, and C2 footprints
+- **AI-Powered Analysis** — Understands code semantics and AST call-chains, not just random bit-flips
+- **Pre-Finding Type Verification** — Resolves header `#define` macro expansions and 64-bit `size_t` widening casts before triage to eliminate historical false positives
+- **Token-Efficient Threat Intelligence** — Ranks CVE/CWE signatures by CVSS score and deduplicates candidates to minimize LLM prompt token consumption
+- **Universal Binary Repair Pass** — Dynamic Magic Byte inspection (`\x89PNG`, `\x7fELF`, `PK\x03\x04`, `MZ`) and automated CRC32/header repair for image, archive, ELF system, and PE kernel binaries
+- **Isolated Container Sandboxing** — Runs fuzzing execution inside containerized Docker sandboxes (`--network=none`) with CPU/memory limits and host protection
+- **Agentic Retries** — Learns from `stdout/stderr` execution state to bypass authentication logic and complex handshakes
+- **Auto-Patching & Verification** — Generates secure C patches and mathematically proves remediation by attacking the patched binary
+- **Exploit PoC Generation** — Synthesizes standalone Python regression testing scripts
+- **Interactive HTML & Structured JSON Reports** — Executive dashboards and JSON reports containing complete type verification annotations and container metadata
+- **Multi-LLM Engine** — Native support for Gemini, Anthropic Claude, OpenAI, and local Ollama models
+- **Headless Binary Decompilation** — Integrates with Ghidra to decompile and fuzz binaries without source code
+- **Supply-Chain & Malware Auditing** — Detects backdoors, credential leaks, ransomware loops, and C2 implants
 - **Local `.env` Config** — Store provider, model, and API keys in a local config file
 - **CI/CD Integration** — GitHub Actions workflow template for automated fuzzing on every pull request
 

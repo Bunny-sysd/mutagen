@@ -170,26 +170,41 @@ class PayloadSynthesizerAgent(BaseAgent):
         lang_rules = get_synthesizer_rules(context.language)
         poc_context_str = ("\nVulnerability Signature Intelligence:\n" + "\n".join(intel_hints)) if intel_hints else ""
 
-        prompt = f"""You are an elite offensive security researcher and exploit developer.
-Target System Platform: {context.os_platform} (Language: {context.language}, Delivery Mode: {context.delivery_mode})
-Your objective is to generate exact crash/exploit payloads to reproduce the identified security flaws.
+        prompt = f"""You are an expert security researcher and automated fuzzing payload engineer.
+Target Environment: OS={context.os_platform}, Language={context.language}, Delivery Mode={context.delivery_mode}
 
-Vulnerabilities found:
+Objective:
+Synthesize exact input payloads (arguments, byte buffers, or files) engineered to reproduce identified security flaws.
+
+Target Vulnerabilities:
 {joined_vuln_desc}
 {poc_context_str}
 
-Source Code:
+Source Code Context:
 {context.source_code}
 
-RULES:
-1. Provide argument arrays, raw text/hex byte buffers, or structured input data to trigger the crash.
-2. IMPORTANT: Keep all input data and argument strings under 1000 characters. Use short inputs that demonstrate the logic flow.
-3. DO NOT prepend the program/target executable name to the 'args' list.
-4. For 'file' delivery mode, specify 'raw_bytes_hex' as a valid hex-encoded string (e.g. "89504e470d0a1a0a...") or provide short safe ASCII strings in 'input_data'. Always provide 'args': ["overflow_poc.png"] for filename arguments.
-5. Escape all special characters and quotes cleanly inside JSON strings. Do not include raw unescaped newlines inside string literals.
-6. For logical vulnerabilities (like command injection), synthesize payloads that execute commands echoing known success strings (e.g., "echo vuln_triggered", "echo exploit_success", or "echo PWNED") or calling system status commands (e.g., "whoami", "id", or "systeminfo").
+Payload Generation Guidelines:
+1. Delivery Mode Alignment:
+   - For 'file' delivery mode: Supply raw binary byte streams as hex strings in 'raw_bytes_hex' (e.g. "89504e470d0a1a0a..."). Provide target filename in 'args' (e.g. ["overflow_poc.png"]).
+   - For 'args' delivery mode: Supply target argument arrays in 'args' (do not prepend target executable name).
+   - For 'stdin' / 'tcp' / 'http' delivery modes: Supply payload strings in 'input_data'.
+2. Structural Integrity:
+   - Ensure all JSON string fields are valid, single-line text without unescaped control characters.
+   - For buffer overflows and heap allocation bugs, craft binary boundaries or hex byte streams necessary to exceed target allocations.
 {lang_rules}
-8. Output MUST be valid JSON adhering strictly to the schema.
+
+Required Schema:
+Return JSON adhering strictly to:
+{{
+  "payloads": [
+    {{
+      "args": ["overflow_poc.png"],
+      "input_data": "",
+      "raw_bytes_hex": "89504e47...",
+      "reason": "Technical rationale explaining payload structure"
+    }}
+  ]
+}}
 """
 
         try:
