@@ -21,13 +21,19 @@ class VulnerabilityDetail(BaseModel):
         if isinstance(obj, VulnerabilityDetail):
             return obj
         if isinstance(obj, dict):
+            meta = dict(obj.get("metadata", {}))
+            if "reason" not in meta and "reason" in obj:
+                meta["reason"] = str(obj.get("reason", ""))
+            for k in ("verification_status", "verification_annotation", "confidence", "is_false_positive_risk"):
+                if k in obj:
+                    meta[k] = obj[k]
             return cls(
                 vuln_type=str(obj.get("vuln_type", "Memory Corruption")),
                 cwe=str(obj.get("cwe", "CWE-120")),
                 severity=str(obj.get("severity", "critical")),
                 line_number=int(obj.get("line_number", obj.get("line", 1))),
                 code_snippet=str(obj.get("code_snippet", obj.get("context_snippet", obj.get("snippet", "")))),
-                metadata=dict(obj.get("metadata", {"reason": str(obj.get("reason", ""))}))
+                metadata=meta
             )
         if hasattr(obj, "call_name") or hasattr(obj, "cwe"):
             # StaticFinding dataclass or similar AST object

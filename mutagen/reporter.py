@@ -204,6 +204,13 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         safe_pci = html.escape(comp.get("PCI-DSS", ""))
         safe_soc2 = html.escape(comp.get("SOC2", ""))
 
+        v_annot = c.get("verification_annotation") or c.get("metadata", {}).get("verification_annotation", "")
+        safe_v_annot_html = ""
+        if v_annot:
+            is_fp = c.get("is_false_positive_risk", c.get("metadata", {}).get("is_false_positive_risk", False))
+            badge_color = "#f59e0b" if is_fp else "#3b82f6"
+            safe_v_annot_html = f'<div style="margin-top: 0.4rem; padding: 0.3rem 0.5rem; background: rgba(245, 158, 11, 0.1); border-left: 3px solid {badge_color}; font-size: 0.8rem; color: #fbbf24;"><strong>Type Verification:</strong> {html.escape(v_annot)}</div>'
+
         crash_rows += f"""
         <tr>
             <td>{i+1}</td>
@@ -216,6 +223,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
             <td>{safe_crash}</td>
             <td class="reason">
                 <div>{safe_reason}</div>
+                {safe_v_annot_html}
                 <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #94a3b8;"><strong>Mitigations:</strong> {safe_mitigations}</div>
                 <div style="margin-top: 0.3rem; font-size: 0.8rem; color: #f59e0b;"><strong>Compliance:</strong> PCI-DSS: <em>{safe_pci}</em> &bull; SOC2: <em>{safe_soc2}</em></div>
             </td>

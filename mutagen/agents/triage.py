@@ -153,9 +153,30 @@ class TriageAgent(BaseAgent):
 
             context.logs.append(f"[TriageAgent] Dynamically detected input delivery mode: {context.delivery_mode}")
 
+            from rich.console import Console
+            console = Console(force_terminal=True, force_jupyter=False)
+            from mutagen.type_verifier import verify_finding_type_safety
+
             vulns = data.get("vulnerabilities", [])
             for item in vulns:
                 detail = context.add_vulnerability(item)
+                v_res = verify_finding_type_safety(
+                    source_code=context.source_code,
+                    line_number=detail.line_number,
+                    cwe=detail.cwe,
+                    vuln_type=detail.vuln_type,
+                    language=context.language,
+                    target_path=context.target_path
+                )
+                detail.metadata["verification_status"] = v_res.verification_status
+                detail.metadata["verification_annotation"] = v_res.annotation
+                detail.metadata["confidence"] = v_res.confidence
+                detail.metadata["is_false_positive_risk"] = v_res.is_false_positive_risk
+
+                if v_res.is_false_positive_risk:
+                    context.logs.append(f"[TypeVerifier] {v_res.annotation} (Line {detail.line_number})")
+                    console.print(f"[bold yellow]  [TypeVerifier] {v_res.annotation} (Line {detail.line_number})[/bold yellow]")
+
                 context.logs.append(f"[TriageAgent] Identified {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
                 context.notepad.append(f"Triage: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
 
@@ -167,8 +188,26 @@ class TriageAgent(BaseAgent):
             context.delivery_mode = "args"
             # Fallback to static analyzer findings if LLM fails
             if pretarget.findings:
+                from mutagen.type_verifier import verify_finding_type_safety
                 for finding in pretarget.findings:
                     detail = context.add_vulnerability(finding)
+                    v_res = verify_finding_type_safety(
+                        source_code=context.source_code,
+                        line_number=detail.line_number,
+                        cwe=detail.cwe,
+                        vuln_type=detail.vuln_type,
+                        language=context.language,
+                        target_path=context.target_path
+                    )
+                    detail.metadata["verification_status"] = v_res.verification_status
+                    detail.metadata["verification_annotation"] = v_res.annotation
+                    detail.metadata["confidence"] = v_res.confidence
+                    detail.metadata["is_false_positive_risk"] = v_res.is_false_positive_risk
+
+                    if v_res.is_false_positive_risk:
+                        context.logs.append(f"[TypeVerifier] {v_res.annotation} (Line {detail.line_number})")
+                        console.print(f"[bold yellow]  [TypeVerifier] {v_res.annotation} (Line {detail.line_number})[/bold yellow]")
+
                     context.logs.append(f"[TriageAgent Fallback] Identified {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
                     context.notepad.append(f"Triage fallback: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
 
