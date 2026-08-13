@@ -267,11 +267,14 @@ def analyze_source(code: str) -> PreTargetingResult:
     # Add each dangerous function
     for func_name, func_node in dangerous_func_nodes.items():
         func_text = _node_text(func_node, code_bytes)
+        start_line = (getattr(func_node, "start_point", (0, 0))[0] + 1) if hasattr(func_node, "start_point") else 1
         # Annotate which dangerous calls are inside this function
         func_findings = [f for f in findings if f.function_name == func_name]
         if func_findings:
             calls_str = ", ".join(sorted(set(f.call_name for f in func_findings)))
-            focused_parts.append(f"// [SNIPER] Function '{func_name}' contains: {calls_str}")
+            focused_parts.append(f"// [SNIPER - ORIGINAL SOURCE LINE {start_line}] Function '{func_name}' contains: {calls_str}")
+        else:
+            focused_parts.append(f"// [SNIPER - ORIGINAL SOURCE LINE {start_line}] Function '{func_name}'")
 
         focused_parts.append(func_text)
         focused_parts.append("")

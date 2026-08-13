@@ -155,3 +155,31 @@ function typedJS(a, b) {
     res_typed = verify_finding_type_safety(js_code, line_number=8, cwe="CWE-190", vuln_type="Integer Overflow", language="javascript")
     assert res_typed.is_false_positive_risk is False
     assert res_typed.verification_status == "UNCONFIRMED_RISK"
+
+
+def test_grounding_verifier_rejects_unrelated_line():
+    """
+    Ensures that claiming an integer overflow or heap buffer overflow on a line
+    with NO arithmetic calculations or memory writes (e.g. a simple null check)
+    is caught and marked as UNGROUNDED_FINDING.
+    """
+    c_code = """
+void png_start_read_image(png_structrp png_ptr) {
+    if (png_ptr == NULL)
+        return;
+
+    int status = 0;
+}
+"""
+    # Claiming integer overflow on a null check line
+    res_ungrounded = verify_finding_type_safety(
+        source_code=c_code,
+        line_number=3,
+        cwe="CWE-190",
+        vuln_type="Heap Buffer Overflow",
+        language="c"
+    )
+    assert res_ungrounded.verification_status == "UNGROUNDED_FINDING"
+    assert res_ungrounded.is_false_positive_risk is True
+    assert "UNGROUNDED FINDING" in res_ungrounded.annotation
+    assert res_ungrounded.confidence == "LOW"

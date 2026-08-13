@@ -92,7 +92,10 @@ class TriageAgent(BaseAgent):
         context.logs.append("[TriageAgent] Starting code triage...")
 
         pretarget = analyze_source(context.source_code)
-        focused_code = pretarget.focused_code if pretarget.findings else context.source_code
+        
+        # Always provide the full, intact source code with 1-based line numbers for 100% precision
+        code_lines = context.source_code.splitlines()
+        numbered_source = "\n".join(f"{i+1:4d} | {line}" for i, line in enumerate(code_lines))
 
         # Enrich prompt with multi-file workspace call graph summary if available
         graph_summary = ""
@@ -103,7 +106,13 @@ class TriageAgent(BaseAgent):
             if "No multi-file workspace" not in graph_text:
                 graph_summary = f"\n\nPROJECT WORKSPACE CONTEXT:\n{graph_text}\n"
 
-        prompt = get_triage_prompt(context.language, focused_code)
+        prompt = get_triage_prompt(context.language, numbered_source)
+
+        # Include AST static findings as non-destructive hints
+        if pretarget.findings:
+            ast_hints = [f"- Line {f.line}: {f.call_name} ({f.pattern_type}, {f.cwe})" for f in pretarget.findings[:10]]
+            prompt += "\n\n[STATIC AST DANGEROUS PATTERN HINTS]\n" + "\n".join(ast_hints) + "\n"
+
         if context.is_binary:
             binary_context = (
                 f"\n\n[REVERSE ENGINEERING ANALYSIS CONTEXT]\n"
@@ -159,6 +168,25 @@ class TriageAgent(BaseAgent):
 
             vulns = data.get("vulnerabilities", [])
             for item in vulns:
+                # 1. Snippet Line Re-anchoring (Align line number from focused_code to full original source)
+                code_snip = (item.get("code_snippet") or "").strip() if isinstance(item, dict) else getattr(item, "code_snippet", "")
+                claimed_line = item.get("line_number", 1) if isinstance(item, dict) else getattr(item, "line", 1)
+
+                if code_snip and context.source_code:
+                    lines = context.source_code.splitlines()
+                    claimed_idx = max(0, claimed_line - 1)
+                    # If claimed line does not contain snippet, search full source for the exact line
+                    if claimed_idx >= len(lines) or code_snip not in lines[claimed_idx]:
+                        for idx, src_l in enumerate(lines):
+                            if code_snip in src_l or (len(code_snip) > 10 and src_l.strip() and src_l.strip() in code_snip):
+                                reanchored_line = idx + 1
+                                if isinstance(item, dict):
+                                    item["line_number"] = reanchored_line
+                                else:
+                                    setattr(item, "line", reanchored_line)
+                                context.logs.append(f"[GroundingVerifier] Re-anchored finding line from {claimed_line} to {reanchored_line} based on exact source code snippet match.")
+                                break
+
                 detail = context.add_vulnerability(item)
                 v_res = verify_finding_type_safety(
                     source_code=context.source_code,
@@ -173,7 +201,10 @@ class TriageAgent(BaseAgent):
                 detail.metadata["confidence"] = v_res.confidence
                 detail.metadata["is_false_positive_risk"] = v_res.is_false_positive_risk
 
-                if v_res.is_false_positive_risk:
+                if v_res.verification_status == "UNGROUNDED_FINDING":
+                    context.logs.append(f"[GroundingVerifier] REJECTED / UNGROUNDED finding at line {detail.line_number}: {v_res.annotation}")
+                    console.print(f"[bold red]  [GroundingVerifier] REJECTED / UNGROUNDED at Line {detail.line_number}: {v_res.annotation}[/bold red]")
+                elif v_res.is_false_positive_risk:
                     context.logs.append(f"[TypeVerifier] {v_res.annotation} (Line {detail.line_number})")
                     console.print(f"[bold yellow]  [TypeVerifier] {v_res.annotation} (Line {detail.line_number})[/bold yellow]")
                 else:
@@ -181,7 +212,7 @@ class TriageAgent(BaseAgent):
                     console.print(f"[dim]  [TypeVerifier] Line {detail.line_number} verified: {v_res.annotation}[/dim]")
 
                 context.logs.append(f"[TriageAgent] Identified {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
-                context.notepad.append(f"Triage: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
+                context.notepad.append(f"Triage: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe}) [Status: {v_res.verification_status}]")
 
         except Exception as e:
             from rich.console import Console

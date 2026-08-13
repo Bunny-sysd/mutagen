@@ -13,7 +13,9 @@ class TypeVerificationResult:
 
 ARITHMETIC_CWES = {
     "CWE-190", "CWE-191", "CWE-680", "CWE-681", "CWE-128", "CWE-131",
-    "INTEGER OVERFLOW", "INTEGER UNDERFLOW", "WRAPAROUND", "NUMERIC TRUNCATION"
+    "CWE-120", "CWE-121", "CWE-122",
+    "INTEGER OVERFLOW", "INTEGER UNDERFLOW", "WRAPAROUND", "NUMERIC TRUNCATION",
+    "BUFFER OVERFLOW", "HEAP OVERFLOW", "STACK OVERFLOW"
 }
 
 
@@ -57,10 +59,60 @@ def _resolve_macro_definitions(target_dir: str, macro_names: list[str]) -> dict[
     return definitions
 
 
-def _verify_c_cpp(snippet: str, surrounding_code: str, target_dir: str = None) -> TypeVerificationResult:
-    combined = f"{snippet}\n{surrounding_code}"
+def _has_arithmetic_operations(code_snippet: str, surrounding_code: str) -> bool:
+    """Checks if the snippet or surrounding statement contains actual arithmetic operators."""
+    combined = f"{code_snippet}\n{surrounding_code}"
+    # Match binary operators (*, +, -, /, %, <<, >>), assignment arithmetic (+=, -=, *=, /=), or increment/decrement
+    # Ignore standalone pointer dereferences like *ptr = ... or ->
+    arithmetic_patterns = [
+        re.compile(r'[\w\)]\s*[\*\+\-\/%]\s*[\w\(]'),  # a * b, x + y, count / 2
+        re.compile(r'[\w\)]\s*(<<|>>)\s*[\w\(]'),      # shift operations
+        re.compile(r'(\+\=|\-\=|\*\=|\/\=)'),           # compound assignments
+        re.compile(r'(\+\+|\-\-)'),                     # increment/decrement
+        re.compile(r'\b(PNG_ROWBYTES|ROWBYTES|MULTIPLY|CALC|OFFSET|STRIDE)\b', re.IGNORECASE),
+    ]
+    return any(p.search(combined) for p in arithmetic_patterns)
 
-    # 1. Macro expansion check (e.g., PNG_ROWBYTES)
+
+def _has_memory_operations(code_snippet: str, surrounding_code: str) -> bool:
+    """Checks if the snippet or surrounding statement contains actual memory write/copy/access operations."""
+    combined = f"{code_snippet}\n{surrounding_code}"
+    mem_patterns = [
+        re.compile(r'\b(memcpy|memmove|strcpy|strncpy|strcat|strncat|sprintf|snprintf|vsprintf|vsnprintf|gets|fgets|read|recv|recvfrom|scanf|fscanf|sscanf)\b'),
+        re.compile(r'\b(malloc|calloc|realloc|free|VirtualAlloc|HeapAlloc)\b'),
+        re.compile(r'\[[^\]]+\]\s*='),               # arr[i] = ...
+        re.compile(r'\*\s*[\w\->\.]+\s*='),          # *ptr = ...
+        re.compile(r'->[\w]+\s*='),                  # ptr->field = ...
+        re.compile(r'\[[^\]]+\]'),                   # buffer indexing arr[x]
+    ]
+    return any(p.search(combined) for p in mem_patterns)
+
+
+def _verify_c_cpp(snippet: str, surrounding_code: str, target_dir: str = None, cwe: str = "", vuln_type: str = "") -> TypeVerificationResult:
+    combined = f"{snippet}\n{surrounding_code}"
+    vuln_class = f"{cwe} {vuln_type}".upper()
+
+    # 1. Grounding check: Confirm the cited code actually contains the mechanism claimed
+    is_arithmetic = any(c in vuln_class for c in ["CWE-190", "CWE-191", "CWE-680", "CWE-681", "INTEGER OVERFLOW", "INTEGER UNDERFLOW", "WRAPAROUND", "TRUNCATION"])
+    is_buffer_mem = any(c in vuln_class for c in ["CWE-120", "CWE-121", "CWE-122", "CWE-119", "CWE-787", "CWE-125", "BUFFER OVERFLOW", "HEAP OVERFLOW", "STACK OVERFLOW"])
+
+    if is_arithmetic and not _has_arithmetic_operations(snippet, surrounding_code):
+        return TypeVerificationResult(
+            verification_status="UNGROUNDED_FINDING",
+            confidence="LOW",
+            annotation="UNGROUNDED FINDING: Source code at cited line contains no arithmetic expressions or calculations matching claimed integer overflow",
+            is_false_positive_risk=True
+        )
+
+    if is_buffer_mem and not is_arithmetic and not _has_memory_operations(snippet, surrounding_code):
+        return TypeVerificationResult(
+            verification_status="UNGROUNDED_FINDING",
+            confidence="LOW",
+            annotation="UNGROUNDED FINDING: Source code at cited line contains no memory copy, buffer write, or array access matching claimed buffer overflow",
+            is_false_positive_risk=True
+        )
+
+    # 2. Macro expansion check (e.g., PNG_ROWBYTES)
     macro_calls = re.findall(r'\b([A-Z0-9_]{3,})\b', combined)
     if macro_calls and target_dir:
         macro_defs = _resolve_macro_definitions(target_dir, macro_calls)
@@ -73,7 +125,7 @@ def _verify_c_cpp(snippet: str, surrounding_code: str, target_dir: str = None) -
                     is_false_positive_risk=True
                 )
 
-    # 2. Widening casts check (e.g. (size_t)a * b, (uint64_t)width, static_cast<size_t>)
+    # 3. Widening casts check (e.g. (size_t)a * b, (uint64_t)width, static_cast<size_t>)
     widening_cast_pattern = re.compile(
         r'\(\s*(png_size_t|size_t|uint64_t|int64_t|unsigned\s+long|uintmax_t)\s*\)|'
         r'static_cast\s*<\s*(size_t|uint64_t|int64_t|unsigned\s+long)\s*>'
@@ -86,7 +138,7 @@ def _verify_c_cpp(snippet: str, surrounding_code: str, target_dir: str = None) -
             is_false_positive_risk=True
         )
 
-    # 3. Checked arithmetic builtins/macros check (__builtin_mul_overflow, ckd_mul, SafeInt)
+    # 4. Checked arithmetic builtins/macros check (__builtin_mul_overflow, ckd_mul, SafeInt)
     checked_builtins = [
         "__builtin_mul_overflow", "__builtin_add_overflow", "__builtin_sub_overflow",
         "ckd_mul", "ckd_add", "ckd_sub", "SafeInt", "overflow_check"
@@ -103,7 +155,7 @@ def _verify_c_cpp(snippet: str, surrounding_code: str, target_dir: str = None) -
     return TypeVerificationResult(
         verification_status="UNCONFIRMED_RISK",
         confidence="MEDIUM",
-        annotation="No explicit 64-bit widening cast or checked-arithmetic builtin detected in immediate scope",
+        annotation="Verified grounded mechanism in immediate scope; no explicit 64-bit widening cast or checked-arithmetic builtin detected",
         is_false_positive_risk=False
     )
 
@@ -250,7 +302,7 @@ def verify_finding_type_safety(
     lang = (language or "c").lower()
 
     if lang in ("c", "cpp", "c++"):
-        return _verify_c_cpp(snippet, surrounding_code, target_dir)
+        return _verify_c_cpp(snippet, surrounding_code, target_dir, cwe, vuln_type)
     elif lang == "rust":
         return _verify_rust(snippet, surrounding_code)
     elif lang in ("python", "py"):
@@ -260,4 +312,4 @@ def verify_finding_type_safety(
     elif lang in ("javascript", "js", "typescript", "ts"):
         return _verify_javascript(snippet, surrounding_code)
 
-    return _verify_c_cpp(snippet, surrounding_code, target_dir)
+    return _verify_c_cpp(snippet, surrounding_code, target_dir, cwe, vuln_type)
