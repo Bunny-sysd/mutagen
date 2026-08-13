@@ -82,6 +82,7 @@ def main():
     parser.add_argument("--webhook-header", action="append", default=[], help="Custom header to send with the webhook request (format: Name: Value)")
     parser.add_argument("--mode", default="pipeline", choices=["pipeline", "agents"], help="Execution mode: pipeline, agents (default: pipeline)")
     parser.add_argument("--skip-flagged-findings", action="store_true", default=os.getenv("MUTAGEN_SKIP_FLAGGED_FINDINGS", "false").lower() in ("true", "1", "yes"), help="Skip payload synthesis and fuzzing execution for findings flagged as likely false positives or ungrounded")
+    parser.add_argument("--validate-cve", default=os.getenv("MUTAGEN_VALIDATE_CVE", ""), help="Run in Ground-Truth Validation Mode against a specific CVE identifier (e.g. CVE-2025-65018)")
     # --- Defects4C benchmark settings ---
     parser.add_argument("--defects4c", default="", help="Base URL of Defects4C Bug Helper REST API service (e.g. http://localhost:8000)")
     parser.add_argument("--defects4c-bug-id", default="", help="Defects4C bug ID (e.g. libxml2@a1b2c3d4)")
@@ -402,6 +403,7 @@ def main():
                 decompiler_path=args.decompiler_path,
                 mode=args.mode,
                 skip_flagged_findings=args.skip_flagged_findings,
+                validate_cve=args.validate_cve,
             )
             total_crashes += (crashes_found or 0)
             console.print()

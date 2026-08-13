@@ -490,7 +490,7 @@ def _normalize_sequences(raw_payloads) -> list[dict]:
     return sequences
 
 
-def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = "", sandbox: str = "none", coverage: bool = False, webhook_secret: str = "", webhook_headers: list[str] = None, decompiler: str = "ghidra", decompiler_path: str = "", defects4c_url: str = "", defects4c_mount_dir: str = "", mode: str = "pipeline", skip_flagged_findings: bool = False):
+def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int, timeout: int, debug: bool, provider: str = "gemini", model: str = "", delivery_mode: str = "args", max_patch_retries: int = 3, binary_mode: bool = False, decompile_all: bool = False, ghidra_path: str = "", profile: str = "legacy-audit", static_only: bool = False, webhook_url: str = "", sandbox: str = "none", coverage: bool = False, webhook_secret: str = "", webhook_headers: list[str] = None, decompiler: str = "ghidra", decompiler_path: str = "", defects4c_url: str = "", defects4c_mount_dir: str = "", mode: str = "pipeline", skip_flagged_findings: bool = False, validate_cve: str = ""):
     """Main fuzzer orchestration function."""
     if mode == "agents":
         import asyncio
@@ -530,6 +530,22 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         orchestrator.context.decompiler_used = decompiler_name
         orchestrator.context.architecture = arch_name
         orchestrator.context.skip_flagged_findings = skip_flagged_findings
+
+        # --- GROUND-TRUTH CVE VALIDATION SETUP ---
+        cve_meta = None
+        detected_ver = None
+        is_ver_affected = True
+        if validate_cve:
+            from mutagen.cve_validator import check_version_affected, detect_target_version, fetch_cve_metadata
+            cve_meta = fetch_cve_metadata(validate_cve)
+            detected_ver = detect_target_version(source_path, source_code)
+            is_ver_affected, ver_msg = check_version_affected(detected_ver, cve_meta)
+            console.print(f"[bold cyan]🔍 Target Ground-Truth CVE Mode: {cve_meta['cve_id']} ({cve_meta['name']})[/bold cyan]")
+            console.print(f"[dim]Version Gate: {ver_msg}[/dim]")
+            orchestrator.context.notepad.append(f"[GroundTruthCVE] Target Validation for {cve_meta['cve_id']} ({cve_meta['name']})")
+            orchestrator.context.notepad.append(f"[GroundTruthCVE] Version Gate: {ver_msg}")
+            if cve_meta.get("poc_guidance"):
+                orchestrator.context.notepad.append(f"[GroundTruthCVE] PoC Guidance: {cve_meta['poc_guidance']}")
 
         # --- UPFRONT SAFETY GATE & DOCKER DETECTION ---
         is_no_sandbox = (sandbox == "none")
@@ -715,6 +731,12 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             )
 
         console.print(summary)
+
+        if validate_cve and cve_meta:
+            from mutagen.cve_validator import evaluate_cve_validation_outcome, render_cve_validation_panel
+            cve_res = evaluate_cve_validation_outcome(context, cve_meta, detected_ver, is_ver_affected)
+            render_cve_validation_panel(cve_res)
+
         return len(unique_dynamic_crashes)
 
     engine = get_engine(provider, api_key, model, debug, console)
