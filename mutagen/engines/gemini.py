@@ -351,7 +351,7 @@ Your task is to securely patch the vulnerability.
 Provide the ENTIRE updated {self.lang_name} source code file that fixes the issue.
 IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown formatting, markdown code fences (like ```), or conversational preamble/explanations. Output raw source code starting directly on Line 1."""
 
-        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"])
+        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-1.5-flash"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -359,6 +359,7 @@ IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown
                 break
             for attempt in range(2):
                 try:
+                    console.print(f"[dim]  [GeminiEngine] Querying AI model '{model_name}' (attempt {attempt + 1}/2)...[/dim]")
                     response = self.client.models.generate_content(
                         model=model_name,
                         contents=prompt,
@@ -367,6 +368,8 @@ IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown
                             "safety_settings": GEMINI_SAFETY_OFF,
                         },
                     )
+                    if response and response.text:
+                        console.print(f"[dim]  ✓ Received {len(response.text.splitlines())} lines of patch code from '{model_name}'.[/dim]")
                     break
                 except Exception as e:
                     action, wait_time = self._classify_and_handle_error(e, attempt)
@@ -421,7 +424,7 @@ Please analyze the failure details and correct the patch code.
 Provide the ENTIRE corrected {self.lang_name} source code file, grounded in the ORIGINAL SOURCE CODE baseline while fixing the reported failure details.
 IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown formatting, markdown code fences (like ```), or conversational preamble/explanations. Output raw source code starting directly on Line 1."""
 
-        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"])
+        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-1.5-flash"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -429,6 +432,7 @@ IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown
                 break
             for attempt in range(2):
                 try:
+                    console.print(f"[dim]  [GeminiEngine] Refining patch with AI model '{model_name}' (attempt {attempt + 1}/2)...[/dim]")
                     response = self.client.models.generate_content(
                         model=model_name,
                         contents=prompt,
@@ -437,6 +441,8 @@ IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown
                             "safety_settings": GEMINI_SAFETY_OFF,
                         },
                     )
+                    if response and response.text:
+                        console.print(f"[dim]  ✓ Received {len(response.text.splitlines())} lines of refined patch code from '{model_name}'.[/dim]")
                     break
                 except Exception as e:
                     action, wait_time = self._classify_and_handle_error(e, attempt)

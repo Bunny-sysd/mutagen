@@ -26,8 +26,12 @@ class StructuralValidatorAgent(BaseAgent):
             context.verification_status = "REGRESSION_FAILED"
             return context
 
+        from rich.console import Console
+        console = Console(force_terminal=True, force_jupyter=False)
+
         # 1. Run Tree-sitter AST Pre-Check (C/C++ only)
         if context.language == "c":
+            console.print("[dim]  [StructuralValidatorAgent] Running Tree-sitter AST syntax validation...[/dim]")
             result = validate_c_source(patched_code)
             if not result.is_valid:
                 err_msg = ", ".join(f"line {e.line}: {e.message}" for e in result.errors)
@@ -42,8 +46,10 @@ class StructuralValidatorAgent(BaseAgent):
                     pass
                 context.logs.append(f"[StructuralValidatorAgent] AST Validation failed: {err_msg}")
                 context.verification_status = "REGRESSION_FAILED"
+                console.print(f"[bold yellow]  ⚠️ Patch failed AST syntax validation: {err_msg[:120]}[/bold yellow]")
                 return context
             context.logs.append(f"[StructuralValidatorAgent] AST Validation passed. Parsed {result.node_count} nodes.")
+            console.print(f"[dim]  ✓ AST syntax valid ({result.node_count} nodes).[/dim]")
         else:
             context.logs.append(f"[StructuralValidatorAgent] Skipping Tree-sitter AST check for non-C language: {context.language}")
 
@@ -55,13 +61,16 @@ class StructuralValidatorAgent(BaseAgent):
                 f.write(patched_code)
 
             try:
+                console.print("[dim]  [StructuralValidatorAgent] Compiling patched target with native compiler...[/dim]")
                 exe_path = compile_target(temp_c_path, self.compiler_path)
                 context.logs.append(f"[StructuralValidatorAgent] Patched target compiled successfully: {exe_path}")
+                console.print(f"[dim]  ✓ Patched target compiled successfully: {os.path.basename(exe_path)}[/dim]")
             except Exception as e:
                 err_msg = f"[StructuralValidatorAgent] Compilation of patched target failed: {e}"
                 context.logs.append(err_msg)
                 context.notepad.append(f"Validator: Compilation error on patch: {e}")
                 context.verification_status = "REGRESSION_FAILED"
+                console.print(f"[bold yellow]  ⚠️ Patched code compilation failed: {e}[/bold yellow]")
                 return context
 
             # 3. Fire all reproduction crash payloads at the patched target
@@ -77,6 +86,7 @@ class StructuralValidatorAgent(BaseAgent):
             if current_sandbox == "none" and context.sandboxed:
                 current_sandbox = "docker"
 
+            console.print(f"[dim]  [StructuralValidatorAgent] Re-testing {len(active_crashes)} reproduction payload(s) in sandbox...[/dim]")
             all_secured = True
             for crash in active_crashes:
                 # For stdin mode, ensure the payload string is passed as input_data if args is set but input_data is empty
@@ -106,6 +116,7 @@ class StructuralValidatorAgent(BaseAgent):
                     fail_msg = f"Validator verification failed: Payload {crash.args} still triggered vulnerability (type: {res.get('crash_type')})."
                     context.logs.append(f"[StructuralValidatorAgent] {fail_msg}")
                     context.notepad.append(f"Validator: {fail_msg}")
+                    console.print(f"[bold yellow]  ⚠️ Regression test: payload {crash.args} still triggered {res.get('crash_type')}[/bold yellow]")
                     all_secured = False
                     break
 
@@ -113,6 +124,7 @@ class StructuralValidatorAgent(BaseAgent):
                 context.verification_status = "VERIFIED_SECURE"
                 context.logs.append("[StructuralValidatorAgent] Verification PASSED! The patch blocks all crash payloads.")
                 context.notepad.append("Validator: Verification PASSED! All payloads blocked.")
+                console.print("[bold green]  ✓ All reproduction payloads blocked! Zero regressions.[/bold green]")
             else:
                 context.verification_status = "REGRESSION_FAILED"
 
