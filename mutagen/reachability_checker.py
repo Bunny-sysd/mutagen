@@ -46,7 +46,7 @@ def extract_vulnerable_function_name(source_path: str, line_number: int) -> str 
                                         return res
                                 return None
                             name = _drill(declarator)
-                            if name:
+                            if name and name.lower() not in ("if", "while", "for", "switch", "return", "do", "else"):
                                 return name
                     curr = curr.parent
         except Exception:
