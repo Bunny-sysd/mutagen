@@ -168,8 +168,77 @@ def strip_code_fences(raw: str) -> str:
     # Final cleanup of any lingering isolated backticks
     if result.startswith("```"):
         result = re.sub(r"^```[a-zA-Z0-9_+-]*\s*\n?", "", result)
-    if result.endswith("```"):
-        result = re.sub(r"\n?```\s*$", "", result)
-
     return result.strip()
+
+
+def repair_truncated_json(raw: str) -> dict | list | None:
+    """
+    Attempts to salvage valid JSON objects or arrays from truncated LLM output strings.
+    Extracts complete inner JSON objects, strips incomplete trailing tokens,
+    and balances quotes/brackets.
+    """
+    if not raw or not raw.strip():
+        return None
+
+    text = raw.strip()
+    text = re.sub(r'^```(?:json)?\s*\n?', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\n?```\s*$', '', text, flags=re.MULTILINE).strip()
+
+    # 1. Try direct parse first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Extract all complete {"key": ...} objects using brace balance parser
+    objects = []
+    depth = 0
+    start_idx = None
+    in_string = False
+    escape = False
+
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == '\\':
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+
+        if ch == '{':
+            if depth == 0:
+                start_idx = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and start_idx is not None:
+                candidate = text[start_idx:i+1]
+                try:
+                    obj = json.loads(candidate)
+                    if isinstance(obj, dict):
+                        objects.append(obj)
+                except Exception:
+                    pass
+                start_idx = None
+
+    if objects:
+        if len(objects) == 1 and any(k in objects[0] for k in ("vulnerabilities", "payloads", "items")):
+            return objects[0]
+        return objects
+
+    # 3. Truncation repair: try closing open string quotes and closing braces
+    for suffix in ['"}', '"}]}', '"]}', ']}', '}']:
+        try:
+            patched = text.rstrip(', \n\t') + suffix
+            data = json.loads(patched)
+            return data
+        except Exception:
+            pass
+
+    return None
 

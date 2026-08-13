@@ -282,6 +282,23 @@ def evaluate_cve_validation_outcome(
                 "logs": context.logs[-10:],
             }
         }
+    # Category E: INCONCLUSIVE — TRIAGE FAILURE
+    # If the triage LLM call failed (API error / JSON parse error) and produced 0 findings:
+    triage_failed = getattr(context, "triage_failed", False)
+    triage_error = getattr(context, "triage_error", "")
+    if (triage_failed or (len(context.active_payloads) == 0 and triage_error)) and len(context.vulnerabilities) == 0:
+        return {
+            "category": "E",
+            "status": "INCONCLUSIVE — TRIAGE FAILURE",
+            "cve_id": cve_id,
+            "cve_name": cve_name,
+            "summary": f"Triage phase failed to complete ({triage_error or 'API/Parse error'}). 0 findings generated — run is inconclusive.",
+            "diagnostic": {
+                "triage_error": triage_error or "Triage LLM call failed or returned empty findings",
+                "target_path": context.target_path,
+                "logs": context.logs[-15:],
+            }
+        }
 
     # Category C: PIPELINE GAP
     # The target IS within the affected version range, but 0 crashes reproduced.
@@ -348,12 +365,20 @@ def render_cve_validation_panel(result: dict[str, Any]) -> None:
     elif cat == "D":
         color = "yellow"
         title = f"[bold yellow]⚠️ GROUND-TRUTH CVE VALIDATION: {cve_id} — {status_str}[/bold yellow]"
+    elif cat == "E":
+        color = "yellow"
+        title = f"[bold yellow]⚠️ GROUND-TRUTH CVE VALIDATION: {cve_id} — {status_str}[/bold yellow]"
     else:  # Category C
         color = "red"
         title = f"[bold red]❌ GROUND-TRUTH CVE VALIDATION: {cve_id} — {status_str}[/bold red]"
 
     diag_text = ""
-    if cat == "C" and result.get("diagnostic"):
+    if cat == "E" and result.get("diagnostic"):
+        diag = result["diagnostic"]
+        diag_text = f"\n\n[bold yellow]Triage Error Telemetry:[/bold yellow]\n"
+        diag_text += f"  - Error Detail:   {diag.get('triage_error')}\n"
+        diag_text += f"  - Recommendation: Triage LLM call encountered a parse/network error. Please retry the run.\n"
+    elif cat == "C" and result.get("diagnostic"):
         diag = result["diagnostic"]
         diag_text = f"\n\n[bold yellow]Pipeline Diagnostic Telemetry:[/bold yellow]\n"
         diag_text += f"  - Target Delivery Mode:  {diag.get('delivery_mode')}\n"
@@ -368,9 +393,12 @@ def render_cve_validation_panel(result: dict[str, Any]) -> None:
                 diag_text += f"  - Payload 1 Stderr:      {p0.get('stderr').strip()[:120]}\n"
 
     panel = Panel(
-        f"[bold white]{summary}[/bold white]{diag_text}",
+        f"[bold]CVE ID:[/bold]       {cve_id} ({result.get('cve_name', '')})\n"
+        f"[bold]Outcome:[/bold]      {status_str}\n"
+        f"[bold]Summary:[/bold]      {summary}"
+        f"{diag_text}",
         title=title,
         border_style=color,
-        box=box.HEAVY
+        expand=False,
     )
     console.print(panel)

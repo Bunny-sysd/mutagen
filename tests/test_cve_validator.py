@@ -126,6 +126,31 @@ def test_evaluate_cve_outcomes():
     assert res_c["diagnostic"]["reachability_status"] != ""
     assert res_c["diagnostic"]["reachability_message"] != ""
 
+    # Case E: Inconclusive Triage Failure
+    ctx_e = ProgramContext(
+        target_path="dummy.c",
+        language="c",
+        os_platform="linux",
+        source_code="",
+        triage_failed=True,
+        triage_error="JSONDecodeError: Unterminated string"
+    )
+    res_e = evaluate_cve_validation_outcome(ctx_e, cve_meta, "1.6.50", is_version_affected=True)
+    assert res_e["category"] == "E"
+    assert "INCONCLUSIVE" in res_e["status"]
+    assert "JSONDecodeError" in res_e["diagnostic"]["triage_error"]
+
+
+def test_repair_truncated_json():
+    from mutagen.engines.output_parser import repair_truncated_json
+
+    # Truncated JSON array/object midway through string
+    truncated = '{"vulnerabilities": [{"vuln_type": "Heap Overflow", "cwe": "CWE-122", "severity": "high", "line_number": 12, "code_snippet": "buf[i] = 1;", "reason": "Unclosed reason text...'
+    repaired = repair_truncated_json(truncated)
+    assert repaired is not None
+    assert isinstance(repaired, (dict, list))
+
+
 
 from unittest.mock import patch, MagicMock
 from mutagen.executor import execute_payload

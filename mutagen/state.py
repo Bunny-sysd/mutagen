@@ -175,6 +175,8 @@ class ProgramContext(BaseModel):
     user_confirmed_unsandboxed: bool = False
     ci_mode: bool = False
     skip_flagged_findings: bool = False
+    triage_failed: bool = False
+    triage_error: str = ""
 
     @field_validator("vulnerabilities", mode="before")
     @classmethod

@@ -148,8 +148,12 @@ class AgentOrchestrator:
         # 1. Run Triage Agent to find bugs & detect delivery mode
         self.context = await self.triage_agent.process(self.context)
         if not self.context.vulnerabilities:
-            console.print("[bold green][100%] [✓] Analysis Complete: Code appears clean. No vulnerabilities found.[/bold green]")
-            self.context.logs.append("[Orchestrator] Code appears clean. No vulnerabilities found.")
+            if getattr(self.context, "triage_failed", False):
+                console.print(f"[bold red]❌ Triage Incomplete: AI Triage failed ({self.context.triage_error}) and fallback produced 0 findings.[/bold red]")
+                self.context.logs.append(f"[Orchestrator] Triage incomplete due to triage error: {self.context.triage_error}")
+            else:
+                console.print("[bold green][100%] [✓] Analysis Complete: Code appears clean. No vulnerabilities found.[/bold green]")
+                self.context.logs.append("[Orchestrator] Code appears clean. No vulnerabilities found.")
             return self.context
 
         # Determine active delivery mode (user explicit override beats auto-detected)
