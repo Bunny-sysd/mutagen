@@ -70,6 +70,56 @@ def extract_vulnerable_function_name(source_path: str, line_number: int) -> str 
     return None
 
 
+def extract_vulnerable_function_scope(source_code: str, line_number: int) -> dict | None:
+    """
+    Extracts the enclosing function name, body, and line range (1-indexed) around line_number.
+    Returns: {"name": str, "body": str, "start_line": int, "end_line": int} or None.
+    """
+    if not source_code:
+        return None
+
+    try:
+        import tree_sitter_c as tsc
+        from tree_sitter import Language, Parser
+        c_lang = Language(tsc.language())
+        parser = Parser(c_lang)
+        code_bytes = source_code.encode("utf-8")
+        tree = parser.parse(code_bytes)
+        lines = source_code.splitlines()
+
+        target_line = max(0, line_number - 1)
+        if target_line < len(lines):
+            target_bytes_offset = sum(len(line_str.encode("utf-8")) + 1 for line_str in lines[:target_line])
+            node = tree.root_node.descendant_for_byte_range(target_bytes_offset, target_bytes_offset + 1)
+            curr = node
+            while curr:
+                if curr.type == "function_definition":
+                    declarator = curr.child_by_field_name("declarator")
+                    name = None
+                    if declarator:
+                        def _drill(n):
+                            if n.type == "identifier":
+                                return n.text.decode("utf-8")
+                            for c in n.children:
+                                res = _drill(c)
+                                if res:
+                                    return res
+                            return None
+                        name = _drill(declarator)
+                    body_text = code_bytes[curr.start_byte:curr.end_byte].decode("utf-8", errors="replace")
+                    return {
+                        "name": name or "<unknown>",
+                        "body": body_text,
+                        "start_line": curr.start_point[0] + 1,
+                        "end_line": curr.end_point[0] + 1,
+                    }
+                curr = curr.parent
+    except Exception:
+        pass
+
+    return None
+
+
 def get_expanded_reachability_set(target_path_or_dir: str, vuln_function: str) -> set[str]:
     """
     Scans project header/source files to discover macro aliases (#define MACRO ... vuln_function)

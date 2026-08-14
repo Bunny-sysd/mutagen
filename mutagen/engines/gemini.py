@@ -22,7 +22,15 @@ class GeminiEngine(BaseEngine):
         self.api_key = api_key
         self.model = model
         self.debug = debug
-        self.client = genai.Client(api_key=self.api_key)
+        try:
+            from google.genai import types
+            http_opts = types.HttpOptions(timeout=int(GEMINI_HTTP_TIMEOUT * 1000))
+            self.client = genai.Client(api_key=self.api_key, http_options=http_opts)
+        except Exception:
+            try:
+                self.client = genai.Client(api_key=self.api_key, http_options={"timeout": int(GEMINI_HTTP_TIMEOUT * 1000)})
+            except Exception:
+                self.client = genai.Client(api_key=self.api_key)
         # Override internal HTTP clients with custom timeouts to bypass connect/handshake timeout errors in this environment
         import httpx
         custom_timeout = httpx.Timeout(

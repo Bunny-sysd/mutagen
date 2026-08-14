@@ -162,3 +162,34 @@ def test_gemini_engine_patch_generation_model_resolution():
         patch_res = engine.generate_patch("int main() {}", {"args": ["test"], "vuln_type": "overflow"})
         assert patch_res == "int main() { return 0; }"
 
+
+def test_extract_vulnerable_function_scope():
+    """
+    Ensures extract_vulnerable_function_scope isolates the enclosing function.
+    """
+    from mutagen.reachability_checker import extract_vulnerable_function_scope
+
+    code = """#include <stdio.h>
+
+void safe_function(void) {
+    printf("safe\\n");
+}
+
+void vuln_function(char *src) {
+    char buf[10];
+    strcpy(buf, src);
+}
+
+int main(int argc, char **argv) {
+    vuln_function(argv[1]);
+    return 0;
+}
+"""
+    scope = extract_vulnerable_function_scope(code, 8)
+    assert scope is not None
+    assert scope["name"] == "vuln_function"
+    assert "strcpy" in scope["body"]
+    assert scope["start_line"] == 7
+    assert scope["end_line"] == 10
+
+
