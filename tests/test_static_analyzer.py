@@ -171,3 +171,32 @@ def test_chunker_ast_dangerous_keywords():
     assert contains_dangerous_keywords("void test() { // strcpy is bad \n }") is False
     # False because it's only in a string literal
     assert contains_dangerous_keywords('void test() { const char *s = "strcpy"; }') is False
+
+
+def test_dynamic_ast_pattern_detection():
+    """
+    Ensures AST detects dynamic buffer writing, pointer dereferences,
+    and bit transformations without needing hardcoded function names.
+    """
+    code = """#include <stdint.h>
+
+void custom_quantize(uint8_t *row, int width, int shift) {
+    for (int i = 0; i < width; i++) {
+        uint8_t val = row[i];
+        row[i] = val >> shift;
+    }
+}
+
+void safe_standalone() {
+    int a = 1;
+}
+"""
+    res = analyze_source(code)
+    assert len(res.findings) > 0
+    # Should extract custom_quantize because of pointer parameters, subscript write, and bit shift
+    assert "custom_quantize" in res.focused_functions
+    assert "safe_standalone" not in res.focused_functions
+
+    pattern_types = {f.pattern_type for f in res.findings}
+    assert "dynamic_buffer_write" in pattern_types or "dynamic_input_entry" in pattern_types
+

@@ -301,21 +301,25 @@ def _walk_for_calls(
     findings: list[StaticFinding],
     dangerous_func_nodes: dict[str, object],
 ) -> None:
-    """Recursively walk the AST looking for call_expression nodes to dangerous functions."""
+    """
+    Recursively walk the AST looking for:
+    1. Known dangerous function call expressions
+    2. Dynamic buffer subscript writes (e.g. arr[i] = ...)
+    3. Dynamic pointer dereference writes (e.g. *ptr = ...)
+    4. Dynamic size & arithmetic calculations (*, <<, sizeof)
+    5. Dynamic external input entry points & buffer parameters
+    """
+    # 1. Check call expressions
     if node.type == "call_expression":
-        # Get the function being called
         func_child = node.child_by_field_name("function")
         if func_child and func_child.type == "identifier":
             call_name = func_child.text.decode("utf-8") if isinstance(func_child.text, bytes) else str(func_child.text)
 
             if call_name in dangerous_names:
                 info = DANGEROUS_CALLS[call_name]
-                line_num = node.start_point[0] + 1  # 1-indexed
-
-                # Find the enclosing function
+                line_num = node.start_point[0] + 1
                 enclosing = _find_enclosing_function(node)
                 func_name = _get_function_name(enclosing) if enclosing else "<global>"
-
                 context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
 
                 findings.append(StaticFinding(
@@ -327,13 +331,28 @@ def _walk_for_calls(
                     cwe=info["cwe"],
                     context_snippet=context.strip(),
                 ))
+                if enclosing and func_name not in dangerous_func_nodes:
+                    dangerous_func_nodes[func_name] = enclosing
 
-                # Track the enclosing function node for extraction
+            elif any(sub in call_name.lower() for sub in ["alloc", "malloc", "calloc", "realloc", "free", "quantize", "transform"]):
+                line_num = node.start_point[0] + 1
+                enclosing = _find_enclosing_function(node)
+                func_name = _get_function_name(enclosing) if enclosing else "<global>"
+                context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
+
+                findings.append(StaticFinding(
+                    function_name=func_name,
+                    line=line_num,
+                    pattern_type="heap_operation" if "alloc" in call_name.lower() or "free" in call_name.lower() else "format_transformation",
+                    call_name=call_name,
+                    severity="high",
+                    cwe="CWE-416" if "free" in call_name.lower() else "CWE-119",
+                    context_snippet=context.strip(),
+                ))
                 if enclosing and func_name not in dangerous_func_nodes:
                     dangerous_func_nodes[func_name] = enclosing
             else:
-                # Dynamic AST heuristic for custom wrapper functions:
-                # Only flag if an argument involves pointer arithmetic or array subscripting on a pointer
+                # Dynamic AST heuristic: call passing pointer arithmetic or subscript expression
                 has_ptr_op = any(child.type in ("pointer_expression", "subscript_expression") for child in node.children)
                 if has_ptr_op and len(node.children) > 1:
                     enclosing = _find_enclosing_function(node)
@@ -352,6 +371,100 @@ def _walk_for_calls(
                     ))
                     if enclosing and func_name not in dangerous_func_nodes:
                         dangerous_func_nodes[func_name] = enclosing
+
+    # 2. Check dynamic assignment expressions (buffer & pointer writes)
+    elif node.type == "assignment_expression":
+        left_child = node.child_by_field_name("left")
+        if left_child:
+            if left_child.type == "subscript_expression":
+                # Dynamic array / buffer write: e.g. dest[i] = ... or row[x] = ...
+                enclosing = _find_enclosing_function(node)
+                func_name = _get_function_name(enclosing) if enclosing else "<global>"
+                line_num = node.start_point[0] + 1
+                context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
+
+                findings.append(StaticFinding(
+                    function_name=func_name,
+                    line=line_num,
+                    pattern_type="dynamic_buffer_write",
+                    call_name="[subscript_write]",
+                    severity="high",
+                    cwe="CWE-787",
+                    context_snippet=context.strip(),
+                ))
+                if enclosing and func_name not in dangerous_func_nodes:
+                    dangerous_func_nodes[func_name] = enclosing
+
+            elif left_child.type == "pointer_expression":
+                # Dynamic pointer dereference write: e.g. *ptr = ...
+                enclosing = _find_enclosing_function(node)
+                func_name = _get_function_name(enclosing) if enclosing else "<global>"
+                line_num = node.start_point[0] + 1
+                context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
+
+                findings.append(StaticFinding(
+                    function_name=func_name,
+                    line=line_num,
+                    pattern_type="dynamic_ptr_deref_write",
+                    call_name="*ptr=",
+                    severity="high",
+                    cwe="CWE-119",
+                    context_snippet=context.strip(),
+                ))
+                if enclosing and func_name not in dangerous_func_nodes:
+                    dangerous_func_nodes[func_name] = enclosing
+
+    # 3. Check dynamic size arithmetic and bitwise quantization transforms
+    elif node.type == "binary_expression":
+        op_child = node.child_by_field_name("operator")
+        op_str = op_child.text.decode("utf-8") if op_child and isinstance(op_child.text, bytes) else (str(op_child.text) if op_child else "")
+        if op_str in ("<<", ">>"):
+            # Bitwise transform or shift inside functions
+            enclosing = _find_enclosing_function(node)
+            if enclosing:
+                func_name = _get_function_name(enclosing)
+                line_num = node.start_point[0] + 1
+                context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
+                findings.append(StaticFinding(
+                    function_name=func_name,
+                    line=line_num,
+                    pattern_type="dynamic_data_transformation",
+                    call_name=f"shift_{op_str}",
+                    severity="medium",
+                    cwe="CWE-681",
+                    context_snippet=context.strip(),
+                ))
+                if func_name not in dangerous_func_nodes:
+                    dangerous_func_nodes[func_name] = enclosing
+
+    # 4. Check function parameters for dynamic buffer and taint entry points
+    elif node.type == "function_definition":
+        declarator = node.child_by_field_name("declarator")
+        func_name = _get_function_name(node)
+        if declarator and func_name not in dangerous_func_nodes:
+            # Check if function takes pointer parameters or buffer lengths
+            params = node.child_by_field_name("parameters")
+            if not params:
+                # Look for parameter_list inside declarator
+                for child in node.children:
+                    if child.type == "parameter_list":
+                        params = child
+                        break
+            if params:
+                param_text = _node_text(params, source_bytes)
+                if "*" in param_text and any(k in param_text for k in ["len", "size", "count", "num", "bytes", "width", "height", "row"]):
+                    line_num = node.start_point[0] + 1
+                    context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
+                    findings.append(StaticFinding(
+                        function_name=func_name,
+                        line=line_num,
+                        pattern_type="dynamic_input_entry",
+                        call_name="param_buffer_in",
+                        severity="medium",
+                        cwe="CWE-120",
+                        context_snippet=context.strip(),
+                    ))
+                    dangerous_func_nodes[func_name] = node
 
     for child in node.children:
         _walk_for_calls(child, source_bytes, source_lines, dangerous_names, findings, dangerous_func_nodes)
