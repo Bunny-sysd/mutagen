@@ -195,12 +195,12 @@ def test_docker_infrastructure_error_classified_as_execution_error():
             assert "you cannot start and attach" in res["stderr"]
 
 
-@pytest.mark.asyncio
-async def test_supervisor_records_execution_error():
+def test_supervisor_records_execution_error():
     """
     Ensures that when execute_payload returns EXECUTION_ERROR, FuzzingSupervisorAgent
     sets payload.crash_type = 'EXECUTION_ERROR' and does NOT count it as a clean negative.
     """
+    import asyncio
     from mutagen.agents.supervisor import FuzzingSupervisorAgent
     ctx = ProgramContext(
         target_path="dummy.c",
@@ -221,8 +221,71 @@ async def test_supervisor_records_execution_error():
                 "container_id": "a1b2c3d4e5f6"
             }):
                 supervisor = FuzzingSupervisorAgent()
-                updated_ctx = await supervisor.process(ctx)
+                updated_ctx = asyncio.run(supervisor.process(ctx))
                 p0 = updated_ctx.active_payloads[0]
                 assert p0.crash_type == "EXECUTION_ERROR"
                 assert any("Infrastructure/Execution error" in log for log in updated_ctx.logs)
+
+
+def test_synthesis_failed_outcome_and_fallback_exclusion():
+    """
+    Ensures that when synthesis fails and only generic fallback payloads are executed,
+    evaluate_cve_validation_outcome returns 'INCONCLUSIVE — SYNTHESIS FAILED' (Category F)
+    and NEVER returns CONFIRMED, even if the fallback triggered an exit code.
+    """
+    cve_meta = {
+        "cve_id": "CVE-2025-64505",
+        "name": "Heap buffer over-read in png_do_quantize",
+        "fixed_version": "1.6.51"
+    }
+
+    # Case F1: Explicit synthesis_failed flag set
+    ctx_f1 = ProgramContext(
+        target_path="pngrtran.c",
+        language="c",
+        os_platform="linux",
+        source_code="void png_do_quantize() {}",
+        synthesis_failed=True,
+        synthesis_error="ClientError: 504 Gateway Timeout",
+        active_payloads=[
+            CrashPayload(args=["AAAAAA"], is_fallback=True, synthesis_failed=True, crash_type="LOGICAL_EXPLOIT", exit_code=1)
+        ]
+    )
+    res_f1 = evaluate_cve_validation_outcome(ctx_f1, cve_meta, "1.6.50", is_version_affected=True)
+    assert res_f1["category"] == "F"
+    assert "INCONCLUSIVE — SYNTHESIS FAILED" in res_f1["status"]
+    assert res_f1["status"] != "CONFIRMED"
+
+    # Case F2: Only fallback payloads in active_payloads
+    ctx_f2 = ProgramContext(
+        target_path="pngrtran.c",
+        language="c",
+        os_platform="linux",
+        source_code="void png_do_quantize() {}",
+        active_payloads=[
+            CrashPayload(args=["AAAAAA"], is_fallback=True, crash_type=None, exit_code=1)
+        ]
+    )
+    res_f2 = evaluate_cve_validation_outcome(ctx_f2, cve_meta, "1.6.50", is_version_affected=True)
+    assert res_f2["category"] == "F"
+    assert "INCONCLUSIVE — SYNTHESIS FAILED" in res_f2["status"]
+
+
+def test_materiality_check_excludes_file_not_found():
+    """
+    Ensures that generic file-not-found, usage, or environmental errors
+    are NOT matched as LOGICAL_EXPLOIT crashes by the executor oracles.
+    """
+    from mutagen.session_supervisor import _check_oracles
+
+    crashed, crash_type = _check_oracles(
+        stdout="",
+        stderr="pngimage: AAAAAA: No such file or directory\n",
+        return_code=1
+    )
+
+    assert crashed is False
+    assert crash_type in ("", "none")
+    assert "LOGICAL_EXPLOIT" not in crash_type
+
 

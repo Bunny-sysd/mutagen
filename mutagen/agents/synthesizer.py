@@ -1,4 +1,5 @@
 import json
+import re
 import struct
 
 from pydantic import BaseModel, Field
@@ -219,28 +220,63 @@ Return JSON adhering strictly to:
 """
 
         try:
+            data = None
+            synthesis_error = None
             if self.model_provider == "gemini" and hasattr(self.engine, "client") and hasattr(self.engine.client, "models"):
-                response = self.engine.client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt,
-                    config={
-                        "temperature": SYNTHESIZER_TEMPERATURE,
-                        "response_mime_type": "application/json",
-                        "response_schema": PayloadList,
-                        "safety_settings": GEMINI_SAFETY_OFF,
-                    }
-                )
-                raw_response_text = response.text
-                # Diagnostic: log raw API response length for debugging empty/blocked responses
-                if not raw_response_text or not raw_response_text.strip():
-                    context.logs.append("[PayloadSynthesizerAgent] WARNING: Gemini API returned empty response (possible safety block or rate limit).")
+                from mutagen.engines.base import AiActivityHeartbeat
+                from rich.console import Console
+                console = Console(force_terminal=True, force_jupyter=False)
+
+                models_to_try = [self.model_name] if self.model_name else []
+                for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
+                    if m not in models_to_try:
+                        models_to_try.append(m)
+
+                for model_candidate in models_to_try:
+                    for attempt in range(2):
+                        try:
+                            with AiActivityHeartbeat(task_name=f"synthesizing exploit payloads with {model_candidate}"):
+                                response = self.engine.client.models.generate_content(
+                                    model=model_candidate,
+                                    contents=prompt,
+                                    config={
+                                        "temperature": SYNTHESIZER_TEMPERATURE,
+                                        "response_mime_type": "application/json",
+                                        "response_schema": PayloadList,
+                                        "safety_settings": GEMINI_SAFETY_OFF,
+                                    }
+                                )
+                            raw_response_text = response.text if response else ""
+                            if not raw_response_text or not raw_response_text.strip():
+                                raise ValueError("Empty response text from AI model")
+                            parsed = robust_json_parse(raw_response_text)
+                            if parsed and parsed.get("payloads") and not (len(parsed["payloads"]) == 1 and "Fallback" in parsed["payloads"][0].get("reason", "")):
+                                data = parsed
+                                break
+                        except Exception as e:
+                            synthesis_error = e
+                            err_upper = str(e).upper()
+                            if "429" in err_upper or "RESOURCE_EXHAUSTED" in err_upper:
+                                import time
+                                console.print("[yellow]  Rate limit (429) on synthesis. Waiting 15s to cool down...[/yellow]")
+                                time.sleep(15)
+                            elif any(k in err_upper for k in ["504", "TIMEOUT", "503", "SERVER_ERROR", "DEADLINE_EXCEEDED", "NOT_FOUND", "404"]):
+                                console.print(f"[yellow]  Model '{model_candidate}' timed out (504/timeout). Switching to fallback model candidate...[/yellow]")
+                                break
+                            elif attempt < 1:
+                                import time
+                                time.sleep(2)
+                    if data is not None and data.get("payloads"):
+                        break
+
+                if data is None:
+                    context.synthesis_failed = True
+                    context.synthesis_error = f"{type(synthesis_error).__name__}: {synthesis_error}" if synthesis_error else "Empty response"
+                    context.logs.append(f"[PayloadSynthesizerAgent] WARNING: Real payload synthesis failed ({context.synthesis_error}). Activating format fallback...")
                     if context.delivery_mode == "file":
-                        context.logs.append("[PayloadSynthesizerAgent] Activating format-aware file mode fallback payloads...")
                         data = {"payloads": _generate_file_mode_fallback_payloads()}
                     else:
-                        data = robust_json_parse(raw_response_text)
-                else:
-                    data = robust_json_parse(raw_response_text)
+                        data = {"payloads": [{"args": ["A" * 64], "input_data": "A" * 64, "reason": "Generic fallback payload (synthesis failed)", "is_fallback": True}]}
             else:
                 # Multi-provider fallback for OpenAI, Claude, and Ollama
                 raw_payloads = self.engine.generate_payloads(context.source_code, prompt, max_payloads=5, debug=False)
@@ -264,25 +300,26 @@ Return JSON adhering strictly to:
 
             payloads = data.get("payloads", [])
             valid_payloads_added = 0
+            is_synthesis_fallback = getattr(context, "synthesis_failed", False)
+
             for p in payloads:
                 args = p.get("args", [])
                 input_data = p.get("input_data", "")
                 raw_bytes_hex = p.get("raw_bytes_hex")
                 reason = p.get("reason", "")
+                item_is_fallback = bool(p.get("is_fallback", is_synthesis_fallback) or "Fallback" in reason)
 
                 # SYSTEMIC VALIDATION & FALLBACK RECOVERY:
-                # If reason exists or LLM produced a payload item, but args, input_data, and raw_bytes_hex are all empty:
-                # auto-populate args/input_data based on delivery_mode so FuzzingSupervisorAgent never receives empty inputs.
                 is_empty_payload = (not args or len(args) == 0) and (not input_data or not str(input_data).strip()) and not raw_bytes_hex
                 if is_empty_payload:
+                    item_is_fallback = True
                     context.logs.append(f"[PayloadSynthesizerAgent] WARNING: Payload produced reasoning without args/input_data (Reason: {reason}). Auto-recovering payload...")
                     if context.delivery_mode == "file":
-                        # Populate default file mode argument payload if empty
                         args = ["overflow_poc.png"]
                         raw_bytes_hex = _generate_file_mode_fallback_payloads()[0]["raw_bytes_hex"]
                     elif context.delivery_mode == "args":
                         args = ["A" * 64]
-                    else: # stdin, tcp, http
+                    else:
                         input_data = "A" * 64
                 elif context.delivery_mode == "file" and (not args or len(args) == 0):
                     ext = ".png" if "png" in context.target_path.lower() else ".bin"
@@ -307,40 +344,46 @@ Return JSON adhering strictly to:
                     "args": args,
                     "input_data": input_data,
                     "raw_bytes_hex": raw_bytes_hex,
-                    "reason": reason
+                    "reason": reason,
+                    "is_fallback": item_is_fallback,
+                    "synthesis_failed": is_synthesis_fallback,
                 })
                 valid_payloads_added += 1
-                context.logs.append(f"[PayloadSynthesizerAgent] Generated payload args: {args} (Reason: {reason})")
+                context.logs.append(f"[PayloadSynthesizerAgent] Generated payload args: {args} (Fallback: {item_is_fallback}, Reason: {reason})")
 
             # For file delivery mode, append format-aware structural binary fallback payloads
-            # (e.g. corrupted IHDR, zero-length IDAT, boundary probes) alongside LLM payloads.
-            if context.delivery_mode == "file":
+            if context.delivery_mode == "file" and not is_synthesis_fallback:
                 ext = ".png" if "png" in context.target_path.lower() else ".bin"
                 for i, fb in enumerate(_generate_file_mode_fallback_payloads()):
                     context.add_payload({
                         "args": [f"payload_fallback_{i+1}{ext}"],
                         "input_data": "",
                         "raw_bytes_hex": fb["raw_bytes_hex"],
-                        "reason": fb["reason"]
+                        "reason": fb["reason"],
+                        "is_fallback": True,
+                        "synthesis_failed": False,
                     })
                     valid_payloads_added += 1
 
             # Final safety check: if active_payloads remains empty, insert fallback
             if valid_payloads_added == 0:
+                context.synthesis_failed = True
                 context.logs.append("[PayloadSynthesizerAgent] WARNING: Zero payloads generated by synthesis. Inserting format fallback...")
                 if context.delivery_mode == "file":
                     for fb in _generate_file_mode_fallback_payloads():
-                        context.add_payload(CrashPayload(args=["poc_fallback.png"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"]))
+                        context.add_payload(CrashPayload(args=["poc_fallback.png"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"], is_fallback=True, synthesis_failed=True))
                 else:
-                    context.add_payload(CrashPayload(args=["A" * 64], input_data="A" * 64))
+                    context.add_payload(CrashPayload(args=["A" * 64], input_data="A" * 64, is_fallback=True, synthesis_failed=True))
 
         except Exception as e:
+            context.synthesis_failed = True
+            context.synthesis_error = str(e)
             context.logs.append(f"[PayloadSynthesizerAgent] Error generating payloads: {e}")
             if context.delivery_mode == "file":
                 for fb in _generate_file_mode_fallback_payloads():
-                    context.add_payload(CrashPayload(args=["poc_fallback.png"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"]))
+                    context.add_payload(CrashPayload(args=["poc_fallback.png"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"], is_fallback=True, synthesis_failed=True))
             else:
-                context.add_payload(CrashPayload(args=["A" * 64], input_data="A" * 64, reason="Fallback due to execution error"))
+                context.add_payload(CrashPayload(args=["A" * 64], input_data="A" * 64, reason="Fallback due to execution error", is_fallback=True, synthesis_failed=True))
             context.logs.append("[PayloadSynthesizerAgent] Added safe fallback payload")
 
         return context

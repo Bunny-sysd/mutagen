@@ -53,19 +53,42 @@ class PatchEngineerAgent(BaseAgent):
         from rich.console import Console
         from mutagen.editor import VirtualCodeEditor
         from mutagen.engines.output_parser import strip_code_fences
+        import re
         console = Console(force_terminal=True, force_jupyter=False)
 
-        # 1. Initialize Virtual Code Editor workspace
+        # 1. Initialize Virtual Code Editor workspace with precise target scope
         target_line = 1
+        target_func = None
+
         if context.vulnerabilities:
-            target_line = context.vulnerabilities[0].line_number
+            for v in context.vulnerabilities:
+                if getattr(v, "line_number", 0) > 1:
+                    target_line = v.line_number
+                    break
+                if getattr(v, "function_name", None) and v.function_name != "<unknown>":
+                    target_func = v.function_name
+                    break
+
+        # Check logs and notepad for crashing function name or line numbers
+        if (target_line == 1 and not target_func):
+            combined_history = " ".join(context.notepad + context.logs)
+            m_line = re.search(r'[\w\-]+\.[c|cpp|h]:(\d+)', combined_history)
+            if m_line:
+                target_line = int(m_line.group(1))
+            m_fn = re.search(r'(?:in|function|called|at)\s+[`\'"]?([a-zA-Z_][a-zA-Z0-9_]{3,})[`\'"]?', combined_history)
+            if m_fn and m_fn.group(1).lower() not in ("main", "error", "warning", "failed", "passed", "return"):
+                target_func = m_fn.group(1)
 
         editor = VirtualCodeEditor(
             source_code=context.source_code,
             language=context.language,
             filename=context.target_path
         )
-        editor.open_vulnerable_scope(target_line)
+        if target_func:
+            editor.open_function_scope(target_func)
+        else:
+            editor.open_vulnerable_scope(target_line)
+
         editor.print_editor_status()
 
         candidate = None

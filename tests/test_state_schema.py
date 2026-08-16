@@ -117,12 +117,12 @@ def test_vulnerability_detail_schema_completeness():
     assert vuln.line_number == 42
 
 
-@pytest.mark.asyncio
-async def test_supervisor_compilation_failure_exception_handling():
+def test_supervisor_compilation_failure_exception_handling():
     """
     Ensures that when compilation fails, FuzzingSupervisorAgent gracefully
     records COMPILATION_FAILED reachability telemetry without raising ValueError.
     """
+    import asyncio
     from unittest.mock import patch
     from mutagen.agents.supervisor import FuzzingSupervisorAgent
 
@@ -135,7 +135,7 @@ async def test_supervisor_compilation_failure_exception_handling():
 
     with patch("mutagen.agents.supervisor.compile_target", side_effect=RuntimeError("gcc not found")):
         supervisor = FuzzingSupervisorAgent()
-        res_ctx = await supervisor.process(ctx)
+        res_ctx = asyncio.run(supervisor.process(ctx))
 
         assert res_ctx.reachability_status == "COMPILATION_FAILED"
         assert "gcc not found" in res_ctx.reachability_message

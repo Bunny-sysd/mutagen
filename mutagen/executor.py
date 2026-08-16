@@ -410,12 +410,39 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 port = int(delivery_mode.split(":")[1]) if ":" in delivery_mode else 8080
                 import socket
                 import time
-                process = subprocess.Popen(
-                    run_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    env=env
-                )
+
+                if is_docker_sandbox:
+                    create_cmd = [
+                        "docker", "create",
+                        "--name", container_name,
+                        "-i",
+                        f"--memory={DOCKER_MEMORY_LIMIT}",
+                        f"--cpus={DOCKER_CPU_LIMIT}",
+                        "-p", f"{port}:{port}",
+                        "-v", f"{exe_dir}:/target:ro",
+                        "-w", "/target",
+                        image,
+                        f"./{exe_name}"
+                    ]
+                    create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
+                    if create_res.returncode == 0:
+                        raw_stdout = create_res.stdout.strip()
+                        if raw_stdout:
+                            container_id = raw_stdout.split()[-1][:12]
+                    start_cmd = ["docker", "start", "-a", "-i", container_name]
+                    process = subprocess.Popen(
+                        start_cmd,
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                else:
+                    process = subprocess.Popen(
+                        run_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        env=env
+                    )
                 time.sleep(0.5) # Wait for server to start
                 try:
                     try:
@@ -654,27 +681,38 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         for arg in args:
             clean_output = clean_output.replace(arg.lower(), "")
 
-        if not crashed:
+        # --- MATERIALITY CHECK & LOGICAL EXPLOIT ORACLE --------------------
+        # Filter out benign, expected environmental errors (e.g. file not found, usage errors)
+        mundane_error_patterns = [
+            "no such file or directory",
+            "cannot open file",
+            "file not found",
+            "directory nonexistent",
+            "is not recognized as an internal or external command",
+            "operable program or batch file",
+            "command not found",
+            "permission denied",
+            "invalid option",
+            "unrecognized option",
+            "usage: ",
+            "invalid argument",
+        ]
+
+        is_mundane_error = any(p in clean_output for p in mundane_error_patterns) and result.returncode in (1, 2, 127, 255)
+
+        if not crashed and not is_mundane_error:
             logical_indicators = [
                 "access granted",
                 "privileges acquired",
                 "admin privileges",
                 "flag{",
-                "root:",
-                "uid=0",
-                "systeminfo",
-                "cmd.exe",
-                "/bin/sh",
+                "root:x:",
+                "root::",
+                "uid=0(root)",
+                "uid=0(",
                 "vuln_triggered",
                 "exploit_success",
                 "authenticated as admin",
-                "is not recognized as an internal or external command",
-                "operable program or batch file",
-                "command not found",
-                "no such file or directory",
-                "directory nonexistent",
-                "pwned",
-                "pwn"
             ]
 
             for indicator in logical_indicators:

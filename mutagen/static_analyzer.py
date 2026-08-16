@@ -217,11 +217,12 @@ def analyze_source(code: str) -> PreTargetingResult:
     # Build the set of dangerous function names for fast lookup
     dangerous_names = set(DANGEROUS_CALLS.keys())
 
-    # Walk the entire AST to find call_expression nodes targeting dangerous functions
+    # Walk the entire AST to find dangerous semantic patterns and calls
     findings: list[StaticFinding] = []
     dangerous_func_nodes: dict[str, object] = {}  # func_name → AST node (deduped)
+    seen_findings: set[tuple[int, str]] = set()
 
-    _walk_for_calls(root, code_bytes, source_lines, dangerous_names, findings, dangerous_func_nodes)
+    _walk_for_calls(root, code_bytes, source_lines, dangerous_names, findings, dangerous_func_nodes, seen_findings)
     _ensure_main_included(root, code_bytes, dangerous_func_nodes)
 
     result.findings = findings
@@ -300,6 +301,7 @@ def _walk_for_calls(
     dangerous_names: set[str],
     findings: list[StaticFinding],
     dangerous_func_nodes: dict[str, object],
+    seen_findings: set[tuple[int, str]] = None,
 ) -> None:
     """
     Recursively walk the AST looking for:
@@ -309,6 +311,17 @@ def _walk_for_calls(
     4. Dynamic size & arithmetic calculations (*, <<, sizeof)
     5. Dynamic external input entry points & buffer parameters
     """
+    if seen_findings is None:
+        seen_findings = set()
+
+    def _add_finding(f: StaticFinding, enclosing_node=None):
+        key = (f.line, f.cwe)
+        if key not in seen_findings:
+            seen_findings.add(key)
+            findings.append(f)
+        if enclosing_node and f.function_name != "<global>" and f.function_name not in dangerous_func_nodes:
+            dangerous_func_nodes[f.function_name] = enclosing_node
+
     # 1. Check call expressions
     if node.type == "call_expression":
         func_child = node.child_by_field_name("function")
@@ -322,7 +335,7 @@ def _walk_for_calls(
                 func_name = _get_function_name(enclosing) if enclosing else "<global>"
                 context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
 
-                findings.append(StaticFinding(
+                _add_finding(StaticFinding(
                     function_name=func_name,
                     line=line_num,
                     pattern_type=info["category"],
@@ -330,9 +343,7 @@ def _walk_for_calls(
                     severity=info["severity"],
                     cwe=info["cwe"],
                     context_snippet=context.strip(),
-                ))
-                if enclosing and func_name not in dangerous_func_nodes:
-                    dangerous_func_nodes[func_name] = enclosing
+                ), enclosing)
 
             elif any(sub in call_name.lower() for sub in ["alloc", "malloc", "calloc", "realloc", "free", "quantize", "transform"]):
                 line_num = node.start_point[0] + 1
@@ -340,7 +351,7 @@ def _walk_for_calls(
                 func_name = _get_function_name(enclosing) if enclosing else "<global>"
                 context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
 
-                findings.append(StaticFinding(
+                _add_finding(StaticFinding(
                     function_name=func_name,
                     line=line_num,
                     pattern_type="heap_operation" if "alloc" in call_name.lower() or "free" in call_name.lower() else "format_transformation",
@@ -348,9 +359,7 @@ def _walk_for_calls(
                     severity="high",
                     cwe="CWE-416" if "free" in call_name.lower() else "CWE-119",
                     context_snippet=context.strip(),
-                ))
-                if enclosing and func_name not in dangerous_func_nodes:
-                    dangerous_func_nodes[func_name] = enclosing
+                ), enclosing)
             else:
                 # Dynamic AST heuristic: call passing pointer arithmetic or subscript expression
                 has_ptr_op = any(child.type in ("pointer_expression", "subscript_expression") for child in node.children)
@@ -360,7 +369,7 @@ def _walk_for_calls(
                     line_num = node.start_point[0] + 1
                     context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
 
-                    findings.append(StaticFinding(
+                    _add_finding(StaticFinding(
                         function_name=func_name,
                         line=line_num,
                         pattern_type="custom_ptr_arithmetic",
@@ -368,9 +377,7 @@ def _walk_for_calls(
                         severity="medium",
                         cwe="CWE-119",
                         context_snippet=context.strip(),
-                    ))
-                    if enclosing and func_name not in dangerous_func_nodes:
-                        dangerous_func_nodes[func_name] = enclosing
+                    ), enclosing)
 
     # 2. Check dynamic assignment expressions (buffer & pointer writes)
     elif node.type == "assignment_expression":
@@ -383,7 +390,7 @@ def _walk_for_calls(
                 line_num = node.start_point[0] + 1
                 context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
 
-                findings.append(StaticFinding(
+                _add_finding(StaticFinding(
                     function_name=func_name,
                     line=line_num,
                     pattern_type="dynamic_buffer_write",
@@ -391,9 +398,7 @@ def _walk_for_calls(
                     severity="high",
                     cwe="CWE-787",
                     context_snippet=context.strip(),
-                ))
-                if enclosing and func_name not in dangerous_func_nodes:
-                    dangerous_func_nodes[func_name] = enclosing
+                ), enclosing)
 
             elif left_child.type == "pointer_expression":
                 # Dynamic pointer dereference write: e.g. *ptr = ...
@@ -402,7 +407,7 @@ def _walk_for_calls(
                 line_num = node.start_point[0] + 1
                 context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
 
-                findings.append(StaticFinding(
+                _add_finding(StaticFinding(
                     function_name=func_name,
                     line=line_num,
                     pattern_type="dynamic_ptr_deref_write",
@@ -410,9 +415,7 @@ def _walk_for_calls(
                     severity="high",
                     cwe="CWE-119",
                     context_snippet=context.strip(),
-                ))
-                if enclosing and func_name not in dangerous_func_nodes:
-                    dangerous_func_nodes[func_name] = enclosing
+                ), enclosing)
 
     # 3. Check dynamic size arithmetic and bitwise quantization transforms
     elif node.type == "binary_expression":
@@ -425,7 +428,7 @@ def _walk_for_calls(
                 func_name = _get_function_name(enclosing)
                 line_num = node.start_point[0] + 1
                 context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
-                findings.append(StaticFinding(
+                _add_finding(StaticFinding(
                     function_name=func_name,
                     line=line_num,
                     pattern_type="dynamic_data_transformation",
@@ -433,9 +436,7 @@ def _walk_for_calls(
                     severity="medium",
                     cwe="CWE-681",
                     context_snippet=context.strip(),
-                ))
-                if func_name not in dangerous_func_nodes:
-                    dangerous_func_nodes[func_name] = enclosing
+                ), enclosing)
 
     # 4. Check function parameters for dynamic buffer and taint entry points
     elif node.type == "function_definition":
@@ -455,7 +456,7 @@ def _walk_for_calls(
                 if "*" in param_text and any(k in param_text for k in ["len", "size", "count", "num", "bytes", "width", "height", "row"]):
                     line_num = node.start_point[0] + 1
                     context = source_lines[node.start_point[0]] if node.start_point[0] < len(source_lines) else ""
-                    findings.append(StaticFinding(
+                    _add_finding(StaticFinding(
                         function_name=func_name,
                         line=line_num,
                         pattern_type="dynamic_input_entry",
@@ -463,11 +464,10 @@ def _walk_for_calls(
                         severity="medium",
                         cwe="CWE-120",
                         context_snippet=context.strip(),
-                    ))
-                    dangerous_func_nodes[func_name] = node
+                    ), node)
 
     for child in node.children:
-        _walk_for_calls(child, source_bytes, source_lines, dangerous_names, findings, dangerous_func_nodes)
+        _walk_for_calls(child, source_bytes, source_lines, dangerous_names, findings, dangerous_func_nodes, seen_findings)
 
 
 def _ensure_main_included(root, source_bytes: bytes, dangerous_func_nodes: dict[str, object]) -> None:

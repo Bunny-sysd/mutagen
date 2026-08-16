@@ -92,8 +92,6 @@ class TriageAgent(BaseAgent):
         context.logs.append("[TriageAgent] Starting code triage...")
 
         pretarget = analyze_source(context.source_code)
-        
-        # Always provide the full, intact source code with 1-based line numbers for 100% precision
         code_lines = context.source_code.splitlines()
         numbered_source = "\n".join(f"{i+1:4d} | {line}" for i, line in enumerate(code_lines))
 
@@ -106,7 +104,15 @@ class TriageAgent(BaseAgent):
             if "No multi-file workspace" not in graph_text:
                 graph_summary = f"\n\nPROJECT WORKSPACE CONTEXT:\n{graph_text}\n"
 
-        prompt = get_triage_prompt(context.language, numbered_source)
+        # For large files (> 300 lines), use Sniper Mode AST pre-targeting if available
+        # to focus on dangerous regions, preventing 504 timeouts and gateway latency
+        if len(code_lines) > 300 and pretarget.focused_code and pretarget.findings:
+            from rich.console import Console
+            console = Console(force_terminal=True, force_jupyter=False)
+            console.print(f"[dim]  🎯 [TriageAgent] Sniper Mode active: focused {pretarget.focused_line_count}/{pretarget.original_line_count} lines ({pretarget.reduction_percent:.1f}% token reduction)[/dim]")
+            prompt = get_triage_prompt(context.language, pretarget.focused_code)
+        else:
+            prompt = get_triage_prompt(context.language, numbered_source)
 
         # Include AST static findings as non-destructive hints
         if pretarget.findings:
@@ -132,9 +138,9 @@ class TriageAgent(BaseAgent):
         from rich.console import Console
         console = Console(force_terminal=True, force_jupyter=False)
 
-        # Build fallback model chain for Gemini triage
+        # Build fallback model chain for Gemini triage (using supported model names)
         models_to_try = [self.model_name] if self.model_name else []
-        for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+        for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash-002"]:
             if m not in models_to_try:
                 models_to_try.append(m)
 
@@ -206,10 +212,18 @@ class TriageAgent(BaseAgent):
             context.logs.append(f"[TriageAgent] Error during triage LLM call: {context.triage_error}. Executing static analyzer fallback.")
             console.print(f"[bold yellow]⚠️  Triage AI API unavailable ({context.triage_error}). Falling back to static AST analyzer findings.[/bold yellow]")
             context.delivery_mode = "args"
-            # Fallback to static analyzer findings if LLM fails
+            # Fallback to static analyzer findings if LLM fails (with strict deduplication)
             if pretarget.findings:
                 from mutagen.type_verifier import verify_finding_type_safety
+                seen_fallback_keys = set()
+                deduped_findings = []
                 for finding in pretarget.findings:
+                    f_key = (finding.line, finding.cwe)
+                    if f_key not in seen_fallback_keys:
+                        seen_fallback_keys.add(f_key)
+                        deduped_findings.append(finding)
+
+                for finding in deduped_findings:
                     detail = context.add_vulnerability(finding)
                     v_res = verify_finding_type_safety(
                         source_code=context.source_code,

@@ -51,16 +51,16 @@ DOCKER_CPU_LIMIT: str = os.environ.get("MUTAGEN_DOCKER_CPUS", "1.0")
 # ---------------------------------------------------------------------------
 
 #: Total httpx request timeout for Gemini API calls (seconds).
-GEMINI_HTTP_TIMEOUT: float = float(os.environ.get("MUTAGEN_GEMINI_HTTP_TIMEOUT", "60.0"))
+GEMINI_HTTP_TIMEOUT: float = float(os.environ.get("MUTAGEN_GEMINI_HTTP_TIMEOUT", "120.0"))
 
 #: TCP connect timeout for Gemini API calls (seconds).
-GEMINI_HTTP_CONNECT_TIMEOUT: float = float(os.environ.get("MUTAGEN_GEMINI_CONNECT_TIMEOUT", "10.0"))
+GEMINI_HTTP_CONNECT_TIMEOUT: float = float(os.environ.get("MUTAGEN_GEMINI_CONNECT_TIMEOUT", "15.0"))
 
 #: Read timeout for Gemini API calls (seconds).
-GEMINI_HTTP_READ_TIMEOUT: float = float(os.environ.get("MUTAGEN_GEMINI_READ_TIMEOUT", "60.0"))
+GEMINI_HTTP_READ_TIMEOUT: float = float(os.environ.get("MUTAGEN_GEMINI_READ_TIMEOUT", "120.0"))
 
 #: Write timeout for Gemini API calls (seconds).
-GEMINI_HTTP_WRITE_TIMEOUT: float = float(os.environ.get("MUTAGEN_GEMINI_WRITE_TIMEOUT", "30.0"))
+GEMINI_HTTP_WRITE_TIMEOUT: float = float(os.environ.get("MUTAGEN_GEMINI_WRITE_TIMEOUT", "60.0"))
 
 #: Seconds to sleep when a 429 / RESOURCE_EXHAUSTED rate-limit is hit.
 GEMINI_RATE_LIMIT_WAIT: int = int(os.environ.get("MUTAGEN_RATE_LIMIT_WAIT", "20"))

@@ -45,16 +45,17 @@ def repair_binary_payload(raw_data: bytes | str, target_hint: str = "") -> bytes
     if not buf or len(buf) < 4:
         return buf
 
-    # Dynamic Magic Byte Matcher
+    # Dynamic Magic Byte Matcher with Target Hint Fallback
     magic = buf[:8]
+    hint_lower = target_hint.lower() if target_hint else ""
 
-    if magic.startswith(MAGIC_PNG):
+    if magic.startswith(MAGIC_PNG) or "png" in hint_lower:
         return _repair_png(buf)
-    elif magic.startswith(MAGIC_ELF):
+    elif magic.startswith(MAGIC_ELF) or "elf" in hint_lower:
         return _repair_elf(buf)
-    elif magic.startswith(MAGIC_ZIP):
+    elif magic.startswith(MAGIC_ZIP) or "zip" in hint_lower:
         return _repair_zip(buf)
-    elif magic.startswith(MAGIC_PE):
+    elif magic.startswith(MAGIC_PE) or any(k in hint_lower for k in [".exe", ".dll"]):
         return _repair_pe(buf)
 
     # Return untouched for unstructured text/raw payloads

@@ -28,7 +28,7 @@ def test_png_binary_repair():
 def test_elf_header_repair():
     # Corrupted 16-byte ELF header
     corrupted_elf = b"\x00\x00\x00\x00" + b"\x00" * 12
-    repaired = repair_binary_payload(corrupted_elf)
+    repaired = repair_binary_payload(corrupted_elf, target_hint="target.elf")
     assert repaired.startswith(MAGIC_ELF)
     assert repaired[4] in (1, 2)  # EI_CLASS (32/64-bit)
 

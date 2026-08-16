@@ -188,7 +188,7 @@ RULES:
 
         from mutagen.models import FuzzPayloadList
 
-        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"])
+        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -284,7 +284,7 @@ IMPORTANT RULES:
 Respond with ONLY the JSON array."""
 
         from mutagen.models import FuzzPayloadList
-        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"])
+        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -357,11 +357,12 @@ REASONING:
 CRASH TYPE:
 {crash_data.get("crash_type")}
 
-Your task is to securely patch the vulnerability.
-Provide the ENTIRE updated {self.lang_name} source code file that fixes the issue.
+Your task is to securely patch the vulnerability in the provided code scope.
+Provide ONLY the updated, complete {self.lang_name} function/code block corresponding to the provided scope.
+The Virtual Code Editor will surgically splice your patched function back into the project.
 IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown formatting, markdown code fences (like ```), or conversational preamble/explanations. Output raw source code starting directly on Line 1."""
 
-        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-1.5-flash"])
+        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -370,7 +371,7 @@ IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown
             for attempt in range(2):
                 try:
                     console.print(f"[dim]  [GeminiEngine] Querying AI model '{model_name}' (attempt {attempt + 1}/2)...[/dim]")
-                    with AiActivityHeartbeat(task_name="generating full secure patch"):
+                    with AiActivityHeartbeat(task_name="generating surgical secure patch"):
                         response = self.client.models.generate_content(
                             model=model_name,
                             contents=prompt,
@@ -410,10 +411,10 @@ IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown
             os_info = "\nIMPORTANT: The patch will be compiled on Windows using MinGW GCC. Ensure the code is compatible with Windows/MinGW and does NOT use POSIX-specific headers/functions (like sys/wait.h, unistd.h, sigaction, sigprocmask, sigset_t, fork, pipe, etc.) unless there is a standard Windows alternative, or unless you can write standard, portable, cross-platform ISO C code."
 
         prompt = f"""You are a Senior {self.lang_name} Security Engineer.
-We tried to patch a vulnerability in the following {self.lang_name} code, but the patch failed.
+We tried to patch a vulnerability in the following {self.lang_name} code scope, but the patch failed verification.
 {os_info}
 
-ORIGINAL SOURCE CODE:
+ORIGINAL CODE SCOPE:
 ```{self.lang_ext}
 {source_code}
 ```
@@ -430,14 +431,15 @@ THE ATTEMPTED PATCH CODE THAT FAILED:
 {bad_patch}
 ```
 
-FAILURE DETAILS:
+FAILURE DETAILS & COMPILATION / RUNTIME LOGS:
 {error_message}
 
 Please analyze the failure details and correct the patch code.
-Provide the ENTIRE corrected {self.lang_name} source code file, grounded in the ORIGINAL SOURCE CODE baseline while fixing the reported failure details.
+Provide ONLY the corrected {self.lang_name} function/code block for this scope, grounded in the ORIGINAL CODE SCOPE baseline while fixing the reported failure details.
+The Virtual Code Editor will surgically splice your patched function back into the project.
 IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown formatting, markdown code fences (like ```), or conversational preamble/explanations. Output raw source code starting directly on Line 1."""
 
-        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-1.5-flash"])
+        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -517,7 +519,7 @@ DO NOT use markdown formatting outside of the code block.
 Return ONLY the raw Python code. DO NOT wrap it in ```python and ```.
 If you must use markdown, the parser will try to strip it, but please try to return just the Python code."""
 
-        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"])
+        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -579,7 +581,7 @@ RAW DECOMPILED PSEUDO-CODE:
 
 Return ONLY the refactored, commented, and readable C code."""
 
-        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"])
+        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -629,7 +631,7 @@ Return ONLY the refactored, commented, and readable C code."""
 
         full_prompt = f"{prompt}\n\nSOURCE CODE:\n```\n{source_code}\n```"
 
-        models_to_try = self._get_models(["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash", "gemini-2.5-pro"])
+        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"])
         response = None
         abort_outer = False
         for model_name in models_to_try:

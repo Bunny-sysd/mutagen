@@ -190,12 +190,12 @@ from mutagen.state import ProgramContext, VulnerabilityDetail
 from mutagen.agents.synthesizer import PayloadSynthesizerAgent
 
 
-@pytest.mark.asyncio
-async def test_pipeline_orchestration_c_libpng_downgrade(tmp_path):
+def test_pipeline_orchestration_c_libpng_downgrade(tmp_path):
     """
     Verifies that C/libpng findings with widening macro casts are structured with
     LIKELY_FALSE_POSITIVE and can be skipped with skip_flagged_findings.
     """
+    import asyncio
     png_h = tmp_path / "png.h"
     png_h.write_text("""
 #ifndef PNG_H
@@ -247,13 +247,12 @@ void png_read_row_demo(int width, int pixel_depth) {
         skip_flagged_findings=True
     )
     synth = PayloadSynthesizerAgent(model_provider="ollama")  # mock offline engine
-    updated_ctx = await synth.process(ctx)
+    updated_ctx = asyncio.run(synth.process(ctx))
     assert len(updated_ctx.active_payloads) == 0
     assert any("Skipping payload synthesis" in log for log in updated_ctx.logs)
 
 
-@pytest.mark.asyncio
-async def test_pipeline_orchestration_rust_checked_mul_downgrade():
+def test_pipeline_orchestration_rust_checked_mul_downgrade():
     """
     Verifies that non-C (Rust) findings using checked_mul are structured with
     LIKELY_FALSE_POSITIVE and confidence LOW at the pipeline data-structure level.
@@ -288,8 +287,7 @@ fn calc(width: u32, height: u32) -> Option<u32> {
     assert "checked_mul" in detail.verification_annotation
 
 
-@pytest.mark.asyncio
-async def test_pipeline_orchestration_go_safe_bits_downgrade():
+def test_pipeline_orchestration_go_safe_bits_downgrade():
     """
     Verifies that non-C (Go) findings using math/bits are structured with
     LIKELY_FALSE_POSITIVE across the pipeline.

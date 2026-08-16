@@ -6,7 +6,10 @@ from rich.console import Console
 from rich.syntax import Syntax
 
 from mutagen.ast_validator import validate_c_source
-from mutagen.reachability_checker import extract_vulnerable_function_scope
+from mutagen.reachability_checker import (
+    extract_function_scope_by_name,
+    extract_vulnerable_function_scope,
+)
 
 console = Console(force_terminal=True, force_jupyter=False)
 
@@ -42,6 +45,25 @@ class VirtualCodeEditor:
         self.lines = source_code.splitlines()
         self.active_scope: Optional[EditorScope] = None
         self.history: list[str] = []
+
+    def open_function_scope(self, function_name: str) -> EditorScope:
+        """
+        Extracts a specific function by name using Tree-sitter AST into the active editor buffer.
+        """
+        if self.language == "c" and function_name:
+            scope_dict = extract_function_scope_by_name(self.source_code, function_name)
+            if scope_dict and scope_dict.get("body"):
+                self.active_scope = EditorScope(
+                    name=scope_dict.get("name", function_name),
+                    body=scope_dict["body"],
+                    start_line=scope_dict["start_line"],
+                    end_line=scope_dict["end_line"],
+                    scope_type="function"
+                )
+                return self.active_scope
+
+        # Fallback to vulnerable scope at line 1
+        return self.open_vulnerable_scope(1)
 
     def open_vulnerable_scope(self, target_line: int, window_padding: int = 30) -> EditorScope:
         """

@@ -90,6 +90,8 @@ class CrashPayload(BaseModel):
     exit_code: int | None = None
     crash_type: str | None = None
     is_execution_error: bool = False
+    is_fallback: bool = False
+    synthesis_failed: bool = False
     stdout: str | None = None
     stderr: str | None = None
     container_id: str | None = None
@@ -116,6 +118,8 @@ class CrashPayload(BaseModel):
                 exit_code=obj.get("exit_code"),
                 crash_type=obj.get("crash_type"),
                 is_execution_error=bool(obj.get("is_execution_error", False)),
+                is_fallback=bool(obj.get("is_fallback", False)),
+                synthesis_failed=bool(obj.get("synthesis_failed", False)),
                 stdout=obj.get("stdout"),
                 stderr=obj.get("stderr"),
                 container_id=obj.get("container_id"),
@@ -187,6 +191,8 @@ class ProgramContext(BaseModel):
     skip_flagged_findings: bool = False
     triage_failed: bool = False
     triage_error: str = ""
+    synthesis_failed: bool = False
+    synthesis_error: str = ""
     reachability_status: str = ""
     reachability_message: str = ""
 
@@ -205,8 +211,12 @@ class ProgramContext(BaseModel):
         return [CrashPayload.from_any(item) for item in v]
 
     def add_vulnerability(self, item: Any) -> VulnerabilityDetail:
-        """Helper to append and validate a vulnerability detail object to context."""
+        """Helper to append and validate a vulnerability detail object to context with deduplication."""
         detail = VulnerabilityDetail.from_any(item)
+        # Deduplicate by line_number, cwe, and vuln_type
+        for existing in self.vulnerabilities:
+            if existing.line_number == detail.line_number and existing.cwe == detail.cwe and existing.vuln_type == detail.vuln_type:
+                return existing
         self.vulnerabilities.append(detail)
         return detail
 

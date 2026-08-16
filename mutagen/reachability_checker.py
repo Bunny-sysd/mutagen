@@ -120,6 +120,51 @@ def extract_vulnerable_function_scope(source_code: str, line_number: int) -> dic
     return None
 
 
+def extract_function_scope_by_name(source_code: str, function_name: str) -> dict | None:
+    """
+    Extracts the function body, name, and line range (1-indexed) for a function by name using Tree-sitter AST.
+    Returns: {"name": str, "body": str, "start_line": int, "end_line": int} or None.
+    """
+    if not source_code or not function_name:
+        return None
+
+    try:
+        import tree_sitter_c as tsc
+        from tree_sitter import Language, Parser
+        c_lang = Language(tsc.language())
+        parser = Parser(c_lang)
+        code_bytes = source_code.encode("utf-8")
+        tree = parser.parse(code_bytes)
+
+        target_name = function_name.strip()
+
+        for child in tree.root_node.children:
+            if child.type == "function_definition":
+                declarator = child.child_by_field_name("declarator")
+                if declarator:
+                    def _drill(n):
+                        if n.type == "identifier":
+                            return n.text.decode("utf-8")
+                        for c in n.children:
+                            res = _drill(c)
+                            if res:
+                                return res
+                        return None
+                    name = _drill(declarator)
+                    if name and (name == target_name or target_name.lower() in name.lower()):
+                        body_text = code_bytes[child.start_byte:child.end_byte].decode("utf-8", errors="replace")
+                        return {
+                            "name": name,
+                            "body": body_text,
+                            "start_line": child.start_point[0] + 1,
+                            "end_line": child.end_point[0] + 1,
+                        }
+    except Exception:
+        pass
+
+    return None
+
+
 def get_expanded_reachability_set(target_path_or_dir: str, vuln_function: str) -> set[str]:
     """
     Scans project header/source files to discover macro aliases (#define MACRO ... vuln_function)

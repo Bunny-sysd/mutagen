@@ -120,9 +120,24 @@ def _strip_coverage_marker(text: str) -> str:
 # Oracle detection — mirrors executor.py logic
 # ---------------------------------------------------------------------------
 
+_MUNDANE_ERROR_PATTERNS = [
+    "no such file or directory",
+    "cannot open file",
+    "file not found",
+    "directory nonexistent",
+    "is not recognized as an internal or external command",
+    "operable program or batch file",
+    "command not found",
+    "permission denied",
+    "invalid option",
+    "unrecognized option",
+    "usage: ",
+    "invalid argument",
+]
+
 _LOGICAL_INDICATORS = [
     "access granted", "privileges acquired", "admin privileges",
-    "flag{", "root:", "uid=0", "systeminfo", "cmd.exe", "/bin/sh",
+    "flag{", "root:x:", "root::", "uid=0(root)", "uid=0(",
     "vuln_triggered", "exploit_success", "authenticated as admin",
 ]
 
@@ -149,10 +164,14 @@ def _check_oracles(stdout: str, stderr: str, return_code: int) -> tuple[bool, st
     """
     combined = (stdout + stderr).lower()
 
+    # Materiality check: exclude benign environmental / usage error exits
+    is_mundane_error = any(p in combined for p in _MUNDANE_ERROR_PATTERNS) and return_code in (1, 2, 127, 255)
+
     # Logical exploit check
-    for indicator in _LOGICAL_INDICATORS:
-        if indicator in combined:
-            return True, f"LOGICAL_EXPLOIT (Matched signature: '{indicator}')"
+    if not is_mundane_error:
+        for indicator in _LOGICAL_INDICATORS:
+            if indicator in combined:
+                return True, f"LOGICAL_EXPLOIT (Matched signature: '{indicator}')"
 
     # Heap corruption — hard signatures are crashes regardless of exit code
     for sig in _HEAP_HARD_SIGNATURES:
