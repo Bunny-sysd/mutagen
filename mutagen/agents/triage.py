@@ -128,56 +128,77 @@ class TriageAgent(BaseAgent):
 
         data = None
         triage_api_error = None
-        for attempt in range(3):
-            try:
-                if self.model_provider == "gemini" and hasattr(self.engine, "client") and hasattr(self.engine.client, "models"):
-                    from mutagen.engines.base import AiActivityHeartbeat
-                    with AiActivityHeartbeat(task_name="triaging code architecture & discovering vulnerabilities"):
-                        response = self.engine.client.models.generate_content(
-                            model=self.model_name,
-                            contents=prompt,
-                            config={
-                                "temperature": TRIAGE_TEMPERATURE,
-                                "response_mime_type": "application/json",
-                                "response_schema": TriageResult,
-                                "safety_settings": GEMINI_SAFETY_OFF,
-                            }
-                        )
-                    raw_text = response.text.strip()
-                    try:
-                        data = json.loads(raw_text)
-                    except json.JSONDecodeError as jde:
-                        from mutagen.engines.output_parser import repair_truncated_json
-                        repaired = repair_truncated_json(raw_text)
-                        if repaired and isinstance(repaired, dict):
-                            data = repaired
-                        elif repaired and isinstance(repaired, list):
-                            data = {"vulnerabilities": repaired, "suggested_delivery_mode": "args"}
-                        else:
-                            raise jde
-                else:
-                    # Multi-provider fallback for OpenAI, Claude, and Ollama
-                    res_obj = getattr(self.engine, "_parse_generate", lambda *a, **kw: [])(
-                        prompt=prompt,
-                        response_model=TriageResult,
-                        list_key="vulnerabilities"
-                    )
-                    if isinstance(res_obj, dict):
-                        data = res_obj
-                    elif isinstance(res_obj, list):
-                        data = {"vulnerabilities": res_obj, "suggested_delivery_mode": "args"}
-                    else:
-                        data = {"vulnerabilities": [], "suggested_delivery_mode": "args"}
-
-                if data and isinstance(data, dict):
-                    break
-            except Exception as e:
-                triage_api_error = e
-                if attempt < 2:
-                    context.logs.append(f"[TriageAgent] Triage call attempt {attempt + 1} failed ({type(e).__name__}: {e}). Retrying...")
 
         from rich.console import Console
         console = Console(force_terminal=True, force_jupyter=False)
+
+        # Build fallback model chain for Gemini triage
+        models_to_try = [self.model_name] if self.model_name else []
+        for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+            if m not in models_to_try:
+                models_to_try.append(m)
+
+        for model_candidate in models_to_try:
+            for attempt in range(2):
+                try:
+                    if self.model_provider == "gemini" and hasattr(self.engine, "client") and hasattr(self.engine.client, "models"):
+                        from mutagen.engines.base import AiActivityHeartbeat
+                        with AiActivityHeartbeat(task_name=f"triaging code architecture with {model_candidate}"):
+                            response = self.engine.client.models.generate_content(
+                                model=model_candidate,
+                                contents=prompt,
+                                config={
+                                    "temperature": TRIAGE_TEMPERATURE,
+                                    "response_mime_type": "application/json",
+                                    "response_schema": TriageResult,
+                                    "safety_settings": GEMINI_SAFETY_OFF,
+                                }
+                            )
+                        raw_text = response.text.strip() if response and response.text else ""
+                        if not raw_text:
+                            raise ValueError("Empty response text from AI model")
+                        try:
+                            data = json.loads(raw_text)
+                        except json.JSONDecodeError as jde:
+                            from mutagen.engines.output_parser import repair_truncated_json
+                            repaired = repair_truncated_json(raw_text)
+                            if repaired and isinstance(repaired, dict):
+                                data = repaired
+                            elif repaired and isinstance(repaired, list):
+                                data = {"vulnerabilities": repaired, "suggested_delivery_mode": "args"}
+                            else:
+                                raise jde
+                    else:
+                        # Multi-provider fallback for OpenAI, Claude, and Ollama
+                        res_obj = getattr(self.engine, "_parse_generate", lambda *a, **kw: [])(
+                            prompt=prompt,
+                            response_model=TriageResult,
+                            list_key="vulnerabilities"
+                        )
+                        if isinstance(res_obj, dict):
+                            data = res_obj
+                        elif isinstance(res_obj, list):
+                            data = {"vulnerabilities": res_obj, "suggested_delivery_mode": "args"}
+                        else:
+                            data = {"vulnerabilities": [], "suggested_delivery_mode": "args"}
+
+                    if data and isinstance(data, dict):
+                        break
+                except Exception as e:
+                    triage_api_error = e
+                    err_upper = str(e).upper()
+                    if "429" in err_upper or "RESOURCE_EXHAUSTED" in err_upper:
+                        import time
+                        console.print("[yellow]  Rate limit (429) on triage. Waiting 15s to cool down...[/yellow]")
+                        time.sleep(15)
+                    elif any(k in err_upper for k in ["504", "TIMEOUT", "503", "SERVER_ERROR", "DEADLINE_EXCEEDED", "NOT_FOUND", "404"]):
+                        console.print(f"[yellow]  Model '{model_candidate}' timed out (504/timeout). Switching to fallback model candidate...[/yellow]")
+                        break
+                    elif attempt < 1:
+                        import time
+                        time.sleep(2)
+            if data is not None and isinstance(data, dict):
+                break
 
         if data is None:
             context.triage_failed = True

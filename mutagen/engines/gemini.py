@@ -46,45 +46,46 @@ class GeminiEngine(BaseEngine):
         import httpx
         err_str = str(e).upper()
 
-        # 1. Check for connection/network/handshake/timeout errors
-        is_network = False
-        if isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout, httpx.NetworkError)):
-            is_network = True
-        elif any(k in err_str for k in ["CONNECTTIMEOUT", "CONNECTERROR", "READTIMEOUT", "TLS", "SSL", "HANDSHAKE", "NAMERESOLUTIONERROR", "CONNECTION REFUSED", "TIMEOUT"]):
-            is_network = True
-
-        if is_network:
-            console.print("[red]  Network connection or TLS handshake failure detected.[/red]")
-            console.print("[yellow]  Skipping Gemini API calls. Mutagen will fall back to local traditional/offline fuzzing.[/yellow]")
-            return "abort_all", 0
-
-        # 2. Check for invalid API key / auth errors
-        if any(k in err_str for k in ["API_KEY_INVALID", "API KEY NOT VALID", "INVALID_API_KEY", "APIKEY"]):
+        # 1. Check for invalid API key / auth errors (fatal)
+        if any(k in err_str for k in ["API_KEY_INVALID", "API KEY NOT VALID", "INVALID_API_KEY", "APIKEY", "UNAUTHENTICATED"]):
             console.print("[red]  Critical Auth Error: The provided Gemini API Key is invalid.[/red]")
             return "abort_all", 0
+
+        # 2. Check for 404 Not Found (Model not supported or not found)
+        if "NOT_FOUND" in err_str or "404" in err_str or "NOT FOUND" in err_str:
+            console.print("[yellow]  Model not found or not supported. Skipping to next model fallback...[/yellow]")
+            return "skip_model", 0
 
         # 3. Check for 429 Resource Exhausted (Rate Limit / Quota)
         if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str or "QUOTA" in err_str:
             console.print(f"[yellow]  Rate limit (429 RESOURCE_EXHAUSTED) hit. Waiting {GEMINI_RATE_LIMIT_WAIT}s to cool down API quota...[/yellow]")
             return "retry", GEMINI_RATE_LIMIT_WAIT
 
-        # 4. Check for 404 Not Found (Model not supported or not found)
-        if "NOT_FOUND" in err_str or "404" in err_str or "NOT FOUND" in err_str:
-            console.print("[yellow]  Model not found or not supported. Skipping this model...[/yellow]")
+        # 4. Check for 504 Gateway Timeout / Read Timeout / Server Overload (Transient)
+        if any(k in err_str for k in ["504", "GATEWAY TIMEOUT", "READTIMEOUT", "TIMEOUT", "503", "500", "SERVER_ERROR", "DEADLINE_EXCEEDED"]):
+            wait_time = (attempt + 1) * 3
+            console.print(f"[yellow]  Transient API timeout/gateway error ({str(e)[:120]}). Switching to fallback model...[/yellow]")
+            return "skip_model" if attempt >= 1 else "retry", wait_time
+
+        # 5. Check for hard network/connectivity/DNS/TLS drop
+        if isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, httpx.NetworkError)) or any(k in err_str for k in ["CONNECTERROR", "NAMERESOLUTIONERROR", "CONNECTION REFUSED", "SSL", "HANDSHAKE"]):
+            console.print(f"[yellow]  Network connection issue: {str(e)[:120]}. Skipping model...[/yellow]")
             return "skip_model", 0
 
-        # 5. Default transient error (e.g. 500, 503)
+        # 6. Default transient error
         wait_time = (attempt + 1) * 5
         console.print(f"[red]  API Error: {str(e)[:200]}[/red]")
         console.print(f"[yellow]  Waiting {wait_time}s before retry...[/yellow]")
         return "retry", wait_time
 
-
-
     def _get_models(self, default_models: list[str]) -> list[str]:
-        if self.model:
-            return [self.model]
-        return default_models
+        models = []
+        if self.model and self.model not in models:
+            models.append(self.model)
+        for m in default_models:
+            if m not in models:
+                models.append(m)
+        return models
 
 
 
