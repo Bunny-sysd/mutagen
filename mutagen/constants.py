@@ -26,6 +26,16 @@ DEFAULT_PROVIDER: str = os.environ.get("MUTAGEN_PROVIDER", "gemini")
 #: Default Gemini model name when no --model flag is given.
 DEFAULT_MODEL_GEMINI: str = os.environ.get("MUTAGEN_MODEL", "gemini-2.5-flash")
 
+#: Verified active Gemini fallback models supporting generateContent.
+DEFAULT_GEMINI_FALLBACK_MODELS: list[str] = [
+    "gemini-2.5-flash",
+    "gemini-flash-latest",
+    "gemini-2.5-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-2.5-pro",
+    "gemini-pro-latest",
+]
+
 # ---------------------------------------------------------------------------
 # Execution / Fuzzing Defaults
 # ---------------------------------------------------------------------------

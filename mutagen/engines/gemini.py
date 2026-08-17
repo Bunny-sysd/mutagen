@@ -6,6 +6,7 @@ from rich.console import Console
 
 from mutagen.constants import (
     DEFAULT_MODEL_GEMINI,
+    DEFAULT_GEMINI_FALLBACK_MODELS,
     GEMINI_HTTP_CONNECT_TIMEOUT,
     GEMINI_HTTP_READ_TIMEOUT,
     GEMINI_HTTP_TIMEOUT,
@@ -78,11 +79,12 @@ class GeminiEngine(BaseEngine):
         console.print(f"[yellow]  Waiting {wait_time}s before retry...[/yellow]")
         return "retry", wait_time
 
-    def _get_models(self, default_models: list[str]) -> list[str]:
+    def _get_models(self, default_models: list[str] = None) -> list[str]:
         models = []
         if self.model and self.model not in models:
             models.append(self.model)
-        for m in default_models:
+        targets = default_models if default_models is not None else DEFAULT_GEMINI_FALLBACK_MODELS
+        for m in targets:
             if m not in models:
                 models.append(m)
         return models
@@ -188,7 +190,7 @@ RULES:
 
         from mutagen.models import FuzzPayloadList
 
-        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"])
+        models_to_try = self._get_models(DEFAULT_GEMINI_FALLBACK_MODELS)
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -284,7 +286,7 @@ IMPORTANT RULES:
 Respond with ONLY the JSON array."""
 
         from mutagen.models import FuzzPayloadList
-        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"])
+        models_to_try = self._get_models(DEFAULT_GEMINI_FALLBACK_MODELS)
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -362,7 +364,7 @@ Provide ONLY the updated, complete {self.lang_name} function/code block correspo
 The Virtual Code Editor will surgically splice your patched function back into the project.
 IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown formatting, markdown code fences (like ```), or conversational preamble/explanations. Output raw source code starting directly on Line 1."""
 
-        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"])
+        models_to_try = self._get_models(DEFAULT_GEMINI_FALLBACK_MODELS)
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -439,7 +441,7 @@ Provide ONLY the corrected {self.lang_name} function/code block for this scope, 
 The Virtual Code Editor will surgically splice your patched function back into the project.
 IMPORTANT: Return ONLY valid, raw {self.lang_name} code. DO NOT include markdown formatting, markdown code fences (like ```), or conversational preamble/explanations. Output raw source code starting directly on Line 1."""
 
-        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"])
+        models_to_try = self._get_models(DEFAULT_GEMINI_FALLBACK_MODELS)
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -519,7 +521,7 @@ DO NOT use markdown formatting outside of the code block.
 Return ONLY the raw Python code. DO NOT wrap it in ```python and ```.
 If you must use markdown, the parser will try to strip it, but please try to return just the Python code."""
 
-        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"])
+        models_to_try = self._get_models(DEFAULT_GEMINI_FALLBACK_MODELS)
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -581,7 +583,7 @@ RAW DECOMPILED PSEUDO-CODE:
 
 Return ONLY the refactored, commented, and readable C code."""
 
-        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"])
+        models_to_try = self._get_models(DEFAULT_GEMINI_FALLBACK_MODELS)
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -631,7 +633,7 @@ Return ONLY the refactored, commented, and readable C code."""
 
         full_prompt = f"{prompt}\n\nSOURCE CODE:\n```\n{source_code}\n```"
 
-        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"])
+        models_to_try = self._get_models(DEFAULT_GEMINI_FALLBACK_MODELS)
         response = None
         abort_outer = False
         for model_name in models_to_try:

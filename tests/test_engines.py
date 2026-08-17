@@ -35,7 +35,8 @@ def test_gemini_engine_analyze_code(mock_client_class):
     # Verify client generate_content call
     mock_client.models.generate_content.assert_called()
     called_args, called_kwargs = mock_client.models.generate_content.call_args
-    assert called_kwargs["model"] in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest")
+    from mutagen.constants import DEFAULT_GEMINI_FALLBACK_MODELS
+    assert called_kwargs["model"] in DEFAULT_GEMINI_FALLBACK_MODELS
     assert called_kwargs["config"]["response_mime_type"] == "application/json"
 
 

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from mutagen.agents.base import BaseAgent
 from mutagen.agents.prompts import get_synthesizer_rules
-from mutagen.constants import DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER, SYNTHESIZER_TEMPERATURE
+from mutagen.constants import DEFAULT_GEMINI_FALLBACK_MODELS, DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER, SYNTHESIZER_TEMPERATURE
 from mutagen.engines import get_engine
 from mutagen.poc_finder import get_cwe_poc_intelligence
 from mutagen.binary_repair import repair_binary_payload
@@ -245,7 +245,7 @@ Return JSON adhering strictly to:
                 console = Console(force_terminal=True, force_jupyter=False)
 
                 models_to_try = [self.model_name] if self.model_name else []
-                for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"]:
+                for m in DEFAULT_GEMINI_FALLBACK_MODELS:
                     if m not in models_to_try:
                         models_to_try.append(m)
 
