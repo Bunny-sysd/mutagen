@@ -265,8 +265,28 @@ def analyze_source(code: str) -> PreTargetingResult:
     )
     focused_parts.append("")
 
+    # Sort functions by highest severity findings first (CWE-787, 119, 122, 125, 416, 190)
+    def _func_priority(item: tuple[str, object]) -> int:
+        fname, _ = item
+        func_f = [f for f in findings if f.function_name == fname]
+        score = 0
+        for f in func_f:
+            if any(c in f.cwe for c in ["787", "119", "122", "125", "416"]):
+                score += 10
+            elif "190" in f.cwe or "681" in f.cwe:
+                score += 5
+            else:
+                score += 2
+        if fname in ("main", "target_function", "png_do_quantize", "png_combine_row"):
+            score += 15
+        return score
+
+    sorted_funcs = sorted(dangerous_func_nodes.items(), key=_func_priority, reverse=True)
+    # Cap to top 8 most critical functions if file is large to keep token footprint ultra-efficient
+    selected_funcs = sorted_funcs[:8] if len(sorted_funcs) > 8 else sorted_funcs
+
     # Add each dangerous function
-    for func_name, func_node in dangerous_func_nodes.items():
+    for func_name, func_node in selected_funcs:
         func_text = _node_text(func_node, code_bytes)
         start_line = (getattr(func_node, "start_point", (0, 0))[0] + 1) if hasattr(func_node, "start_point") else 1
         # Annotate which dangerous calls are inside this function

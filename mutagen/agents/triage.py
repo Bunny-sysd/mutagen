@@ -140,7 +140,7 @@ class TriageAgent(BaseAgent):
 
         # Build fallback model chain for Gemini triage (using supported model names)
         models_to_try = [self.model_name] if self.model_name else []
-        for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-flash-002"]:
+        for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"]:
             if m not in models_to_try:
                 models_to_try.append(m)
 
@@ -267,17 +267,38 @@ class TriageAgent(BaseAgent):
                 if code_snip and context.source_code:
                     lines = context.source_code.splitlines()
                     claimed_idx = max(0, claimed_line - 1)
-                    # If claimed line does not contain snippet, search full source for the exact line
-                    if claimed_idx >= len(lines) or code_snip not in lines[claimed_idx]:
+
+                    # Extract the primary code statement from snippet (ignoring comment-only lines)
+                    snip_lines = [l.strip() for l in code_snip.splitlines() if l.strip() and not l.strip().startswith(("/*", "*", "//"))]
+                    target_snip = snip_lines[0] if snip_lines else code_snip.strip()
+
+                    found_idx = None
+                    # First check if claimed line or nearby window (+/- 10 lines) matches
+                    window_start = max(0, claimed_idx - 10)
+                    window_end = min(len(lines), claimed_idx + 11)
+                    for idx in range(window_start, window_end):
+                        src_clean = lines[idx].strip()
+                        if target_snip and not src_clean.startswith(("/*", "*", "//")) and (target_snip in src_clean or (len(src_clean) >= 12 and src_clean in target_snip)):
+                            found_idx = idx
+                            break
+
+                    # If not in local window, search full source with strict token matching (never match comments or includes)
+                    if found_idx is None and len(target_snip) >= 8:
                         for idx, src_l in enumerate(lines):
-                            if code_snip in src_l or (len(code_snip) > 10 and src_l.strip() and src_l.strip() in code_snip):
-                                reanchored_line = idx + 1
-                                if isinstance(item, dict):
-                                    item["line_number"] = reanchored_line
-                                else:
-                                    setattr(item, "line", reanchored_line)
-                                context.logs.append(f"[GroundingVerifier] Re-anchored finding line from {claimed_line} to {reanchored_line} based on exact source code snippet match.")
+                            src_clean = src_l.strip()
+                            if not src_clean or src_clean.startswith(("/*", "*", "//", "#include")):
+                                continue
+                            if target_snip in src_clean or (len(src_clean) >= 15 and src_clean in target_snip):
+                                found_idx = idx
                                 break
+
+                    if found_idx is not None and found_idx != claimed_idx:
+                        reanchored_line = found_idx + 1
+                        if isinstance(item, dict):
+                            item["line_number"] = reanchored_line
+                        else:
+                            setattr(item, "line", reanchored_line)
+                        context.logs.append(f"[GroundingVerifier] Re-anchored finding line from {claimed_line} to {reanchored_line} based on exact source code snippet match.")
 
                 detail = context.add_vulnerability(item)
                 v_res = verify_finding_type_safety(

@@ -188,7 +188,7 @@ RULES:
 
         from mutagen.models import FuzzPayloadList
 
-        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"])
+        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -284,7 +284,7 @@ IMPORTANT RULES:
 Respond with ONLY the JSON array."""
 
         from mutagen.models import FuzzPayloadList
-        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"])
+        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -519,7 +519,7 @@ DO NOT use markdown formatting outside of the code block.
 Return ONLY the raw Python code. DO NOT wrap it in ```python and ```.
 If you must use markdown, the parser will try to strip it, but please try to return just the Python code."""
 
-        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"])
+        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -581,7 +581,7 @@ RAW DECOMPILED PSEUDO-CODE:
 
 Return ONLY the refactored, commented, and readable C code."""
 
-        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"])
+        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"])
         response = None
         abort_outer = False
         for model_name in models_to_try:
@@ -631,7 +631,7 @@ Return ONLY the refactored, commented, and readable C code."""
 
         full_prompt = f"{prompt}\n\nSOURCE CODE:\n```\n{source_code}\n```"
 
-        models_to_try = self._get_models(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro-latest"])
+        models_to_try = self._get_models([DEFAULT_MODEL_GEMINI, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"])
         response = None
         abort_outer = False
         for model_name in models_to_try:

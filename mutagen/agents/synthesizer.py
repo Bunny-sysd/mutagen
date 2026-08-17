@@ -182,6 +182,23 @@ class PayloadSynthesizerAgent(BaseAgent):
         lang_rules = get_synthesizer_rules(context.language)
         poc_context_str = ("\nVulnerability Signature Intelligence:\n" + "\n".join(intel_hints)) if intel_hints else ""
 
+        # Build token-efficient surgical source code context
+        scoped_source = context.source_code
+        if len(context.source_code.splitlines()) > 300:
+            lines = context.source_code.splitlines()
+            preamble = "\n".join(lines[:30])
+            extracted_snippets = [f"// Preamble:\n{preamble}\n"]
+            seen_scopes = set()
+            for v in candidate_vulns[:3]:
+                window_start = max(0, v.line_number - 30)
+                window_end = min(len(lines), v.line_number + 30)
+                window_key = (window_start, window_end)
+                if window_key not in seen_scopes:
+                    seen_scopes.add(window_key)
+                    snip = "\n".join(lines[window_start:window_end])
+                    extracted_snippets.append(f"// Target context around Line {v.line_number} ({v.vuln_type}):\n{snip}\n")
+            scoped_source = "\n".join(extracted_snippets)
+
         prompt = f"""You are an expert security researcher and automated fuzzing payload engineer.
 Target Environment: OS={context.os_platform}, Language={context.language}, Delivery Mode={context.delivery_mode}
 
@@ -193,7 +210,7 @@ Target Vulnerabilities:
 {poc_context_str}
 
 Source Code Context:
-{context.source_code}
+{scoped_source}
 
 Payload Generation Guidelines:
 1. Delivery Mode Alignment:
@@ -228,7 +245,7 @@ Return JSON adhering strictly to:
                 console = Console(force_terminal=True, force_jupyter=False)
 
                 models_to_try = [self.model_name] if self.model_name else []
-                for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
+                for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash-002"]:
                     if m not in models_to_try:
                         models_to_try.append(m)
 
@@ -323,8 +340,8 @@ Return JSON adhering strictly to:
                         input_data = "A" * 64
                 elif context.delivery_mode == "file" and (not args or len(args) == 0):
                     ext = ".png" if "png" in context.target_path.lower() else ".bin"
-                    args = [f"payload_poc{ext}"]
-                    context.logs.append("[PayloadSynthesizerAgent] Info: Auto-populated missing args filename for file delivery mode.")
+                    args = [f"payload_poc_{valid_payloads_added+1}{ext}"]
+                    context.logs.append(f"[PayloadSynthesizerAgent] Info: Auto-populated missing args filename ({args[0]}) for file delivery mode.")
 
                 # Dynamic Post-Synthesis Binary & Kernel Header Repair Pass
                 if raw_bytes_hex:
