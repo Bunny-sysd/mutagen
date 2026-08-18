@@ -101,8 +101,25 @@ def build_with_native_tool(build_system: str, target_dir: str, target_hint: str 
         candidates = []
         if build_system == "cmake":
             build_dir = os.path.join(target_dir, "build")
-            subprocess.run(["cmake", "-B", build_dir, "-S", target_dir], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
-            subprocess.run(["cmake", "--build", build_dir], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
+            cmake_static_flags = [
+                "-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON",
+                "-DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON",
+                "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON",
+                "-DBUILD_SHARED_LIBS=OFF",
+                "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+            ]
+            try:
+                subprocess.run(["cmake", "-B", build_dir, "-S", target_dir] + cmake_static_flags, capture_output=True, text=True, check=True, cwd=target_dir, env=env)
+                subprocess.run(["cmake", "--build", build_dir], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
+            except Exception:
+                cmake_dyn_flags = [
+                    "-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON",
+                    "-DCMAKE_INSTALL_RPATH_USE_LINK_PATH=ON",
+                    "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON",
+                ]
+                subprocess.run(["cmake", "-B", build_dir, "-S", target_dir] + cmake_dyn_flags, capture_output=True, text=True, check=True, cwd=target_dir, env=env)
+                subprocess.run(["cmake", "--build", build_dir], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
+
             for root, dirs, files in os.walk(build_dir):
                 # Skip internal CMake directories during traversal
                 dirs[:] = [d for d in dirs if d.lower() not in ("cmakefiles", "cmaketmp", "testing")]

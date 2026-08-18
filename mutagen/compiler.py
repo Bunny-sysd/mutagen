@@ -249,6 +249,10 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False, vuln
     compile_args.extend(["-o", output_path])
     compile_args.extend(source_files)
     compile_args.extend(auto_dep_flags)
+    # Inject RPATH $ORIGIN flags so binaries automatically resolve adjacent .so/.libs dependencies
+    rpath_flags = ["-Wl,-rpath,$ORIGIN", "-Wl,-rpath,$ORIGIN/.libs", "-Wl,-rpath,$ORIGIN/../lib", "-Wl,-rpath,$ORIGIN/../.libs", "-Wl,-rpath,$ORIGIN/../build"]
+    compile_args.extend(rpath_flags)
+
 
     # Ensure -lm is explicitly appended at the very end of GCC command if math library symbols are used
     if "-lm" not in compile_args and os.name != 'nt':

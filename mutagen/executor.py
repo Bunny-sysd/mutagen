@@ -112,6 +112,184 @@ def ensure_docker_image_ready(image: str = None) -> None:
         pass
 
 
+def _resolve_target_ld_library_path(exe_dir: str) -> str:
+    """
+    Recursively scans the executable directory and adjacent project directories
+    for shared libraries (.so / .so.* / .dylib) and maps them to container /target paths.
+    Includes standard Linux dynamic linker library search directories.
+    """
+    container_lib_dirs = [
+        "/target",
+        "/target/.libs",
+        "/target/lib",
+        "/target/build",
+        "/target/build/lib",
+        "/target/build/.libs",
+        "/target/src",
+        "/target/src/.libs",
+        "/target/libs",
+        "/target/bin",
+        "/usr/local/lib",
+        "/usr/lib",
+        "/usr/lib/x86_64-linux-gnu",
+        "/lib",
+        "/lib/x86_64-linux-gnu",
+    ]
+    seen = set(container_lib_dirs)
+    try:
+        abs_exe_dir = os.path.abspath(exe_dir)
+        search_roots = [abs_exe_dir]
+        parent = os.path.dirname(abs_exe_dir)
+        if parent and parent != abs_exe_dir:
+            search_roots.append(parent)
+            grandparent = os.path.dirname(parent)
+            if grandparent and grandparent != parent:
+                search_roots.append(grandparent)
+
+        for sroot in search_roots:
+            if not os.path.isdir(sroot):
+                continue
+            for root, dirs, files in os.walk(sroot):
+                dirs[:] = [d for d in dirs if not d.startswith(".") or d == ".libs"]
+                if any(".so" in f.lower() or f.lower().endswith(".dylib") for f in files):
+                    try:
+                        rel = os.path.relpath(root, abs_exe_dir)
+                        if rel == ".":
+                            p = "/target"
+                        elif not rel.startswith(".."):
+                            p = f"/target/{rel.replace(os.sep, '/')}"
+                        else:
+                            p = None
+                        if p and p not in seen:
+                            seen.add(p)
+                            container_lib_dirs.insert(0, p)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    return ":".join(container_lib_dirs)
+
+
+def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
+    """
+    Scans the executable directory and adjacent project directories for built
+    shared libraries (.so, .so.*, .dylib, .dll) and ensures they are staged/aliased
+    in exe_dir so the dynamic linker inside the Docker container (/target) can resolve them.
+    Returns a list of created file/symlink paths for cleanup.
+    """
+    staged_items: list[str] = []
+    if not exe_path or not os.path.exists(exe_path):
+        return staged_items
+
+    abs_exe = os.path.abspath(exe_path)
+    exe_dir = os.path.dirname(abs_exe)
+    if not os.path.isdir(exe_dir):
+        return staged_items
+
+    # 1. Determine search roots (exe_dir, parent, grandparent, workspace)
+    search_roots = [exe_dir]
+    parent = os.path.dirname(exe_dir)
+    if parent and parent != exe_dir:
+        search_roots.append(parent)
+        grandparent = os.path.dirname(parent)
+        if grandparent and grandparent != parent:
+            search_roots.append(grandparent)
+
+    # 2. Collect all shared library files across search roots
+    found_libs: dict[str, str] = {}  # filename -> full_path
+    for sroot in search_roots:
+        if not os.path.isdir(sroot):
+            continue
+        for root, dirs, files in os.walk(sroot):
+            dirs[:] = [d for d in dirs if not d.startswith(".") or d == ".libs"]
+            for f in files:
+                f_lower = f.lower()
+                if ".so" in f_lower or f_lower.endswith(".dylib") or f_lower.endswith(".dll"):
+                    if f not in found_libs:
+                        found_libs[f] = os.path.join(root, f)
+
+    # 3. If objdump / readelf / ldd is available on host, inspect NEEDED libraries
+    needed_libs: set[str] = set()
+    try:
+        res = subprocess.run(["readelf", "-d", abs_exe], capture_output=True, text=True, timeout=3)
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                if "NEEDED" in line and "[" in line and "]" in line:
+                    lib = line.split("[")[1].split("]")[0].strip()
+                    if lib:
+                        needed_libs.add(lib)
+    except Exception:
+        pass
+
+    if not needed_libs:
+        try:
+            res = subprocess.run(["objdump", "-p", abs_exe], capture_output=True, text=True, timeout=3)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    if "NEEDED" in line:
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            needed_libs.add(parts[-1])
+        except Exception:
+            pass
+
+    # 4. Helper to safely copy or symlink
+    import shutil
+    def _stage_file(src_path: str, dest_name: str) -> None:
+        dest_path = os.path.join(exe_dir, dest_name)
+        if os.path.abspath(src_path) == os.path.abspath(dest_path):
+            return
+        if not os.path.exists(dest_path) and not os.path.islink(dest_path):
+            try:
+                try:
+                    os.symlink(src_path, dest_path)
+                except (OSError, NotImplementedError, AttributeError):
+                    shutil.copy2(src_path, dest_path)
+                staged_items.append(dest_path)
+            except Exception:
+                pass
+
+    # 5. Stage required NEEDED libraries and generic .so/.dylib files
+    for lib_filename, lib_fullpath in found_libs.items():
+        _stage_file(lib_fullpath, lib_filename)
+
+        # Generate common SONAME aliases:
+        # e.g., libpng16.so.16.50.0 -> libpng16.so.16 and libpng16.so
+        # e.g., libspng.so.0.7.4 -> libspng.so.0 and libspng.so
+        if ".so." in lib_filename:
+            parts = lib_filename.split(".so.")
+            base_so = parts[0] + ".so"
+            version_parts = parts[1].split(".")
+            _stage_file(lib_fullpath, base_so)
+            if len(version_parts) >= 1 and version_parts[0].isdigit():
+                major_so = f"{base_so}.{version_parts[0]}"
+                _stage_file(lib_fullpath, major_so)
+
+    # 6. Specific check for needed_libs that might not have exact matches
+    for needed in needed_libs:
+        dest_path = os.path.join(exe_dir, needed)
+        if not os.path.exists(dest_path) and not os.path.islink(dest_path):
+            stem = needed.split(".so")[0]
+            for lib_name, lib_path in found_libs.items():
+                if lib_name.startswith(stem):
+                    _stage_file(lib_path, needed)
+                    break
+
+    return staged_items
+
+
+def _cleanup_staged_dependencies(staged_items: list[str]) -> None:
+    """Removes temporary staged dependency files and symlinks."""
+    for item in staged_items:
+        if os.path.exists(item) or os.path.islink(item):
+            try:
+                os.remove(item)
+            except Exception:
+                pass
+
+
+
 def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: str, timeout: int, sandbox: str = "none") -> dict:
     # Coerce input_data to string
     if isinstance(input_data, dict):
@@ -176,6 +354,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
     image = ""
     image_digest = ""
     is_docker_sandbox = (sandbox != "none" and _check_docker_functional())
+    staged_deps: list[str] = []
 
     if is_docker_sandbox:
         import uuid
@@ -192,6 +371,8 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             pass
 
         container_name = f"mutagen_sandbox_{uuid.uuid4().hex[:8]}"
+        staged_deps = _stage_shared_library_dependencies(exe_path)
+        ld_lib_path = _resolve_target_ld_library_path(exe_dir)
 
     try:
         env = os.environ.copy()
@@ -211,6 +392,8 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         "-i",
                         f"--memory={DOCKER_MEMORY_LIMIT}",
                         f"--cpus={DOCKER_CPU_LIMIT}",
+                        "-e", f"LD_LIBRARY_PATH={ld_lib_path}",
+                        "-e", "ASAN_OPTIONS=detect_leaks=0:symbolize=1:abort_on_error=1",
                         "-v", f"{exe_dir}:/target:ro",
                         "-w", "/target",
                         "--network=none",
@@ -264,6 +447,8 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         "-i",
                         f"--memory={DOCKER_MEMORY_LIMIT}",
                         f"--cpus={DOCKER_CPU_LIMIT}",
+                        "-e", f"LD_LIBRARY_PATH={ld_lib_path}",
+                        "-e", "ASAN_OPTIONS=detect_leaks=0:symbolize=1:abort_on_error=1",
                         "-v", f"{exe_dir}:/target:ro",
                         "-w", "/target",
                         "--network=none",
@@ -356,6 +541,8 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                             "-i",
                             f"--memory={DOCKER_MEMORY_LIMIT}",
                             f"--cpus={DOCKER_CPU_LIMIT}",
+                            "-e", f"LD_LIBRARY_PATH={ld_lib_path}",
+                            "-e", "ASAN_OPTIONS=detect_leaks=0:symbolize=1:abort_on_error=1",
                             "-v", f"{exe_dir}:/target:ro",
                             "-w", "/target",
                             "--network=none",
@@ -418,6 +605,8 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         "-i",
                         f"--memory={DOCKER_MEMORY_LIMIT}",
                         f"--cpus={DOCKER_CPU_LIMIT}",
+                        "-e", f"LD_LIBRARY_PATH={ld_lib_path}",
+                        "-e", "ASAN_OPTIONS=detect_leaks=0:symbolize=1:abort_on_error=1",
                         "-p", f"{port}:{port}",
                         "-v", f"{exe_dir}:/target:ro",
                         "-w", "/target",
@@ -821,3 +1010,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             "container_image": image if container_id else "",
             "container_image_digest": image_digest if container_id else "",
         }
+    finally:
+        if staged_deps:
+            _cleanup_staged_dependencies(staged_deps)
+

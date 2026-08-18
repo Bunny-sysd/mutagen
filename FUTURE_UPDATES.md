@@ -122,6 +122,14 @@ This section tracks line-by-line architectural and runtime issues discovered acr
 - `[BUG-14]` `[HIGH]` **Unescaped target path in report filename**: `json_file = f"crashes/crash_report_{target_name}_{timestamp}.json"` crashed with `FileNotFoundError` when `target_name` contained path separators (e.g. `../libspng/examples/example.c`).
   - *Fix*: Sanitize `target_name` into a safe filename using `os.path.basename` and replacing path separators with underscores. `[RESOLVED]`
 
+#### `mutagen/executor.py` & `mutagen/dependency_resolver.py`
+- `[BUG-15]` `[HIGH]` **Docker sandbox shared library resolution failure**: Dynamically linked binaries (e.g. `pngimage`, `pngtest`, `libspng`, `libxml2`) failed at runtime inside Docker sandbox with `error while loading shared libraries: libpng16.so.16: cannot open shared object file`.
+  - *Fix*:
+    1. Implemented `_stage_shared_library_dependencies()` in `executor.py` to scan project build roots, stage `.so` dependencies, and auto-create SONAME aliases (e.g. `libpng16.so.16`) directly in `exe_dir` with automatic post-execution teardown.
+    2. Updated `_resolve_target_ld_library_path()` to remove literal `:$LD_LIBRARY_PATH` and provide standard glibc search paths.
+    3. Added `-DBUILD_SHARED_LIBS=OFF` static linking preference with automatic dynamic fallback in `dependency_resolver.py` CMake builds. `[RESOLVED]`
+
+
 
 
 
