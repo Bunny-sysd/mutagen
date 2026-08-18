@@ -112,15 +112,34 @@ def fetch_cve_metadata(cve_id: str) -> dict[str, Any]:
                             if "introduced" in ev:
                                 affected_vers = f">= {ev['introduced']}"
 
-                # Extract potential function names from details using regex
-                funcs = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]{3,})\s*\(\)', f"{summary} {details}")
+                # Extract potential function names from details, summary, and vanir signatures
+                c_keywords = {"if", "for", "while", "switch", "return", "sizeof", "else", "case", "default", "do", "typedef", "struct", "enum", "union", "true", "false", "null"}
+                raw_funcs = []
+                # Match backticks: `png_do_quantize`
+                raw_funcs.extend(re.findall(r'`([a-zA-Z_][a-zA-Z0-9_]{2,})`', f"{summary} {details}"))
+                # Match function call syntax: png_do_quantize()
+                raw_funcs.extend(re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]{2,})\s*\(\)', f"{summary} {details}"))
+                # Match explicit words: png_do_quantize function or in png_do_quantize
+                raw_funcs.extend(re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]{2,})\s+function\b', f"{summary} {details}", re.IGNORECASE))
+                raw_funcs.extend(re.findall(r'\bin\s+([a-zA-Z_][a-zA-Z0-9_]{2,})\b', f"{summary} {details}"))
+                for aff in affected:
+                    vanir = aff.get("database_specific", {}).get("vanir_signatures", [])
+                    for v in vanir:
+                        target = v.get("target", {})
+                        if isinstance(target, dict) and target.get("function"):
+                            raw_funcs.append(target["function"])
+
+                extracted_funcs = [
+                    f for f in dict.fromkeys(raw_funcs)
+                    if f.lower() not in c_keywords and len(f) >= 3 and not f.endswith(".c") and not f.endswith(".h")
+                ]
 
                 return {
                     "cve_id": clean_id,
                     "name": summary or f"Vulnerability {clean_id}",
                     "cwe": "CWE-119",
                     "vuln_type": "Memory Corruption",
-                    "affected_functions": list(set(funcs)) if funcs else ["target_function"],
+                    "affected_functions": extracted_funcs if extracted_funcs else ["target_function"],
                     "affected_versions": affected_vers or "Unknown",
                     "fixed_version": fixed_ver or "Unknown",
                     "target_libraries": target_libs or ["target"],

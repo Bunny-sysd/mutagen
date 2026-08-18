@@ -171,21 +171,22 @@ def _node_text(node, source_bytes: bytes) -> str:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def analyze_source(code: str) -> PreTargetingResult:
+def analyze_source(code: str, target_functions: list[str] = None) -> PreTargetingResult:
     """
     Parse C source code and extract only the functions containing dangerous
-    patterns. Returns a focused code context for LLM analysis.
+    patterns or matching specific target functions. Returns a focused code context for LLM analysis.
 
     This is the "Sniper Mode" pre-targeting engine. Instead of sending
     the entire codebase to the AI, we use tree-sitter AST queries to
     identify dangerous function calls (strcpy, malloc, system, etc.)
-    and extract only the enclosing functions + the preamble.
+    or specific CVE target functions and extract only those enclosing functions + the preamble.
 
     Args:
         code: The full C source code string.
+        target_functions: Optional list of target function names (e.g. from CVE metadata).
 
     Returns:
-        PreTargetingResult with focused_code containing only dangerous regions.
+        PreTargetingResult with focused_code containing only dangerous/targeted regions.
     """
     result = PreTargetingResult()
 
@@ -225,13 +226,28 @@ def analyze_source(code: str) -> PreTargetingResult:
     _walk_for_calls(root, code_bytes, source_lines, dangerous_names, findings, dangerous_func_nodes, seen_findings)
     _ensure_main_included(root, code_bytes, dangerous_func_nodes)
 
-    result.findings = findings
+    # Filter out invalid function identifiers/keywords (e.g. 'if', 'for')
+    c_keywords = {"if", "for", "while", "switch", "return", "sizeof", "else", "case", "default", "do", "typedef", "struct", "enum", "union", "<unknown>"}
+    dangerous_func_nodes = {k: v for k, v in dangerous_func_nodes.items() if k not in c_keywords}
 
-    # Populate focused_functions map for extracted dangerous functions (including main)
+    result.findings = [f for f in findings if f.function_name not in c_keywords]
+
+    # Find all AST functions for target-guided search
+    all_ast_funcs: dict[str, object] = {}
+    def _collect_funcs(n):
+        if n.type == "function_definition":
+            fn = _get_function_name(n)
+            if fn and fn not in c_keywords:
+                all_ast_funcs[fn] = n
+        for ch in n.children:
+            _collect_funcs(ch)
+    _collect_funcs(root)
+
+    # Populate focused_functions map
     for func_name, func_node in dangerous_func_nodes.items():
         result.focused_functions[func_name] = _node_text(func_node, code_bytes)
 
-    if result.original_line_count <= 20 or not findings:
+    if result.original_line_count <= 20:
         # For small files (under 20 lines), preserve full source code.
         result.focused_code = code
         result.focused_line_count = result.original_line_count
@@ -241,56 +257,79 @@ def analyze_source(code: str) -> PreTargetingResult:
     # Extract preamble (includes, structs, typedefs, globals)
     preamble = _extract_preamble(root, code_bytes)
 
+    # Determine which functions to focus on
+    selected_funcs = []
+    target_match_names = set()
+    if target_functions:
+        clean_targets = [tf.strip() for tf in target_functions if tf and tf.strip() not in ("target_function", "")]
+        for tf in clean_targets:
+            for fn, node in all_ast_funcs.items():
+                if fn.lower() == tf.lower() or tf.lower() in fn.lower() or fn.lower() in tf.lower():
+                    if fn not in target_match_names:
+                        target_match_names.add(fn)
+                        selected_funcs.append((fn, node))
+
+    if not selected_funcs:
+        # Fallback to dangerous function priority sorting
+        def _func_priority(item: tuple[str, object]) -> int:
+            fname, _ = item
+            func_f = [f for f in result.findings if f.function_name == fname]
+            score = 0
+            for f in func_f:
+                if any(c in f.cwe for c in ["787", "119", "122", "125", "416"]):
+                    score += 10
+                elif "190" in f.cwe or "681" in f.cwe:
+                    score += 5
+                else:
+                    score += 2
+            if fname in ("main", "target_function", "png_do_quantize", "png_combine_row"):
+                score += 15
+            return score
+
+        sorted_funcs = sorted(dangerous_func_nodes.items(), key=_func_priority, reverse=True)
+        # Cap to top 4 most critical functions to maintain true token efficiency
+        selected_funcs = sorted_funcs[:4] if len(sorted_funcs) > 4 else sorted_funcs
+
     # Build focused code
     focused_parts = []
+
+    # Limit preamble lines if excessively large (> 80 lines)
+    preamble_lines = preamble.splitlines()
+    if len(preamble_lines) > 80 and target_match_names:
+        # Keep includes, typedefs, and struct headers
+        compact_preamble = [l for l in preamble_lines if any(l.strip().startswith(kw) for kw in ["#include", "typedef", "struct", "#define PNG_"])]
+        preamble = "\n".join(compact_preamble[:80])
 
     if preamble.strip():
         focused_parts.append("// ===== PREAMBLE (includes, types, globals) =====")
         focused_parts.append(preamble)
         focused_parts.append("")
 
-    # Add a summary comment so the AI knows this is pre-filtered
-    category_counts: dict[str, int] = {}
-    for f in findings:
-        category_counts[f.pattern_type] = category_counts.get(f.pattern_type, 0) + 1
-
-    summary_items = [f"{count}x {cat}" for cat, count in sorted(category_counts.items())]
+    # Add a summary comment
+    if target_match_names:
+        focused_parts.append(
+            f"// ===== SNIPER MODE: Targeted {len(selected_funcs)} CVE-relevant function(s): {', '.join([f[0] for f in selected_funcs])} ====="
+        )
+    else:
+        category_counts: dict[str, int] = {}
+        for f in result.findings:
+            category_counts[f.pattern_type] = category_counts.get(f.pattern_type, 0) + 1
+        summary_items = [f"{count}x {cat}" for cat, count in sorted(category_counts.items())]
+        focused_parts.append(
+            f"// ===== SNIPER MODE: {len(result.findings)} dangerous patterns detected "
+            f"({', '.join(summary_items)}) ====="
+        )
     focused_parts.append(
-        f"// ===== SNIPER MODE: {len(findings)} dangerous patterns detected "
-        f"({', '.join(summary_items)}) ====="
-    )
-    focused_parts.append(
-        f"// Extracted {len(dangerous_func_nodes)} functions from "
+        f"// Extracted {len(selected_funcs)} function(s) from "
         f"{result.original_line_count} total lines"
     )
     focused_parts.append("")
 
-    # Sort functions by highest severity findings first (CWE-787, 119, 122, 125, 416, 190)
-    def _func_priority(item: tuple[str, object]) -> int:
-        fname, _ = item
-        func_f = [f for f in findings if f.function_name == fname]
-        score = 0
-        for f in func_f:
-            if any(c in f.cwe for c in ["787", "119", "122", "125", "416"]):
-                score += 10
-            elif "190" in f.cwe or "681" in f.cwe:
-                score += 5
-            else:
-                score += 2
-        if fname in ("main", "target_function", "png_do_quantize", "png_combine_row"):
-            score += 15
-        return score
-
-    sorted_funcs = sorted(dangerous_func_nodes.items(), key=_func_priority, reverse=True)
-    # Cap to top 8 most critical functions if file is large to keep token footprint ultra-efficient
-    selected_funcs = sorted_funcs[:8] if len(sorted_funcs) > 8 else sorted_funcs
-
-    # Add each dangerous function
+    # Add each selected function
     for func_name, func_node in selected_funcs:
         func_text = _node_text(func_node, code_bytes)
         start_line = (getattr(func_node, "start_point", (0, 0))[0] + 1) if hasattr(func_node, "start_point") else 1
-        # Annotate which dangerous calls are inside this function
-        func_findings = [f for f in findings if f.function_name == func_name]
+        func_findings = [f for f in result.findings if f.function_name == func_name]
         if func_findings:
             calls_str = ", ".join(sorted(set(f.call_name for f in func_findings)))
             focused_parts.append(f"// [SNIPER - ORIGINAL SOURCE LINE {start_line}] Function '{func_name}' contains: {calls_str}")
@@ -308,7 +347,6 @@ def analyze_source(code: str) -> PreTargetingResult:
         result.reduction_percent = (
             (1.0 - result.focused_line_count / result.original_line_count) * 100.0
         )
-        # Clamp to 0 if focused is somehow larger (e.g., annotations added)
         result.reduction_percent = max(0.0, result.reduction_percent)
 
     return result

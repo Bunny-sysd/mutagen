@@ -199,14 +199,24 @@ class PayloadSynthesizerAgent(BaseAgent):
                     extracted_snippets.append(f"// Target context around Line {v.line_number} ({v.vuln_type}):\n{snip}\n")
             scoped_source = "\n".join(extracted_snippets)
 
-        prompt = f"""You are an expert security researcher and automated fuzzing payload engineer.
-Target Environment: OS={context.os_platform}, Language={context.language}, Delivery Mode={context.delivery_mode}
+        cve_meta = getattr(context, "cve_meta", None)
+        cve_spec_str = ""
+        if cve_meta:
+            cve_spec_str = (
+                f"\nGround-Truth CVE Target Specification:\n"
+                f"- Target CVE: {cve_meta.get('cve_id')} ({cve_meta.get('name')})\n"
+                f"- Flaw Type: {cve_meta.get('vuln_type')} ({cve_meta.get('cwe')})\n"
+                f"- Affected Function(s): {', '.join(cve_meta.get('affected_functions', []))}\n"
+                f"- PoC Synthesis Guidance: {cve_meta.get('poc_guidance', '')}\n"
+            )
 
+        prompt = f"""You are an elite automated exploit payload generation engineer.
 Objective:
 Synthesize exact input payloads (arguments, byte buffers, or files) engineered to reproduce identified security flaws.
 
 Target Vulnerabilities:
 {joined_vuln_desc}
+{cve_spec_str}
 {poc_context_str}
 
 Source Code Context:

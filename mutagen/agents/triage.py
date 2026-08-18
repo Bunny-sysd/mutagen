@@ -91,7 +91,15 @@ class TriageAgent(BaseAgent):
         self.engine.language = context.language
         context.logs.append("[TriageAgent] Starting code triage...")
 
-        pretarget = analyze_source(context.source_code)
+        # Ground-Truth CVE metadata resolution
+        cve_meta = getattr(context, "cve_meta", None)
+        if not cve_meta and getattr(context, "validate_cve", ""):
+            from mutagen.cve_validator import fetch_cve_metadata
+            cve_meta = fetch_cve_metadata(context.validate_cve)
+            context.cve_meta = cve_meta
+
+        cve_target_functions = cve_meta.get("affected_functions", []) if cve_meta else []
+        pretarget = analyze_source(context.source_code, target_functions=cve_target_functions)
         code_lines = context.source_code.splitlines()
         numbered_source = "\n".join(f"{i+1:4d} | {line}" for i, line in enumerate(code_lines))
 
@@ -104,20 +112,42 @@ class TriageAgent(BaseAgent):
             if "No multi-file workspace" not in graph_text:
                 graph_summary = f"\n\nPROJECT WORKSPACE CONTEXT:\n{graph_text}\n"
 
-        # For large files (> 300 lines), use Sniper Mode AST pre-targeting if available
+        # For large files (> 300 lines) or CVE mode, use Sniper Mode AST pre-targeting if available
         # to focus on dangerous regions, preventing 504 timeouts and gateway latency
-        if len(code_lines) > 300 and pretarget.focused_code and pretarget.findings:
+        if (len(code_lines) > 300 or cve_target_functions) and pretarget.focused_code and (pretarget.findings or cve_target_functions):
             from rich.console import Console
             console = Console(force_terminal=True, force_jupyter=False)
-            console.print(f"[dim]  🎯 [TriageAgent] Sniper Mode active: focused {pretarget.focused_line_count}/{pretarget.original_line_count} lines ({pretarget.reduction_percent:.1f}% token reduction)[/dim]")
+            try:
+                console.print(f"[dim]  🎯 [TriageAgent] Sniper Mode active: focused {pretarget.focused_line_count}/{pretarget.original_line_count} lines ({pretarget.reduction_percent:.1f}% token reduction)[/dim]")
+            except Exception:
+                pass
             prompt = get_triage_prompt(context.language, pretarget.focused_code)
         else:
             prompt = get_triage_prompt(context.language, numbered_source)
+
+        # Inject Ground-Truth CVE Constraint prominently if active
+        if cve_meta:
+            cve_funcs_str = ", ".join(cve_meta.get("affected_functions", [])) or "target_function"
+            cve_constraint = (
+                f"\n\n[GROUND-TRUTH CVE TARGET VALIDATION CONSTRAINT]\n"
+                f"- Target CVE Identifier: {cve_meta.get('cve_id')}\n"
+                f"- Vulnerability Title: {cve_meta.get('name')}\n"
+                f"- Vulnerability Classification: {cve_meta.get('vuln_type', 'Memory Corruption')} ({cve_meta.get('cwe', 'CWE-119')})\n"
+                f"- Target Affected Function(s): {cve_funcs_str}\n"
+                f"- Advisory Description: {cve_meta.get('description')}\n"
+                f"- PoC Synthesis Guidance: {cve_meta.get('poc_guidance', '')}\n"
+                f"- MANDATORY REQUIREMENT: You MUST focus your primary finding directly on the vulnerability in the targeted function(s) ({cve_funcs_str}) defined by this ground-truth CVE advisory. Do NOT select unrelated auxiliary functions.\n"
+            )
+            prompt = cve_constraint + "\n" + prompt + "\n" + cve_constraint
 
         # Include AST static findings as non-destructive hints
         if pretarget.findings:
             ast_hints = [f"- Line {f.line}: {f.call_name} ({f.pattern_type}, {f.cwe})" for f in pretarget.findings[:10]]
             prompt += "\n\n[STATIC AST DANGEROUS PATTERN HINTS]\n" + "\n".join(ast_hints) + "\n"
+
+        if getattr(context, "notepad", None):
+            notepad_str = "\n".join(f"- {note}" for note in context.notepad)
+            prompt += f"\n\n[ORCHESTRATOR SWARM MEMORY & NOTEPAD]\n{notepad_str}\n"
 
         if context.is_binary:
             binary_context = (
