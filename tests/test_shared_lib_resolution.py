@@ -105,16 +105,16 @@ class TestSharedLibraryResolution(unittest.TestCase):
     @patch("subprocess.run")
     def test_execute_payload_docker_cmd_ld_library_path(self, mock_run, mock_docker_check):
         """Validates that execute_payload constructs docker create with clean LD_LIBRARY_PATH."""
-        mock_run.side_effect = [
-            # 1. inspect image
-            MagicMock(returncode=0, stdout="sha256:1234567890abcdef", stderr=""),
-            # 2. docker create
-            MagicMock(returncode=0, stdout="abc123containerid", stderr=""),
-            # 3. docker start
-            MagicMock(returncode=0, stdout="OK", stderr=""),
-            # 4. docker rm -f
-            MagicMock(returncode=0, stdout="", stderr=""),
-        ]
+        def fake_run(cmd, *args, **kwargs):
+            if isinstance(cmd, list) and len(cmd) > 1 and cmd[0] == "docker" and cmd[1] == "create":
+                return MagicMock(returncode=0, stdout="abc123containerid\n", stderr="")
+            if isinstance(cmd, list) and len(cmd) > 1 and cmd[0] == "docker" and cmd[1] == "image":
+                return MagicMock(returncode=0, stdout="sha256:1234567890abcdef", stderr="")
+            if isinstance(cmd, list) and len(cmd) > 0 and cmd[0] == "ldd":
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="OK\n", stderr="")
+
+        mock_run.side_effect = fake_run
 
         dummy_exe = os.path.join(self.test_dir, "test_target")
         with open(dummy_exe, "w") as f:
