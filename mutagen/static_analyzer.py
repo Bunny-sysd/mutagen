@@ -297,7 +297,7 @@ def analyze_source(code: str, target_functions: list[str] = None) -> PreTargetin
     preamble_lines = preamble.splitlines()
     if len(preamble_lines) > 80 and target_match_names:
         # Keep includes, typedefs, and struct headers
-        compact_preamble = [l for l in preamble_lines if any(l.strip().startswith(kw) for kw in ["#include", "typedef", "struct", "#define PNG_"])]
+        compact_preamble = [line for line in preamble_lines if any(line.strip().startswith(kw) for kw in ["#include", "typedef", "struct", "#define PNG_"])]
         preamble = "\n".join(compact_preamble[:80])
 
     if preamble.strip():

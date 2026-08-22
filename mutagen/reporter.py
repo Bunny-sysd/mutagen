@@ -207,7 +207,7 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
         v_stat = c.get("verification_status") or c.get("metadata", {}).get("verification_status", "UNCONFIRMED_RISK")
         v_annot = c.get("verification_annotation") or c.get("metadata", {}).get("verification_annotation", "")
         is_fp = c.get("is_false_positive_risk", c.get("metadata", {}).get("is_false_positive_risk", False)) or v_stat in ("LIKELY_FALSE_POSITIVE", "UNGROUNDED_FINDING")
-        
+
         flagged_badge = ""
         if is_fp or v_stat == "UNGROUNDED_FINDING":
             badge_text = "UNGROUNDED" if v_stat == "UNGROUNDED_FINDING" else "LIKELY FALSE POSITIVE"

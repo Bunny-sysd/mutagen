@@ -9,7 +9,7 @@ to prevent prompt token bloat in LLM contexts.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

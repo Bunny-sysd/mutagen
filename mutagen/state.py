@@ -30,12 +30,12 @@ class VulnerabilityDetail(BaseModel):
             meta = dict(obj.get("metadata", {}))
             if "reason" not in meta and "reason" in obj:
                 meta["reason"] = str(obj.get("reason", ""))
-            
+
             v_stat = obj.get("verification_status", meta.get("verification_status", "UNCONFIRMED_RISK"))
             v_annot = obj.get("verification_annotation", meta.get("verification_annotation", ""))
             v_conf = obj.get("confidence", meta.get("confidence", "HIGH"))
             v_fp = obj.get("is_false_positive_risk", meta.get("is_false_positive_risk", False))
-            
+
             meta["verification_status"] = v_stat
             meta["verification_annotation"] = v_annot
             meta["confidence"] = v_conf

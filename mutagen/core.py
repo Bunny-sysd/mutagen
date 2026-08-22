@@ -536,7 +536,11 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         detected_ver = None
         is_ver_affected = True
         if validate_cve:
-            from mutagen.cve_validator import check_version_affected, detect_target_version, fetch_cve_metadata
+            from mutagen.cve_validator import (
+                check_version_affected,
+                detect_target_version,
+                fetch_cve_metadata,
+            )
             cve_meta = fetch_cve_metadata(validate_cve)
             detected_ver = detect_target_version(source_path, source_code)
             is_ver_affected, ver_msg = check_version_affected(detected_ver, cve_meta)
@@ -733,7 +737,10 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
         console.print(summary)
 
         if validate_cve and cve_meta:
-            from mutagen.cve_validator import evaluate_cve_validation_outcome, render_cve_validation_panel
+            from mutagen.cve_validator import (
+                evaluate_cve_validation_outcome,
+                render_cve_validation_panel,
+            )
             cve_res = evaluate_cve_validation_outcome(context, cve_meta, detected_ver, is_ver_affected)
             render_cve_validation_panel(cve_res)
 

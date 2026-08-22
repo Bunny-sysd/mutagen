@@ -6,10 +6,10 @@ from rich.console import Console
 
 console = Console(force_terminal=True, force_jupyter=False)
 
-SHARED_LIB_PATTERN = re.compile(r"\.(so|dylib)(\.\d+)*$|\.(dll|a|lib|o|obj|cmake|txt|ninja|d|rlib)$", re.IGNORECASE)
+SHARED_LIB_PATTERN = re.compile(r"\.(so|dylib)(\.\d+)*$|\.(dll|a|lib|o|obj|cmake|txt|ninja|d|rlib|awk|sh|py|pl|m4|in|am|h|hpp|c|cpp|cc|cxx|log|status|check|make)$", re.IGNORECASE)
 
 def _is_shared_library_or_build_artifact(filename: str) -> bool:
-    """Returns True if the filename represents a shared library, archive, or non-executable build artifact."""
+    """Returns True if the filename represents a shared library, archive, script, or non-executable build artifact."""
     return bool(SHARED_LIB_PATTERN.search(filename))
 
 # Common C/C++ header to library flag mapping

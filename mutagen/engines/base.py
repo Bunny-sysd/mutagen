@@ -1,4 +1,10 @@
+import threading
+import time
 from abc import ABC, abstractmethod
+
+from rich.console import Console
+
+_hb_console = Console(force_terminal=True, force_jupyter=False)
 
 
 class BaseEngine(ABC):
@@ -80,13 +86,6 @@ class BaseEngine(ABC):
         """Generate ordered sequence payloads for session mode fuzzing.
         Default implementation returns empty list."""
         return []
-
-
-import threading
-import time
-from rich.console import Console
-
-_hb_console = Console(force_terminal=True, force_jupyter=False)
 
 
 class AiActivityHeartbeat:

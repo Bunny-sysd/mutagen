@@ -9,10 +9,9 @@ Dynamic, non-hardcoded format inspection and checksum/header repair across:
 
 from __future__ import annotations
 
+import logging
 import struct
 import zlib
-import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

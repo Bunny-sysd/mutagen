@@ -234,7 +234,7 @@ def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
         except Exception:
             pass
 
-    # 4. Helper to safely copy or symlink
+    # 4. Helper to safely copy or symlink (ensuring container volume mount compatibility)
     import shutil
     def _stage_file(src_path: str, dest_name: str) -> None:
         dest_path = os.path.join(exe_dir, dest_name)
@@ -242,13 +242,20 @@ def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
             return
         if not os.path.exists(dest_path) and not os.path.islink(dest_path):
             try:
-                try:
-                    os.symlink(src_path, dest_path)
-                except (OSError, NotImplementedError, AttributeError):
+                # If src and dest are in the same directory, use relative symlink;
+                # otherwise copy the file so the container's isolated /target mount is self-contained.
+                if os.path.dirname(os.path.abspath(src_path)) == os.path.abspath(exe_dir):
+                    rel_src = os.path.relpath(src_path, exe_dir)
+                    os.symlink(rel_src, dest_path)
+                else:
                     shutil.copy2(src_path, dest_path)
                 staged_items.append(dest_path)
             except Exception:
-                pass
+                try:
+                    shutil.copy2(src_path, dest_path)
+                    staged_items.append(dest_path)
+                except Exception:
+                    pass
 
     # 5. Stage required NEEDED libraries and generic .so/.dylib files
     for lib_filename, lib_fullpath in found_libs.items():
@@ -360,6 +367,12 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         import uuid
         abs_exe_path = os.path.abspath(exe_path)
         exe_dir = os.path.dirname(abs_exe_path)
+        if os.path.exists(abs_exe_path):
+            try:
+                os.chmod(abs_exe_path, 0o755)
+            except Exception:
+                pass
+
         exe_name = os.path.basename(abs_exe_path)
         image = os.environ.get("MUTAGEN_SANDBOX_IMAGE", "ubuntu:latest")
 

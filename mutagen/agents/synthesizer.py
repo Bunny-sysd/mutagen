@@ -6,10 +6,14 @@ from pydantic import BaseModel, Field
 
 from mutagen.agents.base import BaseAgent
 from mutagen.agents.prompts import get_synthesizer_rules
-from mutagen.constants import DEFAULT_GEMINI_FALLBACK_MODELS, DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER, SYNTHESIZER_TEMPERATURE
-from mutagen.engines import get_engine
-from mutagen.poc_finder import get_cwe_poc_intelligence
 from mutagen.binary_repair import repair_binary_payload
+from mutagen.constants import (
+    DEFAULT_GEMINI_FALLBACK_MODELS,
+    DEFAULT_MODEL_GEMINI,
+    DEFAULT_PROVIDER,
+    SYNTHESIZER_TEMPERATURE,
+)
+from mutagen.engines import get_engine
 from mutagen.safety import GEMINI_SAFETY_OFF
 from mutagen.state import CrashPayload, ProgramContext
 
@@ -250,8 +254,9 @@ Return JSON adhering strictly to:
             data = None
             synthesis_error = None
             if self.model_provider == "gemini" and hasattr(self.engine, "client") and hasattr(self.engine.client, "models"):
-                from mutagen.engines.base import AiActivityHeartbeat
                 from rich.console import Console
+
+                from mutagen.engines.base import AiActivityHeartbeat
                 console = Console(force_terminal=True, force_jupyter=False)
 
                 models_to_try = [self.model_name] if self.model_name else []

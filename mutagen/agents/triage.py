@@ -6,7 +6,12 @@ from pydantic import BaseModel
 
 from mutagen.agents.base import BaseAgent
 from mutagen.agents.prompts import get_triage_prompt
-from mutagen.constants import DEFAULT_GEMINI_FALLBACK_MODELS, DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER, TRIAGE_TEMPERATURE
+from mutagen.constants import (
+    DEFAULT_GEMINI_FALLBACK_MODELS,
+    DEFAULT_MODEL_GEMINI,
+    DEFAULT_PROVIDER,
+    TRIAGE_TEMPERATURE,
+)
 from mutagen.engines import get_engine
 from mutagen.safety import GEMINI_SAFETY_OFF
 from mutagen.state import ProgramContext, VulnerabilityDetail
@@ -299,7 +304,7 @@ class TriageAgent(BaseAgent):
                     claimed_idx = max(0, claimed_line - 1)
 
                     # Extract the primary code statement from snippet (ignoring comment-only lines)
-                    snip_lines = [l.strip() for l in code_snip.splitlines() if l.strip() and not l.strip().startswith(("/*", "*", "//"))]
+                    snip_lines = [line.strip() for line in code_snip.splitlines() if line.strip() and not line.strip().startswith(("/*", "*", "//"))]
                     target_snip = snip_lines[0] if snip_lines else code_snip.strip()
 
                     found_idx = None

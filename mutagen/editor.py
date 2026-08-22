@@ -1,6 +1,5 @@
 import difflib
 import re
-from typing import Optional
 
 from rich.console import Console
 from rich.syntax import Syntax
@@ -32,7 +31,7 @@ class EditorScope:
 class VirtualCodeEditor:
     """
     Virtual Code Editor & Scratchpad IDE for Mutagen Agents.
-    
+
     Instead of monolithic full-file generation, this workspace isolates
     the vulnerable scope into an interactive text editor buffer where
     agents can make targeted modifications, review diffs, run AST pre-flight
@@ -43,7 +42,7 @@ class VirtualCodeEditor:
         self.language = language.lower()
         self.filename = filename
         self.lines = source_code.splitlines()
-        self.active_scope: Optional[EditorScope] = None
+        self.active_scope: EditorScope | None = None
         self.history: list[str] = []
 
     def open_function_scope(self, function_name: str) -> EditorScope:

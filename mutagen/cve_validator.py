@@ -15,11 +15,10 @@ import os
 import re
 import urllib.parse
 import urllib.request
-from typing import Any, Optional, Tuple
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
-from rich import box
 
 console = Console(force_terminal=True, force_jupyter=False)
 
@@ -164,7 +163,7 @@ def fetch_cve_metadata(cve_id: str) -> dict[str, Any]:
     }
 
 
-def detect_target_version(target_path: str, source_code: str = "") -> Optional[str]:
+def detect_target_version(target_path: str, source_code: str = "") -> str | None:
     """
     Language-agnostic target version detector.
     Scans source files, header definitions, build configs, and changelogs.
@@ -215,7 +214,7 @@ def _parse_semver(ver_str: str) -> tuple[int, ...]:
     return tuple(int(n) for n in nums) if nums else (0,)
 
 
-def check_version_affected(detected_version: Optional[str], cve_meta: dict[str, Any]) -> Tuple[bool, str]:
+def check_version_affected(detected_version: str | None, cve_meta: dict[str, Any]) -> tuple[bool, str]:
     """
     Compares detected version against CVE affected / fixed version range.
     Returns (is_affected: bool, message: str).
@@ -239,7 +238,7 @@ def check_version_affected(detected_version: Optional[str], cve_meta: dict[str, 
 def evaluate_cve_validation_outcome(
     context: Any,
     cve_meta: dict[str, Any],
-    detected_version: Optional[str],
+    detected_version: str | None,
     is_version_affected: bool
 ) -> dict[str, Any]:
     """
@@ -423,12 +422,12 @@ def render_cve_validation_panel(result: dict[str, Any]) -> None:
     diag_text = ""
     if cat == "E" and result.get("diagnostic"):
         diag = result["diagnostic"]
-        diag_text = f"\n\n[bold yellow]Triage Error Telemetry:[/bold yellow]\n"
+        diag_text = "\n\n[bold yellow]Triage Error Telemetry:[/bold yellow]\n"
         diag_text += f"  - Error Detail:   {diag.get('triage_error')}\n"
-        diag_text += f"  - Recommendation: Triage LLM call encountered a parse/network error. Please retry the run.\n"
+        diag_text += "  - Recommendation: Triage LLM call encountered a parse/network error. Please retry the run.\n"
     elif cat == "C" and result.get("diagnostic"):
         diag = result["diagnostic"]
-        diag_text = f"\n\n[bold yellow]Pipeline Diagnostic Telemetry:[/bold yellow]\n"
+        diag_text = "\n\n[bold yellow]Pipeline Diagnostic Telemetry:[/bold yellow]\n"
         diag_text += f"  - Target Delivery Mode:  {diag.get('delivery_mode')}\n"
         diag_text += f"  - Reachability Status:   {diag.get('reachability_status')} ({diag.get('reachability_message')})\n"
         diag_text += f"  - Payloads Evaluated:    {diag.get('payloads_tested')}\n"

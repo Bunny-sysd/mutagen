@@ -290,6 +290,25 @@ def verify_binary_reachability(candidate_binary: str, vuln_function: str, candid
         except Exception:
             pass
 
+    # 4. Colocated / Linked Shared Library Symbol Inspection
+    bin_dir = os.path.dirname(os.path.abspath(candidate_binary))
+    if os.path.isdir(bin_dir):
+        for f in os.listdir(bin_dir):
+            if ".so" in f or f.endswith((".dylib", ".dll", ".a")):
+                lib_path = os.path.join(bin_dir, f)
+                try:
+                    with open(lib_path, "rb") as lf:
+                        lib_bytes = lf.read()
+                    for sym in target_symbols:
+                        if sym.encode("utf-8") in lib_bytes:
+                            return {
+                                "reachable": True,
+                                "confidence": "HIGH",
+                                "reason": f"Function/alias symbol '{sym}' found in linked library '{f}'"
+                            }
+                except Exception:
+                    pass
+
     return {
         "reachable": False,
         "confidence": "HIGH",

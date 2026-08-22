@@ -50,10 +50,12 @@ class PatchEngineerAgent(BaseAgent):
         # Check if we have a previous bad patch to refine
         bad_patch = context.get_primary_patch()
 
+        import re
+
         from rich.console import Console
+
         from mutagen.editor import VirtualCodeEditor
         from mutagen.engines.output_parser import strip_code_fences
-        import re
         console = Console(force_terminal=True, force_jupyter=False)
 
         # 1. Initialize Virtual Code Editor workspace with precise target scope
@@ -96,7 +98,7 @@ class PatchEngineerAgent(BaseAgent):
             context.logs.append("[PatchEngineerAgent] Refining previous failed patch in VirtualCodeEditor...")
             console.print(f"[dim]  🤖 [PatchEngineerAgent] Refining patch using AI engine '{self.model_provider}' (Model: {self.model_name or DEFAULT_MODEL_GEMINI})...[/dim]")
             clean_bad_patch = strip_code_fences(bad_patch)
-            
+
             # Extract the bad scope from previous attempt
             bad_editor = VirtualCodeEditor(clean_bad_patch, language=context.language, filename=context.target_path)
             bad_editor.open_vulnerable_scope(target_line)
@@ -130,7 +132,7 @@ class PatchEngineerAgent(BaseAgent):
                 console.print(f"[bold yellow]  ⚠️ [VirtualCodeEditor] Pre-flight AST syntax warning: {ast_msg}[/bold yellow]")
                 context.notepad.append(f"VirtualCodeEditor PreFlight: {ast_msg}")
             else:
-                console.print(f"[dim]  ✓ [VirtualCodeEditor] Pre-flight AST syntax check passed.[/dim]")
+                console.print("[dim]  ✓ [VirtualCodeEditor] Pre-flight AST syntax check passed.[/dim]")
 
             # Print rich colorized diff preview
             editor.print_diff_preview()

@@ -5,7 +5,6 @@ from google import genai
 from rich.console import Console
 
 from mutagen.constants import (
-    DEFAULT_MODEL_GEMINI,
     DEFAULT_GEMINI_FALLBACK_MODELS,
     GEMINI_HTTP_CONNECT_TIMEOUT,
     GEMINI_HTTP_READ_TIMEOUT,
@@ -13,7 +12,7 @@ from mutagen.constants import (
     GEMINI_HTTP_WRITE_TIMEOUT,
     GEMINI_RATE_LIMIT_WAIT,
 )
-from mutagen.engines.base import BaseEngine, AiActivityHeartbeat
+from mutagen.engines.base import AiActivityHeartbeat, BaseEngine
 from mutagen.safety import GEMINI_SAFETY_OFF
 
 console = Console(force_terminal=True, force_jupyter=False)
