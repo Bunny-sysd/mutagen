@@ -2,14 +2,16 @@
 Unit tests for Mutagen's Ground-Truth CVE Validation Mode (--validate-cve).
 """
 
-import pytest
+from unittest.mock import MagicMock, patch
+
 from mutagen.cve_validator import (
-    fetch_cve_metadata,
-    detect_target_version,
     check_version_affected,
+    detect_target_version,
     evaluate_cve_validation_outcome,
+    fetch_cve_metadata,
 )
-from mutagen.state import ProgramContext, VulnerabilityDetail, CrashPayload
+from mutagen.executor import execute_payload
+from mutagen.state import CrashPayload, ProgramContext, VulnerabilityDetail
 
 
 def test_fetch_cve_metadata_builtin_and_generic():
@@ -47,7 +49,7 @@ def test_detect_target_version_multilang(tmp_path):
 
 def test_version_match_gating():
     meta = {"fixed_version": "1.6.51"}
-    
+
     # 1.6.50 is affected (< 1.6.51)
     is_affected, msg = check_version_affected("1.6.50", meta)
     assert is_affected is True
@@ -152,10 +154,6 @@ def test_repair_truncated_json():
 
 
 
-from unittest.mock import patch, MagicMock
-from mutagen.executor import execute_payload
-
-
 def test_docker_infrastructure_error_classified_as_execution_error():
     """
     Simulates Docker CLI returning the exact error:
@@ -201,6 +199,7 @@ def test_supervisor_records_execution_error():
     sets payload.crash_type = 'EXECUTION_ERROR' and does NOT count it as a clean negative.
     """
     import asyncio
+
     from mutagen.agents.supervisor import FuzzingSupervisorAgent
     ctx = ProgramContext(
         target_path="dummy.c",

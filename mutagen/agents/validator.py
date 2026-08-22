@@ -2,7 +2,7 @@ import os
 import tempfile
 
 from mutagen.agents.base import BaseAgent
-from mutagen.ast_validator import validate_c_source
+from mutagen.ast_validator import validate_c_patch
 from mutagen.compiler import compile_target
 from mutagen.constants import DEFAULT_EXEC_TIMEOUT, DEFAULT_MODEL_GEMINI, DEFAULT_PROVIDER
 from mutagen.executor import execute_payload
@@ -32,7 +32,7 @@ class StructuralValidatorAgent(BaseAgent):
         # 1. Run Tree-sitter AST Pre-Check (C/C++ only)
         if context.language == "c":
             console.print("[dim]  [StructuralValidatorAgent] Running Tree-sitter AST syntax validation...[/dim]")
-            result = validate_c_source(patched_code)
+            result = validate_c_patch(context.source_code or "", patched_code)
             if not result.is_valid:
                 err_msg = ", ".join(f"line {e.line}: {e.message}" for e in result.errors)
                 try:
@@ -44,12 +44,11 @@ class StructuralValidatorAgent(BaseAgent):
                     context.logs.append(f"[StructuralValidatorAgent] Raw patch dumped to {log_file}")
                 except Exception:
                     pass
-                context.logs.append(f"[StructuralValidatorAgent] AST Validation failed: {err_msg}")
-                context.verification_status = "REGRESSION_FAILED"
-                console.print(f"[bold yellow]  ⚠️ Patch failed AST syntax validation: {err_msg[:120]}[/bold yellow]")
-                return context
-            context.logs.append(f"[StructuralValidatorAgent] AST Validation passed. Parsed {result.node_count} nodes.")
-            console.print(f"[dim]  ✓ AST syntax valid ({result.node_count} nodes).[/dim]")
+                context.logs.append(f"[StructuralValidatorAgent] AST Validation warning (differential): {err_msg}")
+                console.print(f"[dim]  [AST Pre-check] Detected potential syntax differences: {err_msg[:80]}. Verifying with native compiler...[/dim]")
+            else:
+                context.logs.append(f"[StructuralValidatorAgent] AST Validation passed. Parsed {result.node_count} nodes.")
+                console.print(f"[dim]  ✓ AST syntax valid ({result.node_count} nodes).[/dim]")
         else:
             context.logs.append(f"[StructuralValidatorAgent] Skipping Tree-sitter AST check for non-C language: {context.language}")
 

@@ -396,7 +396,8 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         else:
             env["PYTHONPATH"] = workspace_dir
 
-        # Inject host-level library search paths so dynamically linked libraries (e.g. libpng16.so) resolve in host execution
+        host_env = env.copy()
+        # Inject host-level library search paths so dynamically linked libraries (e.g. libpng16.so) resolve in unsandboxed host execution
         host_lib_paths = [exe_dir]
         for candidate_sub in [".libs", "lib", "build", "src", "libs"]:
             sub_path = os.path.join(exe_dir, candidate_sub)
@@ -411,15 +412,15 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     host_lib_paths.append(sub_path)
 
         injected_path_str = os.pathsep.join(host_lib_paths)
-        if "LD_LIBRARY_PATH" in env and env["LD_LIBRARY_PATH"]:
-            env["LD_LIBRARY_PATH"] = injected_path_str + os.pathsep + env["LD_LIBRARY_PATH"]
+        if "LD_LIBRARY_PATH" in host_env and host_env["LD_LIBRARY_PATH"]:
+            host_env["LD_LIBRARY_PATH"] = injected_path_str + os.pathsep + host_env["LD_LIBRARY_PATH"]
         else:
-            env["LD_LIBRARY_PATH"] = injected_path_str
+            host_env["LD_LIBRARY_PATH"] = injected_path_str
 
-        if "DYLD_LIBRARY_PATH" in env and env["DYLD_LIBRARY_PATH"]:
-            env["DYLD_LIBRARY_PATH"] = injected_path_str + os.pathsep + env["DYLD_LIBRARY_PATH"]
+        if "DYLD_LIBRARY_PATH" in host_env and host_env["DYLD_LIBRARY_PATH"]:
+            host_env["DYLD_LIBRARY_PATH"] = injected_path_str + os.pathsep + host_env["DYLD_LIBRARY_PATH"]
         else:
-            env["DYLD_LIBRARY_PATH"] = injected_path_str
+            host_env["DYLD_LIBRARY_PATH"] = injected_path_str
 
         try:
             if delivery_mode == "args":
@@ -438,7 +439,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         image,
                         f"./{exe_name}"
                     ] + args
-                    create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
+                    create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10, env=env)
                     if create_res.returncode == 0:
                         raw_stdout = create_res.stdout.strip()
                         container_id = raw_stdout[:12]
@@ -466,7 +467,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         text=True,
                         timeout=timeout,
                         cwd=exe_dir,
-                        env=env
+                        env=host_env
                     )
 
             elif delivery_mode == "stdin":
@@ -522,7 +523,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         capture_output=True,
                         timeout=timeout,
                         cwd=exe_dir,
-                        env=env
+                        env=host_env
                     )
                 class _Res:
                     pass
@@ -596,7 +597,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                             image,
                             f"./{exe_name}"
                         ] + file_args
-                        create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
+                        create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10, env=env)
                         if create_res.returncode == 0:
                             raw_stdout = create_res.stdout.strip()
                             container_id = raw_stdout[:12]
@@ -624,7 +625,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                             text=True,
                             timeout=timeout,
                             cwd=exe_dir,
-                            env=env
+                            env=host_env
                         )
                 finally:
                     if os.path.exists(temp_file_path):
@@ -661,7 +662,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         image,
                         f"./{exe_name}"
                     ]
-                    create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
+                    create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10, env=env)
                     if create_res.returncode == 0:
                         raw_stdout = create_res.stdout.strip()
                         if raw_stdout:
@@ -671,7 +672,8 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         start_cmd,
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE
+                        stderr=subprocess.PIPE,
+                        env=env
                     )
                 else:
                     process = subprocess.Popen(
@@ -679,7 +681,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         cwd=exe_dir,
-                        env=env
+                        env=host_env
                     )
                 time.sleep(0.5) # Wait for server to start
                 try:

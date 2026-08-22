@@ -4,7 +4,7 @@ import re
 from rich.console import Console
 from rich.syntax import Syntax
 
-from mutagen.ast_validator import validate_c_source
+from mutagen.ast_validator import validate_c_patch
 from mutagen.reachability_checker import (
     extract_function_scope_by_name,
     extract_vulnerable_function_scope,
@@ -149,7 +149,7 @@ class VirtualCodeEditor:
 
         # Splice candidate into full codebase to validate AST in complete translation unit
         candidate_full_code = self.get_full_patched_code()
-        ast_result = validate_c_source(candidate_full_code)
+        ast_result = validate_c_patch(self.source_code, candidate_full_code)
         if not ast_result.is_valid:
             err_msg = ", ".join(f"line {e.line}: {e.message}" for e in ast_result.errors)
             return False, err_msg

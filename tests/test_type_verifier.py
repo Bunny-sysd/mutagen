@@ -1,3 +1,5 @@
+from mutagen.agents.synthesizer import PayloadSynthesizerAgent
+from mutagen.state import ProgramContext, VulnerabilityDetail
 from mutagen.type_verifier import verify_finding_type_safety
 
 
@@ -183,11 +185,6 @@ void png_start_read_image(png_structrp png_ptr) {
     assert res_ungrounded.is_false_positive_risk is True
     assert "UNGROUNDED FINDING" in res_ungrounded.annotation
     assert res_ungrounded.confidence == "LOW"
-
-
-import pytest
-from mutagen.state import ProgramContext, VulnerabilityDetail
-from mutagen.agents.synthesizer import PayloadSynthesizerAgent
 
 
 def test_pipeline_orchestration_c_libpng_downgrade(tmp_path):

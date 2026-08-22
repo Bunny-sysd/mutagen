@@ -4,12 +4,10 @@ Verifies that ProgramContext, CrashPayload, VulnerabilityDetail, and PatchPropos
 declare all necessary fields and handle dynamic assignment safely without ValueError.
 """
 
-import pytest
 from mutagen.state import (
-    ProgramContext,
     CrashPayload,
+    ProgramContext,
     VulnerabilityDetail,
-    PatchProposal,
 )
 
 
@@ -124,6 +122,7 @@ def test_supervisor_compilation_failure_exception_handling():
     """
     import asyncio
     from unittest.mock import patch
+
     from mutagen.agents.supervisor import FuzzingSupervisorAgent
 
     ctx = ProgramContext(
@@ -147,6 +146,7 @@ def test_gemini_engine_patch_generation_model_resolution():
     Ensures GeminiEngine patch methods resolve model lists without NameError.
     """
     from unittest.mock import MagicMock, patch
+
     from mutagen.engines.gemini import GeminiEngine
 
     with patch("google.genai.Client"):

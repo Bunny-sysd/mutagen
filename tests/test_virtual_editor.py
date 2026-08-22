@@ -1,6 +1,4 @@
-import pytest
 from mutagen.editor import VirtualCodeEditor
-
 
 SAMPLE_C_FILE = """#include <stdio.h>
 #include <string.h>

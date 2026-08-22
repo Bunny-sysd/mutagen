@@ -237,3 +237,35 @@ def format_validation_errors(result: ASTValidationResult) -> str:
     )
 
     return "\n".join(lines)
+
+
+def validate_c_patch(original_code: str, patched_code: str) -> ASTValidationResult:
+    """
+    Differentially validates a patched C file against the original source code.
+    Any tree-sitter parse errors that already existed in the original code (due to unexpanded
+    C preprocessor macros, assembly, or typedefs) are filtered out so they do not cause false alarms.
+    """
+    patched_res = validate_c_source(patched_code)
+    if patched_res.is_valid:
+        return patched_res
+
+    if not original_code or not original_code.strip():
+        return patched_res
+
+    orig_res = validate_c_source(original_code)
+    if not orig_res.errors:
+        return patched_res
+
+    # Normalize error signatures by context snippet
+    orig_contexts = {e.context.strip() for e in orig_res.errors if e.context}
+
+    # Filter out errors whose surrounding line context already had AST parse issues in the original file
+    new_errors = [e for e in patched_res.errors if e.context.strip() not in orig_contexts]
+
+    return ASTValidationResult(
+        is_valid=len(new_errors) == 0,
+        errors=new_errors,
+        functions_found=patched_res.functions_found,
+        has_main=patched_res.has_main,
+        node_count=patched_res.node_count,
+    )

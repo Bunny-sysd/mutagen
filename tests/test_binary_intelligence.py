@@ -2,9 +2,8 @@
 Unit tests for Mutagen Intelligence and Binary Repair Engines.
 """
 
-import pytest
-from mutagen.intelligence import VulnerabilityIntelligenceEngine, get_token_efficient_signature
-from mutagen.binary_repair import repair_binary_payload, MAGIC_PNG, MAGIC_ELF, MAGIC_ZIP, MAGIC_PE
+from mutagen.binary_repair import MAGIC_ELF, MAGIC_PNG, repair_binary_payload
+from mutagen.intelligence import VulnerabilityIntelligenceEngine
 
 
 def test_token_efficient_intelligence():

@@ -1,11 +1,9 @@
-import unittest
-from unittest.mock import patch, MagicMock
 import json
+import unittest
+from unittest.mock import MagicMock, patch
 
-from mutagen.cve_validator import fetch_cve_metadata, OFFLINE_CVE_REGISTRY
+from mutagen.cve_validator import fetch_cve_metadata
 from mutagen.static_analyzer import analyze_source
-from mutagen.state import ProgramContext
-from mutagen.agents.triage import TriageAgent
 
 
 class TestCvePipelineAudit(unittest.TestCase):
@@ -42,27 +40,24 @@ class TestCvePipelineAudit(unittest.TestCase):
 
     def test_sniper_mode_target_functions_reduction(self):
         """Validates that analyze_source with target_functions focuses specifically on target functions."""
-        sample_code = """
-        #include <stdio.h>
-        #include <stdlib.h>
-        
-        void helper_function(int a) {
-            char buf[64];
-            printf("val: %d\\n", a);
-        }
-        
-        void target_vuln_func(char *data, int len) {
-            char dest[16];
-            for(int i=0; i<len; i++) {
-                dest[i] = data[i];
-            }
-        }
-        
-        int main(int argc, char **argv) {
-            target_vuln_func(argv[1], 100);
-            return 0;
-        }
-        """
+        sample_code = (
+            "#include <stdio.h>\n"
+            "#include <stdlib.h>\n\n"
+            "void helper_function(int a) {\n"
+            "    char buf[64];\n"
+            '    printf("val: %d\\n", a);\n'
+            "}\n\n"
+            "void target_vuln_func(char *data, int len) {\n"
+            "    char dest[16];\n"
+            "    for(int i=0; i<len; i++) {\n"
+            "        dest[i] = data[i];\n"
+            "    }\n"
+            "}\n\n"
+            "int main(int argc, char **argv) {\n"
+            "    target_vuln_func(argv[1], 100);\n"
+            "    return 0;\n"
+            "}\n"
+        )
         res = analyze_source(sample_code, target_functions=["target_vuln_func"])
         self.assertIn("target_vuln_func", res.focused_functions)
         self.assertTrue(res.reduction_percent >= 0.0)
