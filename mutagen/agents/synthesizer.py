@@ -1,6 +1,7 @@
 import json
 import re
 import struct
+import zlib
 
 from pydantic import BaseModel, Field
 
@@ -91,57 +92,151 @@ def robust_json_parse(raw: str) -> dict:
     return {"payloads": [{"args": [], "input_data": "", "raw_bytes_hex": None, "reason": "Fallback due to JSON parse error"}]}
 
 
-def _generate_file_mode_fallback_payloads() -> list[dict]:
-    """Generate format-aware binary fallback payloads for file-based targets.
-    These cover common binary parser inputs (PNG, JPEG, ELF, PDF, ZIP, raw fuzz)
-    so that even without AI payloads, the fuzzer has a real chance of triggering
-    crashes in file-parsing code paths."""
+def _generate_file_mode_fallback_payloads(target_path: str = "", source_code: str = "") -> list[dict]:
+    """Generate universal format-aware binary and structured fallback payloads.
+    Detects target domain (images, PDFs, archives, ELF/PE, JSON, XML, audio, media, generic binary)
+    and constructs targeted boundary-breaking structures."""
     payloads = []
+    t_lower = (target_path + " " + source_code[:1000]).lower()
 
-    # 1. Minimal PNG with corrupted IHDR (oversized dimensions trigger integer overflow)
-    png_sig = b'\x89PNG\r\n\x1a\n'
-    # IHDR: width=0xFFFFFFFF, height=0xFFFFFFFF, bit_depth=8, color_type=2
-    ihdr_data = struct.pack('>II', 0xFFFFFFFF, 0xFFFFFFFF) + b'\x08\x02\x00\x00\x00'
-    ihdr_chunk = struct.pack('>I', len(ihdr_data)) + b'IHDR' + ihdr_data
-    png_payload = png_sig + ihdr_chunk
-    payloads.append({
-        "args": [], "input_data": "",
-        "raw_bytes_hex": png_payload.hex(),
-        "reason": "Fallback: corrupted PNG with 0xFFFFFFFF dimensions (integer overflow)"
-    })
+    # 1. Image Targets (PNG, JPEG, GIF, WebP, BMP, TIFF)
+    if any(k in t_lower for k in ["png", "palette", "plte", "ihdr", "idat"]):
+        png_sig = b'\x89PNG\r\n\x1a\n'
+        ihdr_data = struct.pack('>II', 0xFFFFFFFF, 0xFFFFFFFF) + b'\x08\x02\x00\x00\x00'
+        ihdr_chunk = struct.pack('>I', len(ihdr_data)) + b'IHDR' + ihdr_data
+        # Palette over-read trigger (10 colors in PLTE, pixel index referencing out of bounds)
+        plte_data = b'\x00\x00\x00' * 10
+        plte_chunk = struct.pack('>I', len(plte_data)) + b'PLTE' + plte_data
+        idat_raw = zlib.compress(b'\x00\xff\xee\xdd\xcc')
+        idat_chunk = struct.pack('>I', len(idat_raw)) + b'IDAT' + idat_raw
+        iend_chunk = struct.pack('>I', 0) + b'IEND'
+        payloads.append({
+            "args": ["overflow_poc.png"], "input_data": "",
+            "raw_bytes_hex": (png_sig + ihdr_chunk + plte_chunk + idat_chunk + iend_chunk).hex(),
+            "reason": "Universal Fallback: PNG with 10-color PLTE and out-of-bounds palette index (CWE-125/119)"
+        })
+        payloads.append({
+            "args": ["oversized_ihdr.png"], "input_data": "",
+            "raw_bytes_hex": (png_sig + ihdr_chunk + iend_chunk).hex(),
+            "reason": "Universal Fallback: PNG with 0xFFFFFFFF dimensions (integer overflow / heap allocation)"
+        })
 
-    # 2. Minimal PNG with zero-length IDAT (triggers allocation edge cases)
-    idat_chunk = struct.pack('>I', 0) + b'IDAT'
-    iend_chunk = struct.pack('>I', 0) + b'IEND'
-    png_zero = png_sig + ihdr_chunk + idat_chunk + iend_chunk
-    payloads.append({
-        "args": [], "input_data": "",
-        "raw_bytes_hex": png_zero.hex(),
-        "reason": "Fallback: PNG with zero-length IDAT chunk (allocation edge case)"
-    })
+    if any(k in t_lower for k in ["jpeg", "jpg", "jfif"]):
+        jpeg_sofo = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00\x60\x00\x60\x00\x00\xff\xc0\x00\x11\x08\xff\xff\xff\xff\x03\x01\x11\x00\x02\x11\x01\x03\x11\x01\xff\xd9'
+        payloads.append({
+            "args": ["corrupt_sof.jpg"], "input_data": "",
+            "raw_bytes_hex": jpeg_sofo.hex(),
+            "reason": "Universal Fallback: JPEG with 0xFFFF dimension markers (buffer overflow)"
+        })
 
-    # 3. Truncated file (just PNG signature, no chunks — triggers out-of-bounds read)
-    payloads.append({
-        "args": [], "input_data": "",
-        "raw_bytes_hex": png_sig.hex(),
-        "reason": "Fallback: truncated PNG signature only (OOB read)"
-    })
+    if any(k in t_lower for k in ["gif"]):
+        gif_hdr = b'GIF89a\xff\xff\xff\xff\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\xff\xff\xff\xff\x00\x02\x02D\x01\x00;'
+        payloads.append({
+            "args": ["corrupt_screen.gif"], "input_data": "",
+            "raw_bytes_hex": gif_hdr.hex(),
+            "reason": "Universal Fallback: GIF with 0xFFFF dimensions and corrupted table (heap over-read)"
+        })
 
-    # 4. Large repetitive buffer (classic heap spray / overflow trigger)
+    # 2. Document & Structured Data Targets (PDF, JSON, XML, YAML)
+    if any(k in t_lower for k in ["pdf"]):
+        pdf_payload = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 4096 >>\nstream\n" + (b"A" * 4096) + b"\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000183 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n290\n%%EOF"
+        payloads.append({
+            "args": ["corrupt_stream.pdf"], "input_data": "",
+            "raw_bytes_hex": pdf_payload.hex(),
+            "reason": "Universal Fallback: PDF with oversized stream length and corrupted xref table"
+        })
+
+    if any(k in t_lower for k in ["json", "cjson", "json-c", "jansson", "yyjson"]):
+        nested_json = ("[" * 400) + "1" + ("]" * 400)
+        payloads.append({
+            "args": ["nested_recursion.json"], "input_data": nested_json,
+            "raw_bytes_hex": nested_json.encode("utf-8").hex(),
+            "reason": "Universal Fallback: 400-level nested JSON array (call stack overflow recursion)"
+        })
+        overflow_json = '{"key": "' + ("A" * 8192) + '", "num": 1e999999999999999999999999999999999999999999999999}'
+        payloads.append({
+            "args": ["overflow_string.json"], "input_data": overflow_json,
+            "raw_bytes_hex": overflow_json.encode("utf-8").hex(),
+            "reason": "Universal Fallback: 8KB string + huge exponent float (string buffer overflow & float parse overflow)"
+        })
+
+    if any(k in t_lower for k in ["xml", "libxml", "expat", "pugixml", "tinyxml"]):
+        billion_laughs = '<?xml version="1.0"?><!DOCTYPE bomb [<!ENTITY a "1234567890"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;"><!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">]><root>&c;&c;&c;&c;&c;&c;&c;&c;</root>'
+        payloads.append({
+            "args": ["entity_expansion.xml"], "input_data": billion_laughs,
+            "raw_bytes_hex": billion_laughs.encode("utf-8").hex(),
+            "reason": "Universal Fallback: XML quadratic entity expansion (memory exhaustion / buffer overflow)"
+        })
+
+    # 3. Archive & Executable Targets (ZIP, TAR, GZ, ELF)
+    if any(k in t_lower for k in ["zip", "unzip", "archive", "miniz", "zlib"]):
+        zip_hdr = b'PK\x03\x04\x14\x00\x00\x00\x08\x00\x00\x00!\x00\x00\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\x1c\x00\x00\x00../../../../../../../../tmp/pwn' + (b'A' * 512)
+        payloads.append({
+            "args": ["traversal_overflow.zip"], "input_data": "",
+            "raw_bytes_hex": zip_hdr.hex(),
+            "reason": "Universal Fallback: ZIP header with 0xFFFFFFFF sizes and directory traversal path"
+        })
+
+    if any(k in t_lower for k in ["elf", "binary", "exec", "loader"]):
+        elf_corrupt = b'\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00>\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00@\x00\x00\x00\x00\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00@\x008\x00\x01\x00@\x00\xff\xff\x00\x00'
+        payloads.append({
+            "args": ["corrupt_header.elf"], "input_data": "",
+            "raw_bytes_hex": elf_corrupt.hex(),
+            "reason": "Universal Fallback: 64-bit ELF with 0xFFFFFFFFFFFFFFFF section offset and 0xFFFF section count"
+        })
+
+    # 4. Universal Generic Binary Fuzz Probes (Always appended to guarantee baseline coverage)
     payloads.append({
-        "args": [], "input_data": "",
+        "args": ["heap_spray_8kb.bin"], "input_data": "A" * 8192,
         "raw_bytes_hex": (b'A' * 8192).hex(),
-        "reason": "Fallback: 8KB buffer overflow probe"
+        "reason": "Universal Fallback: 8KB contiguous ASCII memory spray (heap/stack overflow)"
     })
-
-    # 5. Null bytes interspersed (triggers null-termination assumptions)
     payloads.append({
-        "args": [], "input_data": "",
-        "raw_bytes_hex": (b'\x00' * 256 + b'\xff' * 256).hex(),
-        "reason": "Fallback: null byte + 0xFF block (boundary probe)"
+        "args": ["boundary_probe.bin"], "input_data": "",
+        "raw_bytes_hex": (b'\x00' * 256 + b'\xff' * 256 + b'\x7f\xff\xff\xff\x80\x00\x00\x00').hex(),
+        "reason": "Universal Fallback: Null-bytes, 0xFF blocks, and 32-bit integer boundaries INT_MAX/INT_MIN"
+    })
+    payloads.append({
+        "args": ["format_string.bin"], "input_data": "%s%p%n%x" * 32,
+        "raw_bytes_hex": (b'%s%p%n%x' * 32).hex(),
+        "reason": "Universal Fallback: Format string specifiers (%s%p%n%x) to detect unsafe logging"
     })
 
-    return payloads
+    return payloads[:6]
+
+
+def _detect_file_extension(target_path: str = "", source_code: str = "") -> str:
+    """Dynamically determines the appropriate file extension for synthesized binary payloads."""
+    text = (target_path + " " + source_code[:1000]).lower()
+    # Normalize path separators and punctuation to spaces for tokenization
+    tokens = set(re.findall(r'[a-z0-9_]+', text))
+
+    ext_map = [
+        (["png", "libpng", "ihdr", "plte", "idat"], ".png"),
+        (["jpeg", "jpg", "jfif", "libjpeg"], ".jpg"),
+        (["gif", "gif89a", "gif87a", "libgif"], ".gif"),
+        (["webp", "libwebp"], ".webp"),
+        (["bmp"], ".bmp"),
+        (["tiff", "tif", "libtiff"], ".tiff"),
+        (["svg"], ".svg"),
+        (["pdf", "libpdf", "mupdf", "pdfium"], ".pdf"),
+        (["zip", "unzip", "miniz", "libzip"], ".zip"),
+        (["tar", "untar", "libarchive"], ".tar"),
+        (["gzip", "gz", "zlib"], ".gz"),
+        (["json", "cjson", "yyjson", "jansson"], ".json"),
+        (["xml", "libxml", "expat", "pugixml"], ".xml"),
+        (["yaml", "yml", "libyaml"], ".yaml"),
+        (["sqlite", "sqlite3"], ".db"),
+        (["wav", "wave"], ".wav"),
+        (["mp3"], ".mp3"),
+        (["mp4"], ".mp4"),
+        (["elf"], ".elf"),
+    ]
+    for keywords, ext in ext_map:
+        for k in keywords:
+            if k in tokens or any(t.startswith(k) or t.endswith(k) for t in tokens if len(t) > len(k) and "target" not in t):
+                return ext
+    return ".bin"
 
 
 class PayloadSynthesizerAgent(BaseAgent):
@@ -306,7 +401,7 @@ Return JSON adhering strictly to:
                     context.synthesis_error = f"{type(synthesis_error).__name__}: {synthesis_error}" if synthesis_error else "Empty response"
                     context.logs.append(f"[PayloadSynthesizerAgent] WARNING: Real payload synthesis failed ({context.synthesis_error}). Activating format fallback...")
                     if context.delivery_mode == "file":
-                        data = {"payloads": _generate_file_mode_fallback_payloads()}
+                        data = {"payloads": _generate_file_mode_fallback_payloads(context.target_path or "", context.source_code or "")}
                     else:
                         data = {"payloads": [{"args": ["A" * 64], "input_data": "A" * 64, "reason": "Generic fallback payload (synthesis failed)", "is_fallback": True}]}
             else:
@@ -343,19 +438,20 @@ Return JSON adhering strictly to:
 
                 # SYSTEMIC VALIDATION & FALLBACK RECOVERY:
                 is_empty_payload = (not args or len(args) == 0) and (not input_data or not str(input_data).strip()) and not raw_bytes_hex
+                target_ext = _detect_file_extension(context.target_path or "", context.source_code or "")
                 if is_empty_payload:
                     item_is_fallback = True
                     context.logs.append(f"[PayloadSynthesizerAgent] WARNING: Payload produced reasoning without args/input_data (Reason: {reason}). Auto-recovering payload...")
                     if context.delivery_mode == "file":
-                        args = ["overflow_poc.png"]
-                        raw_bytes_hex = _generate_file_mode_fallback_payloads()[0]["raw_bytes_hex"]
+                        args = [f"overflow_poc{target_ext}"]
+                        fb_payloads = _generate_file_mode_fallback_payloads(context.target_path or "", context.source_code or "")
+                        raw_bytes_hex = fb_payloads[0]["raw_bytes_hex"] if fb_payloads else None
                     elif context.delivery_mode == "args":
                         args = ["A" * 64]
                     else:
                         input_data = "A" * 64
                 elif context.delivery_mode == "file" and (not args or len(args) == 0):
-                    ext = ".png" if "png" in context.target_path.lower() else ".bin"
-                    args = [f"payload_poc_{valid_payloads_added+1}{ext}"]
+                    args = [f"payload_poc_{valid_payloads_added+1}{target_ext}"]
                     context.logs.append(f"[PayloadSynthesizerAgent] Info: Auto-populated missing args filename ({args[0]}) for file delivery mode.")
 
                 # Dynamic Post-Synthesis Binary & Kernel Header Repair Pass
@@ -385,10 +481,10 @@ Return JSON adhering strictly to:
 
             # For file delivery mode, append format-aware structural binary fallback payloads
             if context.delivery_mode == "file" and not is_synthesis_fallback:
-                ext = ".png" if "png" in context.target_path.lower() else ".bin"
-                for i, fb in enumerate(_generate_file_mode_fallback_payloads()):
+                target_ext = _detect_file_extension(context.target_path or "", context.source_code or "")
+                for i, fb in enumerate(_generate_file_mode_fallback_payloads(context.target_path or "", context.source_code or "")):
                     context.add_payload({
-                        "args": [f"payload_fallback_{i+1}{ext}"],
+                        "args": [f"payload_fallback_{i+1}{target_ext}"],
                         "input_data": "",
                         "raw_bytes_hex": fb["raw_bytes_hex"],
                         "reason": fb["reason"],
@@ -401,9 +497,10 @@ Return JSON adhering strictly to:
             if valid_payloads_added == 0:
                 context.synthesis_failed = True
                 context.logs.append("[PayloadSynthesizerAgent] WARNING: Zero payloads generated by synthesis. Inserting format fallback...")
+                target_ext = _detect_file_extension(context.target_path or "", context.source_code or "")
                 if context.delivery_mode == "file":
-                    for fb in _generate_file_mode_fallback_payloads():
-                        context.add_payload(CrashPayload(args=["poc_fallback.png"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"], is_fallback=True, synthesis_failed=True))
+                    for fb in _generate_file_mode_fallback_payloads(context.target_path or "", context.source_code or ""):
+                        context.add_payload(CrashPayload(args=[f"poc_fallback{target_ext}"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"], is_fallback=True, synthesis_failed=True))
                 else:
                     context.add_payload(CrashPayload(args=["A" * 64], input_data="A" * 64, is_fallback=True, synthesis_failed=True))
 
@@ -411,9 +508,10 @@ Return JSON adhering strictly to:
             context.synthesis_failed = True
             context.synthesis_error = str(e)
             context.logs.append(f"[PayloadSynthesizerAgent] Error generating payloads: {e}")
+            target_ext = _detect_file_extension(getattr(context, "target_path", "") or "", getattr(context, "source_code", "") or "")
             if context.delivery_mode == "file":
-                for fb in _generate_file_mode_fallback_payloads():
-                    context.add_payload(CrashPayload(args=["poc_fallback.png"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"], is_fallback=True, synthesis_failed=True))
+                for fb in _generate_file_mode_fallback_payloads(getattr(context, "target_path", "") or "", getattr(context, "source_code", "") or ""):
+                    context.add_payload(CrashPayload(args=[f"poc_fallback{target_ext}"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"], is_fallback=True, synthesis_failed=True))
             else:
                 context.add_payload(CrashPayload(args=["A" * 64], input_data="A" * 64, reason="Fallback due to execution error", is_fallback=True, synthesis_failed=True))
             context.logs.append("[PayloadSynthesizerAgent] Added safe fallback payload")

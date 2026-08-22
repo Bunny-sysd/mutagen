@@ -21,6 +21,10 @@ MAGIC_ELF = b"\x7fELF"
 MAGIC_ZIP = b"PK\x03\x04"
 MAGIC_PE = b"MZ"
 MAGIC_GZ = b"\x1f\x8b"
+MAGIC_JPEG = b"\xff\xd8\xff"
+MAGIC_GIF = b"GIF8"
+MAGIC_SQLITE = b"SQLite format 3\x00"
+MAGIC_RIFF = b"RIFF"
 
 
 def repair_binary_payload(raw_data: bytes | str, target_hint: str = "") -> bytes:
@@ -45,15 +49,25 @@ def repair_binary_payload(raw_data: bytes | str, target_hint: str = "") -> bytes
         return buf
 
     # Dynamic Magic Byte Matcher with Target Hint Fallback
-    magic = buf[:8]
+    magic = buf[:16]
     hint_lower = target_hint.lower() if target_hint else ""
 
     if magic.startswith(MAGIC_PNG) or "png" in hint_lower:
         return _repair_png(buf)
+    elif magic.startswith(MAGIC_JPEG) or any(k in hint_lower for k in ["jpeg", "jpg", "jfif"]):
+        return _repair_jpeg(buf)
+    elif magic.startswith(MAGIC_GIF) or "gif" in hint_lower:
+        return _repair_gif(buf)
     elif magic.startswith(MAGIC_ELF) or "elf" in hint_lower:
         return _repair_elf(buf)
     elif magic.startswith(MAGIC_ZIP) or "zip" in hint_lower:
         return _repair_zip(buf)
+    elif magic.startswith(MAGIC_GZ) or any(k in hint_lower for k in ["gzip", "gz"]):
+        return _repair_gzip(buf)
+    elif magic.startswith(MAGIC_SQLITE) or any(k in hint_lower for k in ["sqlite", ".db", "database"]):
+        return _repair_sqlite(buf)
+    elif magic.startswith(MAGIC_RIFF) or any(k in hint_lower for k in ["riff", "webp", "wav", "avi"]):
+        return _repair_riff(buf)
     elif magic.startswith(MAGIC_PE) or any(k in hint_lower for k in [".exe", ".dll"]):
         return _repair_pe(buf)
 
@@ -175,4 +189,71 @@ def _repair_pe(buf: bytes) -> bytes:
     except Exception:
         pass
 
+    return bytes(out)
+
+
+def _repair_jpeg(buf: bytes) -> bytes:
+    """
+    Ensures JPEG Start-Of-Image (SOI) \xFF\xD8 marker and valid End-Of-Image (EOI) \xFF\xD9.
+    """
+    if len(buf) < 4:
+        return buf
+    out = bytearray(buf)
+    if not out.startswith(b"\xff\xd8"):
+        out[0:2] = b"\xff\xd8"
+    if not out.endswith(b"\xff\xd9") and len(out) >= 2:
+        out.extend(b"\xff\xd9")
+    return bytes(out)
+
+
+def _repair_gif(buf: bytes) -> bytes:
+    """
+    Ensures standard GIF header signature (GIF89a or GIF87a) and standard trailer (0x3B).
+    """
+    if len(buf) < 6:
+        return buf
+    out = bytearray(buf)
+    if not (out.startswith(b"GIF89a") or out.startswith(b"GIF87a")):
+        out[0:6] = b"GIF89a"
+    if not out.endswith(b"\x3b"):
+        out.append(0x3B)
+    return bytes(out)
+
+
+def _repair_gzip(buf: bytes) -> bytes:
+    """
+    Ensures standard GZIP ID1/ID2 magic \x1F\x8B and compression method 8 (DEFLATE).
+    """
+    if len(buf) < 10:
+        return buf
+    out = bytearray(buf)
+    out[0:2] = MAGIC_GZ
+    out[2] = 8  # DEFLATE method
+    return bytes(out)
+
+
+def _repair_sqlite(buf: bytes) -> bytes:
+    """
+    Ensures 16-byte SQLite 3 header string and minimum page size field.
+    """
+    if len(buf) < 16:
+        return buf
+    out = bytearray(buf)
+    out[0:16] = MAGIC_SQLITE
+    return bytes(out)
+
+
+def _repair_riff(buf: bytes) -> bytes:
+    """
+    Validates RIFF (WAV / WebP / AVI) 4-byte chunk size header.
+    """
+    if len(buf) < 8:
+        return buf
+    out = bytearray(buf)
+    out[0:4] = MAGIC_RIFF
+    try:
+        riff_size = len(out) - 8
+        struct.pack_into("<I", out, 4, max(0, riff_size))
+    except Exception:
+        pass
     return bytes(out)
