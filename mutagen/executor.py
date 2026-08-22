@@ -363,17 +363,17 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
     is_docker_sandbox = (sandbox != "none" and _check_docker_functional())
     staged_deps: list[str] = []
 
+    abs_exe_path = os.path.abspath(exe_path)
+    exe_dir = os.path.dirname(abs_exe_path)
+    exe_name = os.path.basename(abs_exe_path)
+    if os.path.exists(abs_exe_path):
+        try:
+            os.chmod(abs_exe_path, 0o755)
+        except Exception:
+            pass
+
     if is_docker_sandbox:
         import uuid
-        abs_exe_path = os.path.abspath(exe_path)
-        exe_dir = os.path.dirname(abs_exe_path)
-        if os.path.exists(abs_exe_path):
-            try:
-                os.chmod(abs_exe_path, 0o755)
-            except Exception:
-                pass
-
-        exe_name = os.path.basename(abs_exe_path)
         image = os.environ.get("MUTAGEN_SANDBOX_IMAGE", "ubuntu:latest")
 
         try:
@@ -395,6 +395,31 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             env["PYTHONPATH"] = workspace_dir + os.pathsep + existing_pythonpath
         else:
             env["PYTHONPATH"] = workspace_dir
+
+        # Inject host-level library search paths so dynamically linked libraries (e.g. libpng16.so) resolve in host execution
+        host_lib_paths = [exe_dir]
+        for candidate_sub in [".libs", "lib", "build", "src", "libs"]:
+            sub_path = os.path.join(exe_dir, candidate_sub)
+            if os.path.isdir(sub_path):
+                host_lib_paths.append(sub_path)
+        parent_exe_dir = os.path.dirname(exe_dir)
+        if parent_exe_dir and parent_exe_dir != exe_dir:
+            host_lib_paths.append(parent_exe_dir)
+            for candidate_sub in [".libs", "lib", "build", "src", "libs"]:
+                sub_path = os.path.join(parent_exe_dir, candidate_sub)
+                if os.path.isdir(sub_path):
+                    host_lib_paths.append(sub_path)
+
+        injected_path_str = os.pathsep.join(host_lib_paths)
+        if "LD_LIBRARY_PATH" in env and env["LD_LIBRARY_PATH"]:
+            env["LD_LIBRARY_PATH"] = injected_path_str + os.pathsep + env["LD_LIBRARY_PATH"]
+        else:
+            env["LD_LIBRARY_PATH"] = injected_path_str
+
+        if "DYLD_LIBRARY_PATH" in env and env["DYLD_LIBRARY_PATH"]:
+            env["DYLD_LIBRARY_PATH"] = injected_path_str + os.pathsep + env["DYLD_LIBRARY_PATH"]
+        else:
+            env["DYLD_LIBRARY_PATH"] = injected_path_str
 
         try:
             if delivery_mode == "args":
@@ -440,6 +465,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         capture_output=True,
                         text=True,
                         timeout=timeout,
+                        cwd=exe_dir,
                         env=env
                     )
 
@@ -495,6 +521,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         input=input_bytes,
                         capture_output=True,
                         timeout=timeout,
+                        cwd=exe_dir,
                         env=env
                     )
                 class _Res:
@@ -509,10 +536,17 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 if isinstance(input_data, bytes):
                     input_bytes = input_data
                 elif isinstance(input_data, str) and input_data.strip():
-                    try:
-                        input_bytes = input_data.encode('utf-8').decode('unicode_escape').encode('latin-1')
-                    except Exception:
-                        input_bytes = input_data.encode('utf-8')
+                    cleaned_str = input_data.strip()
+                    if all(c in "0123456789abcdefABCDEF" for c in cleaned_str) and len(cleaned_str) % 2 == 0 and len(cleaned_str) > 8:
+                        try:
+                            input_bytes = bytes.fromhex(cleaned_str)
+                        except Exception:
+                            input_bytes = input_data.encode('utf-8')
+                    else:
+                        try:
+                            input_bytes = input_data.encode('utf-8').decode('unicode_escape').encode('latin-1')
+                        except Exception:
+                            input_bytes = input_data.encode('utf-8')
                 else:
                     input_bytes = b"A" * 64
 
@@ -589,6 +623,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                             capture_output=True,
                             text=True,
                             timeout=timeout,
+                            cwd=exe_dir,
                             env=env
                         )
                 finally:
@@ -643,6 +678,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         run_cmd,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
+                        cwd=exe_dir,
                         env=env
                     )
                 time.sleep(0.5) # Wait for server to start

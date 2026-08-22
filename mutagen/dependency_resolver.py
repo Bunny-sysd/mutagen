@@ -136,8 +136,14 @@ def build_with_native_tool(build_system: str, target_dir: str, target_hint: str 
             subprocess.run(["make"], capture_output=True, text=True, check=True, cwd=target_dir, env=env)
             for f in os.listdir(target_dir):
                 path = os.path.join(target_dir, f)
-                if os.path.isfile(path) and (os.access(path, os.X_OK) or f.endswith(".exe")) and not f.endswith((".c", ".cpp", ".o", ".h", ".md")):
+                if os.path.isfile(path) and (os.access(path, os.X_OK) or f.endswith(".exe")) and not _is_shared_library_or_build_artifact(f):
                     candidates.append(path)
+            libs_dir = os.path.join(target_dir, ".libs")
+            if os.path.isdir(libs_dir):
+                for f in os.listdir(libs_dir):
+                    path = os.path.join(libs_dir, f)
+                    if os.path.isfile(path) and (os.access(path, os.X_OK) or f.endswith(".exe")) and not _is_shared_library_or_build_artifact(f):
+                        candidates.append(path)
             from mutagen.reachability_checker import select_best_reachable_binary
             selected, status = select_best_reachable_binary(candidates, target_hint, vuln_function)
             return selected
