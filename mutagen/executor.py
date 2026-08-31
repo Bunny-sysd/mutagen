@@ -434,10 +434,10 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         "-e", f"LD_LIBRARY_PATH={ld_lib_path}",
                         "-e", "ASAN_OPTIONS=detect_leaks=0:symbolize=1:abort_on_error=1",
                         "-v", f"{exe_dir}:/target:ro",
-                        "-w", "/target",
+                        "-w", "/tmp",
                         "--network=none",
                         image,
-                        f"./{exe_name}"
+                        f"/target/{exe_name}"
                     ] + args
                     create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10, env=env)
                     if create_res.returncode == 0:
@@ -490,10 +490,10 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                         "-e", f"LD_LIBRARY_PATH={ld_lib_path}",
                         "-e", "ASAN_OPTIONS=detect_leaks=0:symbolize=1:abort_on_error=1",
                         "-v", f"{exe_dir}:/target:ro",
-                        "-w", "/target",
+                        "-w", "/tmp",
                         "--network=none",
                         image,
-                        f"./{exe_name}"
+                        f"/target/{exe_name}"
                     ]
                     create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
                     if create_res.returncode == 0:
@@ -569,7 +569,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     with open(temp_file_path, "wb") as f:
                         f.write(input_bytes)
 
-                    target_file_param = temp_filename if is_docker_sandbox else temp_file_path
+                    target_file_param = f"/target/{temp_filename}" if is_docker_sandbox else temp_file_path
                     if not file_args:
                         file_args = [target_file_param]
                     else:
@@ -592,10 +592,10 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                             "-e", f"LD_LIBRARY_PATH={ld_lib_path}",
                             "-e", "ASAN_OPTIONS=detect_leaks=0:symbolize=1:abort_on_error=1",
                             "-v", f"{exe_dir}:/target:ro",
-                            "-w", "/target",
+                            "-w", "/tmp",
                             "--network=none",
                             image,
-                            f"./{exe_name}"
+                            f"/target/{exe_name}"
                         ] + file_args
                         create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10, env=env)
                         if create_res.returncode == 0:
