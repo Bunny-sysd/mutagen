@@ -264,7 +264,10 @@ def analyze_source(code: str, target_functions: list[str] = None) -> PreTargetin
         clean_targets = [tf.strip() for tf in target_functions if tf and tf.strip() not in ("target_function", "")]
         for tf in clean_targets:
             for fn, node in all_ast_funcs.items():
-                if fn.lower() == tf.lower() or tf.lower() in fn.lower() or fn.lower() in tf.lower():
+                fn_l = fn.lower()
+                tf_l = tf.lower()
+                # Strict exact match or strict underscore-delimited prefix match
+                if fn_l == tf_l or fn_l.startswith(tf_l + "_") or tf_l.startswith(fn_l + "_"):
                     if fn not in target_match_names:
                         target_match_names.add(fn)
                         selected_funcs.append((fn, node))
@@ -287,18 +290,20 @@ def analyze_source(code: str, target_functions: list[str] = None) -> PreTargetin
             return score
 
         sorted_funcs = sorted(dangerous_func_nodes.items(), key=_func_priority, reverse=True)
-        # Cap to top 4 most critical functions to maintain true token efficiency
-        selected_funcs = sorted_funcs[:4] if len(sorted_funcs) > 4 else sorted_funcs
+        # Cap to top 3 most critical functions to maintain true token efficiency
+        selected_funcs = sorted_funcs[:3] if len(sorted_funcs) > 3 else sorted_funcs
+    else:
+        # Cap explicit target matches to top 3
+        selected_funcs = selected_funcs[:3]
 
     # Build focused code
     focused_parts = []
 
-    # Limit preamble lines if excessively large (> 80 lines)
+    # Limit preamble lines to essential headers (max 35 lines)
     preamble_lines = preamble.splitlines()
-    if len(preamble_lines) > 80 and target_match_names:
-        # Keep includes, typedefs, and struct headers
+    if len(preamble_lines) > 35:
         compact_preamble = [line for line in preamble_lines if any(line.strip().startswith(kw) for kw in ["#include", "typedef", "struct", "#define PNG_"])]
-        preamble = "\n".join(compact_preamble[:80])
+        preamble = "\n".join(compact_preamble[:35])
 
     if preamble.strip():
         focused_parts.append("// ===== PREAMBLE (includes, types, globals) =====")
@@ -325,18 +330,27 @@ def analyze_source(code: str, target_functions: list[str] = None) -> PreTargetin
     )
     focused_parts.append("")
 
-    # Add each selected function
+    # Add each selected function (with surgical slicing for massive functions > 150 lines)
     for func_name, func_node in selected_funcs:
         func_text = _node_text(func_node, code_bytes)
+        f_lines = func_text.splitlines()
         start_line = (getattr(func_node, "start_point", (0, 0))[0] + 1) if hasattr(func_node, "start_point") else 1
         func_findings = [f for f in result.findings if f.function_name == func_name]
+
         if func_findings:
             calls_str = ", ".join(sorted(set(f.call_name for f in func_findings)))
             focused_parts.append(f"// [SNIPER - ORIGINAL SOURCE LINE {start_line}] Function '{func_name}' contains: {calls_str}")
         else:
             focused_parts.append(f"// [SNIPER - ORIGINAL SOURCE LINE {start_line}] Function '{func_name}'")
 
-        focused_parts.append(func_text)
+        if len(f_lines) > 150:
+            # Preserve signature/declarations + key data-flow window to stay token-efficient
+            sliced = f_lines[:30] + [f"    // ... [Sniper Mode: {len(f_lines)-80} internal lines trimmed for token efficiency] ..."] + f_lines[-50:]
+            focused_func_code = "\n".join(sliced)
+        else:
+            focused_func_code = func_text
+
+        focused_parts.append(focused_func_code)
         focused_parts.append("")
         result.focused_functions[func_name] = func_text
 

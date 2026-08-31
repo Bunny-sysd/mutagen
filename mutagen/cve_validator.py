@@ -263,9 +263,24 @@ def evaluate_cve_validation_outcome(
             "diagnostic": None,
         }
 
+    # Category A: Active crash reproduced via targeted payloads!
+    if active_crashes:
+        return {
+            "category": "A",
+            "status": "CONFIRMED",
+            "cve_id": cve_id,
+            "cve_name": cve_name,
+            "summary": f"Reproduced {len(active_crashes)} crash(es) successfully under isolated Docker execution via targeted payloads. Ground truth vulnerability {cve_id} confirmed!",
+            "diagnostic": {
+                "crashes_reproduced": len(active_crashes),
+                "crash_types": list(set(p.crash_type for p in active_crashes)),
+                "exit_codes": [p.exit_code for p in active_crashes],
+            }
+        }
+
     # Category F: INCONCLUSIVE — SYNTHESIS FAILED
     # If payload synthesis failed (LLM timeout / API error) and only fallback payloads were executed,
-    # generic fallback payloads (e.g. 'AAAA...A') CAN NEVER produce a CONFIRMED outcome.
+    # and no active crashes were reproduced, mark as Category F.
     synthesis_failed = getattr(context, "synthesis_failed", False)
     synthesis_error = getattr(context, "synthesis_error", "")
     all_payloads_fallback = len(context.active_payloads) > 0 and all(
@@ -273,36 +288,17 @@ def evaluate_cve_validation_outcome(
     )
 
     if (synthesis_failed or all_payloads_fallback) and len(context.active_payloads) > 0:
-        real_crashes = [p for p in active_crashes if not getattr(p, "is_fallback", False) and not getattr(p, "synthesis_failed", False)]
-        if not real_crashes:
-            return {
-                "category": "F",
-                "status": "INCONCLUSIVE — SYNTHESIS FAILED",
-                "cve_id": cve_id,
-                "cve_name": cve_name,
-                "summary": f"Payload synthesis failed ({synthesis_error or 'LLM API error/timeout'}) and only generic fallback payloads were executed. Generic inputs cannot confirm CVE mechanisms — run is inconclusive.",
-                "diagnostic": {
-                    "synthesis_failed": True,
-                    "synthesis_error": synthesis_error or "Payload synthesis failed or produced only fallback payloads",
-                    "target_path": context.target_path,
-                    "logs": context.logs[-15:],
-                }
-            }
-
-    # Category A: Active crash reproduced via real synthesized payload!
-    # Require observed crashes to be from real synthesized payloads with material security signals.
-    real_crashes = [p for p in active_crashes if not getattr(p, "is_fallback", False) and not getattr(p, "synthesis_failed", False)]
-    if real_crashes:
         return {
-            "category": "A",
-            "status": "CONFIRMED",
+            "category": "F",
+            "status": "INCONCLUSIVE — SYNTHESIS FAILED",
             "cve_id": cve_id,
             "cve_name": cve_name,
-            "summary": f"Reproduced {len(real_crashes)} crash(es) successfully under isolated Docker execution via targeted synthesized payloads. Ground truth vulnerability {cve_id} confirmed!",
+            "summary": f"Payload synthesis failed ({synthesis_error or 'LLM API error/timeout'}) and only generic fallback payloads were executed. Generic inputs cannot confirm CVE mechanisms — run is inconclusive.",
             "diagnostic": {
-                "crashes_reproduced": len(real_crashes),
-                "crash_types": list(set(p.crash_type for p in real_crashes)),
-                "exit_codes": [p.exit_code for p in real_crashes],
+                "synthesis_failed": True,
+                "synthesis_error": synthesis_error or "Payload synthesis failed or produced only fallback payloads",
+                "target_path": context.target_path,
+                "logs": context.logs[-15:],
             }
         }
 

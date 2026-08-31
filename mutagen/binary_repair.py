@@ -99,9 +99,13 @@ def _repair_png(buf: bytes) -> bytes:
         actual_data_len = len(chunk_data)
         pos = data_end
 
-        # Skip previous CRC in input buffer if present
-        if pos + 4 <= buf_len:
-            pos += 4
+        # Check if the 4 bytes following data are CRC bytes or start of next chunk
+        if pos + 8 <= buf_len:
+            next_type = buf[pos + 4 : pos + 8]
+            if len(next_type) == 4 and all((65 <= b <= 90) or (97 <= b <= 122) for b in next_type):
+                pos += 4  # Skip old 4-byte CRC
+        elif pos + 4 <= buf_len and chunk_type == b"IEND":
+            pos += 4  # Trailing CRC after IEND
 
         # Recalculate 32-bit CRC over (chunk_type + chunk_data)
         crc = zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF

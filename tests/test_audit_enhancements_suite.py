@@ -137,6 +137,61 @@ class TestAuditEnhancementsSuite(unittest.TestCase):
         self.assertEqual(res_openai["suggested_delivery_mode"], "stdin")
         self.assertEqual(len(res_openai["vulnerabilities"]), 1)
 
+    def test_make_png_chunk_and_repair(self):
+        """Verify _make_png_chunk builds valid chunks and _repair_png parses and recalculates CRCs."""
+        import zlib
+        from mutagen.agents.synthesizer import _make_png_chunk, _generate_file_mode_fallback_payloads
+        from mutagen.binary_repair import repair_binary_payload
+
+        # Test _make_png_chunk
+        data = b"\x01\x02\x03\x04"
+        chunk = _make_png_chunk(b"PLTE", data)
+        self.assertEqual(len(chunk), 4 + 4 + 4 + 4)  # len + type + data + crc
+        expected_crc = zlib.crc32(b"PLTE" + data) & 0xFFFFFFFF
+        actual_crc = int.from_bytes(chunk[-4:], "big")
+        self.assertEqual(actual_crc, expected_crc)
+
+        # Test fallback PNG generation
+        payloads = _generate_file_mode_fallback_payloads("target/pngrtran.c", "png_do_quantize palette plte")
+        self.assertGreaterEqual(len(payloads), 1)
+        poc = payloads[0]
+        self.assertIn("overflow_poc.png", poc["args"])
+        raw_bytes = bytes.fromhex(poc["raw_bytes_hex"])
+        self.assertTrue(raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"))
+
+        # Test repair_binary_payload parses PNG without corrupting chunks
+        repaired = repair_binary_payload(raw_bytes, target_hint="pngrtran.c")
+        self.assertTrue(repaired.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertIn(b"IHDR", repaired)
+        self.assertIn(b"PLTE", repaired)
+        self.assertIn(b"IDAT", repaired)
+        self.assertIn(b"IEND", repaired)
+
+    def test_sniper_mode_cve_token_slicing(self):
+        """Verify analyze_source in Sniper Mode strictly matches CVE functions and reduces lines."""
+        from mutagen.static_analyzer import analyze_source
+
+        dummy_large_source = "\n".join([
+            "#include <stdio.h>",
+            "#include <stdlib.h>",
+            "typedef int png_size_t;",
+            "void helper1() { printf('1'); }",
+            "void helper2() { printf('2'); }",
+            "void png_do_quantize(int *row, int len) {",
+            "    // Target function body",
+            "    int buffer[10];",
+            "    for (int i = 0; i < len; i++) {",
+            "        buffer[i] = row[i];",
+            "    }",
+            "}",
+            "void other_func() { malloc(100); }",
+        ] + [f"void extra_{i}() {{ int x = {i}; }}" for i in range(100)])
+
+        res = analyze_source(dummy_large_source, target_functions=["png_do_quantize"])
+        self.assertTrue(res.reduction_percent > 50.0)
+        self.assertIn("png_do_quantize", res.focused_code)
+        self.assertNotIn("extra_99", res.focused_code)
+
 
 if __name__ == "__main__":
     unittest.main()
