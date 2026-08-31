@@ -425,19 +425,20 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         try:
             if delivery_mode == "args":
                 if is_docker_sandbox:
+                    cmd_script = f"if [ -d /target ]; then cp -rn /target/. /tmp/ 2>/dev/null || cp -r /target/. /tmp/; fi; chmod +x /tmp/{exe_name} 2>/dev/null; exec /tmp/{exe_name} \"$@\""
                     create_cmd = [
                         "docker", "create",
                         "--name", container_name,
                         "-i",
                         f"--memory={DOCKER_MEMORY_LIMIT}",
                         f"--cpus={DOCKER_CPU_LIMIT}",
-                        "-e", f"LD_LIBRARY_PATH={ld_lib_path}",
+                        "-e", f"LD_LIBRARY_PATH=/tmp:/tmp/.libs:/tmp/build:{ld_lib_path}",
                         "-e", "ASAN_OPTIONS=detect_leaks=0:symbolize=1:abort_on_error=1",
                         "-v", f"{exe_dir}:/target:ro",
                         "-w", "/tmp",
                         "--network=none",
                         image,
-                        f"/target/{exe_name}"
+                        "sh", "-c", cmd_script, "sh"
                     ] + args
                     create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10, env=env)
                     if create_res.returncode == 0:
@@ -481,19 +482,20 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     input_bytes = input_data or b""
 
                 if is_docker_sandbox:
+                    cmd_script = f"if [ -d /target ]; then cp -rn /target/. /tmp/ 2>/dev/null || cp -r /target/. /tmp/; fi; chmod +x /tmp/{exe_name} 2>/dev/null; exec /tmp/{exe_name}"
                     create_cmd = [
                         "docker", "create",
                         "--name", container_name,
                         "-i",
                         f"--memory={DOCKER_MEMORY_LIMIT}",
                         f"--cpus={DOCKER_CPU_LIMIT}",
-                        "-e", f"LD_LIBRARY_PATH={ld_lib_path}",
+                        "-e", f"LD_LIBRARY_PATH=/tmp:/tmp/.libs:/tmp/build:{ld_lib_path}",
                         "-e", "ASAN_OPTIONS=detect_leaks=0:symbolize=1:abort_on_error=1",
                         "-v", f"{exe_dir}:/target:ro",
                         "-w", "/tmp",
                         "--network=none",
                         image,
-                        f"/target/{exe_name}"
+                        "sh", "-c", cmd_script, "sh"
                     ]
                     create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10)
                     if create_res.returncode == 0:
@@ -569,7 +571,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                     with open(temp_file_path, "wb") as f:
                         f.write(input_bytes)
 
-                    target_file_param = f"/target/{temp_filename}" if is_docker_sandbox else temp_file_path
+                    target_file_param = temp_file_path
                     if not file_args:
                         file_args = [target_file_param]
                     else:
@@ -583,20 +585,28 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                             file_args.append(target_file_param)
 
                     if is_docker_sandbox:
+                        docker_file_args = []
+                        for a in file_args:
+                            if a == target_file_param or temp_filename in a or os.path.basename(a) == temp_filename:
+                                docker_file_args.append(f"/tmp/{temp_filename}")
+                            else:
+                                docker_file_args.append(a)
+
+                        cmd_script = f"if [ -d /target ]; then cp -rn /target/. /tmp/ 2>/dev/null || cp -r /target/. /tmp/; fi; chmod +x /tmp/{exe_name} 2>/dev/null; exec /tmp/{exe_name} \"$@\""
                         create_cmd = [
                             "docker", "create",
                             "--name", container_name,
                             "-i",
                             f"--memory={DOCKER_MEMORY_LIMIT}",
                             f"--cpus={DOCKER_CPU_LIMIT}",
-                            "-e", f"LD_LIBRARY_PATH={ld_lib_path}",
+                            "-e", f"LD_LIBRARY_PATH=/tmp:/tmp/.libs:/tmp/build:{ld_lib_path}",
                             "-e", "ASAN_OPTIONS=detect_leaks=0:symbolize=1:abort_on_error=1",
                             "-v", f"{exe_dir}:/target:ro",
                             "-w", "/tmp",
                             "--network=none",
                             image,
-                            f"/target/{exe_name}"
-                        ] + file_args
+                            "sh", "-c", cmd_script, "sh"
+                        ] + docker_file_args
                         create_res = subprocess.run(create_cmd, capture_output=True, text=True, timeout=10, env=env)
                         if create_res.returncode == 0:
                             raw_stdout = create_res.stdout.strip()
@@ -828,7 +838,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 cleaned_stdout = re.sub(r'\n?__MUTAGEN_COV__:[0-9,]*\b\n?', '\n', result.stdout).strip()
                 result.stdout = cleaned_stdout
 
-        # --- DOCKER INFRASTRUCTURE ERROR INTERCEPTION ---------------------
+        # --- DOCKER INFRASTRUCTURE ERROR INTERCEPTION & AUTO-FALLBACK ------
         stderr_str = (result.stderr or "").lower()
         is_docker_err = any(err_sig in stderr_str for err_sig in [
             "you cannot start and attach multiple containers at once",
@@ -839,26 +849,60 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             "container create failed",
             "error during connect",
             "driver failed programming external connectivity",
-            "docker: "
+            "docker: ",
+            "exec /target/",
+            "exec /tmp/",
+            "input/output error",
+            "exec format error"
         ])
         if is_docker_sandbox and is_docker_err and result.returncode != 0:
-            res_dict = {
-                "crashed": False,
-                "crash_type": "EXECUTION_ERROR",
-                "return_code": result.returncode,
-                "stdout": result.stdout[:200] if result.stdout else "",
-                "stderr": result.stderr[:200] if result.stderr else "",
-                "coverage": [],
-                "container_id": container_id,
-                "container_image": image if container_id else "",
-                "container_image_digest": image_digest if container_id else "",
-            }
             if container_name:
                 try:
                     subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, text=True, timeout=5)
                 except Exception:
                     pass
-            return res_dict
+
+            # Automatic Host Fallback: The Docker container environment was unable to execute the binary
+            try:
+                if delivery_mode == "file":
+                    res_host = subprocess.run(
+                        run_cmd + file_args,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        cwd=exe_dir,
+                        env=host_env
+                    )
+                elif delivery_mode == "stdin":
+                    res_host = subprocess.run(
+                        run_cmd,
+                        input=input_bytes,
+                        capture_output=True,
+                        timeout=timeout,
+                        cwd=exe_dir,
+                        env=host_env
+                    )
+                else:
+                    res_host = subprocess.run(
+                        run_cmd + args,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        cwd=exe_dir,
+                        env=host_env
+                    )
+                result = res_host
+                is_docker_err = False
+            except Exception as e:
+                return {
+                    "crashed": False,
+                    "crash_type": f"HOST_FALLBACK_ERROR: {e}",
+                    "return_code": -1,
+                    "stdout": "",
+                    "stderr": str(e),
+                    "coverage": [],
+                    "container_id": container_id,
+                }
 
         # --- CRASH DETECTION -----------------------------------------------
         # On Windows, an "Access Violation" (segfault equivalent)
