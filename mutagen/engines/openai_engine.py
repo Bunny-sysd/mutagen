@@ -33,11 +33,13 @@ class OpenAIEngine(BaseEngine):
                     raise e
         raise Exception("OpenAI API call failed after multiple retries.")
 
-    def _parse_generate(self, prompt: str, response_model: type, list_key: str, system: str = "") -> list[dict]:
+    def _parse_generate(self, prompt: str, response_model: type, list_key: str, system: str = "") -> list[dict] | dict:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
+
+        expect_dict = bool(hasattr(response_model, "__annotations__") and "suggested_delivery_mode" in response_model.__annotations__)
 
         for attempt in range(3):
             try:
@@ -49,6 +51,8 @@ class OpenAIEngine(BaseEngine):
                 )
                 parsed = response.choices[0].message.parsed
                 if parsed is not None:
+                    if hasattr(parsed, "suggested_delivery_mode"):
+                        return parsed.model_dump()
                     items = getattr(parsed, list_key, [])
                     return [item.model_dump() for item in items]
                 return []
@@ -79,16 +83,18 @@ class OpenAIEngine(BaseEngine):
                         )
                         raw = response.choices[0].message.content.strip()
                         data = json.loads(raw)
-                        if isinstance(data, dict) and list_key in data:
-                            return data[list_key]
-                        elif isinstance(data, list):
-                            return data
-                        elif isinstance(data, dict):
+                        if isinstance(data, dict):
+                            if expect_dict:
+                                return data
+                            if list_key in data:
+                                return data[list_key]
                             for k, v in data.items():
                                 if isinstance(v, list):
                                     return v
                             return [data]
-                        return []
+                        elif isinstance(data, list):
+                            return data if not expect_dict else {"vulnerabilities": data}
+                        return [] if not expect_dict else {}
                     except Exception as fallback_err:
                         console.print(f"[red]OpenAI JSON fallback failed: {fallback_err}[/red]")
                         return []

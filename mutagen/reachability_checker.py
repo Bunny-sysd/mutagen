@@ -224,7 +224,7 @@ def get_expanded_reachability_set(target_path_or_dir: str, vuln_function: str) -
     return reachability_set
 
 
-def verify_binary_reachability(candidate_binary: str, vuln_function: str, candidate_source: str = None, target_dir: str = None) -> dict:
+def verify_binary_reachability(candidate_binary: str, vuln_function: str, candidate_source: str | None = None, target_dir: str | None = None) -> dict:
     """
     Inspects candidate_binary symbols (via nm, objdump, readelf, or binary strings)
     and candidate_source/target_dir to determine if vuln_function (or macro alias/caller) is reachable.
@@ -316,7 +316,7 @@ def verify_binary_reachability(candidate_binary: str, vuln_function: str, candid
     }
 
 
-def select_best_reachable_binary(candidates: list[str], target_hint: str = "", vuln_function: str = None) -> tuple[str | None, dict]:
+def select_best_reachable_binary(candidates: list[str], target_hint: str = "", vuln_function: str | None = None) -> tuple[str | None, dict]:
     """
     Evaluates candidate binaries for reachability of vuln_function, selecting the
     highest-scoring candidate that is verified reachable.
@@ -354,6 +354,9 @@ def select_best_reachable_binary(candidates: list[str], target_hint: str = "", v
         scored_candidates.append((score, cand))
 
     scored_candidates.sort(key=lambda x: x[0], reverse=True)
+
+    if not scored_candidates:
+        return None, {"reachable": False, "confidence": "LOW", "reason": "All candidate binaries filtered out or excluded"}
 
     if not vuln_function:
         selected = scored_candidates[0][1]

@@ -45,7 +45,7 @@ class ClaudeEngine(BaseEngine):
         console.print("[red]Claude API failed after multiple retries.[/red]")
         return ""
 
-    def _parse_generate(self, prompt: str, response_model: type, list_key: str, system: str = "") -> list[dict]:
+    def _parse_generate(self, prompt: str, response_model: type, list_key: str, system: str = "") -> list[dict] | dict:
         kwargs = {
             "model": self.model,
             "max_tokens": 4000,
@@ -57,11 +57,15 @@ class ClaudeEngine(BaseEngine):
         if system:
             kwargs["system"] = system
 
+        expect_dict = bool(hasattr(response_model, "__annotations__") and "suggested_delivery_mode" in response_model.__annotations__)
+
         for attempt in range(3):
             try:
                 message = self.client.beta.messages.parse(**kwargs)
                 parsed = message.parsed
                 if parsed is not None:
+                    if hasattr(parsed, "suggested_delivery_mode"):
+                        return parsed.model_dump()
                     items = getattr(parsed, list_key, [])
                     return [item.model_dump() for item in items]
                 return []
@@ -81,38 +85,43 @@ class ClaudeEngine(BaseEngine):
                         fallback_prompt = prompt + f"\n\nRespond strictly with a JSON object containing a '{list_key}' key."
                         sys_prompt = system + " Respond only in raw JSON."
                         raw = self._generate(fallback_prompt, system=sys_prompt)
-                        return self._extract_json(raw)
+                        return self._extract_json(raw, expect_dict=expect_dict)
                     except Exception as fallback_err:
                         console.print(f"[red]Claude JSON fallback failed: {fallback_err}[/red]")
                         return []
         return []
 
-    def _extract_json(self, text: str) -> list[dict]:
+    def _extract_json(self, text: str, expect_dict: bool = False) -> list[dict] | dict:
         text = text.strip()
+        data = None
         if "```json" in text:
             try:
                 parts = text.split("```json")
                 block = parts[1].split("```")[0].strip()
-                return json.loads(block)
+                data = json.loads(block)
             except Exception:
                 pass
-        if "```" in text:
+        if data is None and "```" in text:
             try:
                 parts = text.split("```")
                 block = parts[1].strip()
-                return json.loads(block)
+                data = json.loads(block)
             except Exception:
                 pass
-        try:
-            data = json.loads(text)
-            if isinstance(data, dict):
-                for k, v in data.items():
-                    if isinstance(v, list):
-                        return v
-                return [data]
-            return data
-        except Exception:
-            return []
+        if data is None:
+            try:
+                data = json.loads(text)
+            except Exception:
+                return {} if expect_dict else []
+
+        if isinstance(data, dict):
+            if expect_dict:
+                return data
+            for k, v in data.items():
+                if isinstance(v, list):
+                    return v
+            return [data]
+        return data if not expect_dict else {"vulnerabilities": data}
 
     def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool, profile: str = "legacy-audit") -> list[dict]:
         decompile_context = ""

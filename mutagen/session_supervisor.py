@@ -59,6 +59,54 @@ class SessionResult:
     coverage_progression: list[set[int]] = field(default_factory=list)
     return_code: int | None = None
 
+    def to_mermaid_sequence(self) -> str:
+        """Generates a Mermaid sequence diagram showing the state transitions across steps."""
+        lines = [
+            "sequenceDiagram",
+            "    autonumber",
+            "    actor Fuzzer as Mutagen Fuzzer",
+            "    participant Target as Target Process"
+        ]
+        for s in self.steps:
+            safe_input = s.input_sent.replace("\n", "\\n").replace('"', "'")
+            if len(safe_input) > 35:
+                safe_input = safe_input[:32] + "..."
+            lines.append(f'    Fuzzer->>Target: Step {s.step_index + 1}: "{safe_input}"')
+            if s.crash_type != "none":
+                safe_crash = s.crash_type.replace('"', "'")
+                lines.append(f'    Target-->>Fuzzer: 💥 CRASH ({safe_crash}, Exit: {s.return_code})')
+            elif not s.is_alive:
+                lines.append(f'    Target-->>Fuzzer: ⚠️ Process Exited (Exit: {s.return_code})')
+            else:
+                cov_str = f"+{len(s.coverage_delta)} blocks" if s.coverage_delta else "state OK"
+                lines.append(f'    Target-->>Fuzzer: 🟢 Alive ({cov_str})')
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        """Serialize session result into a JSON-serializable dictionary."""
+        return {
+            "crashed": self.crashed,
+            "crash_step": self.crash_step,
+            "crash_type": self.crash_type,
+            "return_code": self.return_code,
+            "total_coverage": sorted(list(self.total_coverage)),
+            "steps": [
+                {
+                    "step_index": s.step_index,
+                    "input_sent": s.input_sent,
+                    "stdout_delta": s.stdout_delta,
+                    "stderr_delta": s.stderr_delta,
+                    "coverage_delta": s.coverage_delta,
+                    "is_alive": s.is_alive,
+                    "return_code": s.return_code,
+                    "crash_type": s.crash_type,
+                    "elapsed_ms": s.elapsed_ms,
+                }
+                for s in self.steps
+            ],
+            "mermaid_sequence": self.to_mermaid_sequence()
+        }
+
 # ---------------------------------------------------------------------------
 # Crash classification — shared taxonomy with executor.py
 # ---------------------------------------------------------------------------

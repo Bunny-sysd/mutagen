@@ -372,6 +372,7 @@ def _run_session_fuzzer(
                         }
                         for s in session_result.steps
                     ],
+                    "mermaid_sequence": session_result.to_mermaid_sequence(),
                 }
                 sig = _crash_signature(crash_entry)
                 all_crashes.append(crash_entry)

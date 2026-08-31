@@ -13,7 +13,7 @@ from mutagen.decompiler import is_binary_target
 
 def is_supported_language(ext: str) -> bool:
     """Returns True if the file extension is a supported source code language."""
-    return ext.lower() in (".c", ".cpp", ".rs", ".go", ".java", ".cs", ".sol", ".html", ".htm", ".js", ".ts", ".css")
+    return ext.lower() in (".c", ".cpp", ".rs", ".go", ".java", ".cs", ".sol", ".html", ".htm", ".js", ".ts", ".css", ".py")
 
 
 
@@ -373,12 +373,15 @@ def main():
                         sys.exit(1)
                 compiler_to_use = csc_path
                 console.print(f"[dim]Using C# compiler: {compiler_to_use}[/dim]")
-            else:
+            elif target.endswith((".c", ".cpp")):
                 if not gcc_path:
                     console.print("[red]X GCC not found. Install MSYS2 or MinGW.[/red]")
                     sys.exit(1)
                 compiler_to_use = gcc_path
                 console.print(f"[dim]Using GCC C/C++ compiler: {compiler_to_use}[/dim]")
+            else:
+                compiler_to_use = ""
+                console.print(f"[dim]Target is interpreted/source-analyzed ({os.path.splitext(target)[1]}). Native compilation bypassed.[/dim]")
 
             console.print(f"[bold magenta] Fuzzing Target: {os.path.relpath(target, workspace_dir)}[/bold magenta]")
             crashes_found = run_fuzzer(

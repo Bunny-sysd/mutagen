@@ -52,13 +52,28 @@ class StructuralValidatorAgent(BaseAgent):
         else:
             context.logs.append(f"[StructuralValidatorAgent] Skipping Tree-sitter AST check for non-C language: {context.language}")
 
-        # 2. Write patch to temporary file and compile/validate it
-        ext = os.path.splitext(context.target_path)[1].lower()
-        with tempfile.TemporaryDirectory() as tmpdir:
+        # 2. Write patch to workspace-staged temporary file and compile/validate it
+        target_dir = os.path.dirname(os.path.abspath(context.target_path)) if context.target_path and os.path.exists(context.target_path) else os.getcwd()
+        ext = os.path.splitext(context.target_path)[1].lower() if context.target_path else ".c"
+
+        import uuid
+        stage_token = f".mutagen_patch_stage_{os.getpid()}_{uuid.uuid4().hex[:6]}"
+        temp_c_path = os.path.join(target_dir, f"{stage_token}{ext}")
+
+        # Fall back to tempfile if target directory is not writable
+        is_workspace_staged = True
+        try:
+            with open(temp_c_path, "w", encoding="utf-8") as f:
+                f.write(patched_code)
+        except Exception:
+            is_workspace_staged = False
+            tmpdir = tempfile.mkdtemp(prefix="mutagen_patch_")
             temp_c_path = os.path.join(tmpdir, f"patched_target{ext}")
             with open(temp_c_path, "w", encoding="utf-8") as f:
                 f.write(patched_code)
 
+        exe_path = None
+        try:
             try:
                 console.print("[dim]  [StructuralValidatorAgent] Compiling patched target with native compiler...[/dim]")
                 exe_path = compile_target(temp_c_path, self.compiler_path)
@@ -126,5 +141,17 @@ class StructuralValidatorAgent(BaseAgent):
                 console.print("[bold green]  ✓ All reproduction payloads blocked! Zero regressions.[/bold green]")
             else:
                 context.verification_status = "REGRESSION_FAILED"
+        finally:
+            if os.path.exists(temp_c_path):
+                try:
+                    os.remove(temp_c_path)
+                except Exception:
+                    pass
+            if not is_workspace_staged and 'tmpdir' in locals() and os.path.exists(tmpdir):
+                try:
+                    import shutil
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                except Exception:
+                    pass
 
         return context

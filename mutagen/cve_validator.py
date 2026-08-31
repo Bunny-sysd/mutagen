@@ -409,10 +409,10 @@ def render_cve_validation_panel(result: dict[str, Any]) -> None:
     elif cat == "B":
         color = "cyan"
         title = f"[bold cyan]ℹ️ GROUND-TRUTH CVE VALIDATION: {cve_id} — {status_str}[/bold cyan]"
-    elif cat == "D":
+    elif cat in ("D", "E"):
         color = "yellow"
         title = f"[bold yellow]⚠️ GROUND-TRUTH CVE VALIDATION: {cve_id} — {status_str}[/bold yellow]"
-    elif cat == "E":
+    elif cat == "F":
         color = "yellow"
         title = f"[bold yellow]⚠️ GROUND-TRUTH CVE VALIDATION: {cve_id} — {status_str}[/bold yellow]"
     else:  # Category C
@@ -425,6 +425,11 @@ def render_cve_validation_panel(result: dict[str, Any]) -> None:
         diag_text = "\n\n[bold yellow]Triage Error Telemetry:[/bold yellow]\n"
         diag_text += f"  - Error Detail:   {diag.get('triage_error')}\n"
         diag_text += "  - Recommendation: Triage LLM call encountered a parse/network error. Please retry the run.\n"
+    elif cat == "F" and result.get("diagnostic"):
+        diag = result["diagnostic"]
+        diag_text = "\n\n[bold yellow]Synthesis Error Telemetry:[/bold yellow]\n"
+        diag_text += f"  - Error Detail:   {diag.get('synthesis_error')}\n"
+        diag_text += "  - Recommendation: Synthesis LLM call failed or timed out. Only generic fallback mutations were executed.\n"
     elif cat == "C" and result.get("diagnostic"):
         diag = result["diagnostic"]
         diag_text = "\n\n[bold yellow]Pipeline Diagnostic Telemetry:[/bold yellow]\n"
