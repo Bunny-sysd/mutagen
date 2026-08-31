@@ -3,22 +3,76 @@ import subprocess
 
 from mutagen.constants import DOCKER_CPU_LIMIT, DOCKER_MEMORY_LIMIT
 
+_DOCKER_AVAILABLE_CACHE: bool | None = None
 _DOCKER_WARNED = False
 
-def _check_docker_functional() -> bool:
+def get_docker_subprocess_env() -> dict[str, str]:
     """
+    Constructs an execution environment for Docker CLI commands that safely bypasses
+    proxy interference for local daemon communication (Unix sockets, Windows named pipes, localhost)
+    while preserving Docker host and TLS configurations.
+    """
+    env = os.environ.copy()
+    local_no_proxy = "localhost,127.0.0.1,0.0.0.0,::1,docker.internal,.docker.internal,unix,/var/run/docker.sock,//./pipe/docker_engine"
+    existing_no_proxy = env.get("NO_PROXY", env.get("no_proxy", ""))
+    if existing_no_proxy:
+        combined_no_proxy = f"{existing_no_proxy},{local_no_proxy}"
+    else:
+        combined_no_proxy = local_no_proxy
+    env["NO_PROXY"] = combined_no_proxy
+    env["no_proxy"] = combined_no_proxy
+    return env
+
+
+def is_docker_available(force_refresh: bool = False, timeout: int = 10) -> bool:
+    """
+    Single canonical Docker daemon health-check function used across the entire Mutagen pipeline.
+    
     Verifies that the Docker CLI binary is present AND the Docker daemon API socket is responsive.
-    Uses 'docker info' with a 3s timeout to catch disconnected or non-running daemon states.
+    Uses 'docker version --format {{.Server.Version}}' (fast lightweight query) with fallback to
+    'docker info'. Uses a 10s timeout to prevent false-negative timeouts on Docker Desktop / WSL2.
+    Safely handles proxy-configured environments and caches the ground-truth result.
     """
-    global _DOCKER_WARNED
+    global _DOCKER_AVAILABLE_CACHE, _DOCKER_WARNED
+
+    if _DOCKER_AVAILABLE_CACHE is not None and not force_refresh:
+        return _DOCKER_AVAILABLE_CACHE
+
+    docker_env = get_docker_subprocess_env()
+    available = False
+
+    # 1. Primary lightweight check: docker version
     try:
-        res = subprocess.run(["docker", "info"], capture_output=True, text=True, timeout=3)
-        if res.returncode == 0:
-            return True
+        res = subprocess.run(
+            ["docker", "version", "--format", "{{.Server.Version}}"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=docker_env
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            available = True
     except Exception:
         pass
 
-    if not _DOCKER_WARNED:
+    # 2. Fallback check: docker info
+    if not available:
+        try:
+            res = subprocess.run(
+                ["docker", "info"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=docker_env
+            )
+            if res.returncode == 0:
+                available = True
+        except Exception:
+            pass
+
+    _DOCKER_AVAILABLE_CACHE = available
+
+    if not available and not _DOCKER_WARNED:
         try:
             from rich.console import Console
             console = Console(force_terminal=True, force_jupyter=False)
@@ -26,7 +80,12 @@ def _check_docker_functional() -> bool:
         except Exception:
             pass
         _DOCKER_WARNED = True
-    return False
+
+    return available
+
+
+# Backwards compatibility alias for existing modules and tests
+_check_docker_functional = is_docker_available
 
 def ensure_docker_image_ready(image: str = None) -> None:
     """
@@ -66,7 +125,8 @@ def ensure_docker_image_ready(image: str = None) -> None:
             proc = subprocess.Popen(
                 ["docker", "pull", image],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                bufsize=1  # Line-buffered
+                bufsize=1,  # Line-buffered
+                env=get_docker_subprocess_env()
             )
 
             layers_seen = set()      # Layer IDs we've encountered
@@ -399,7 +459,13 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         image = os.environ.get("MUTAGEN_SANDBOX_IMAGE", "ubuntu:latest")
 
         try:
-            inspect_img = subprocess.run(["docker", "inspect", "--format", "{{index .RepoDigests 0}}", image], capture_output=True, text=True, timeout=5)
+            inspect_img = subprocess.run(
+                ["docker", "inspect", "--format", "{{index .RepoDigests 0}}", image],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=get_docker_subprocess_env()
+            )
             if inspect_img.returncode == 0 and inspect_img.stdout.strip():
                 image_digest = inspect_img.stdout.strip()
         except Exception:
@@ -410,7 +476,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
         ld_lib_path = _resolve_target_ld_library_path(exe_dir)
 
     try:
-        env = os.environ.copy()
+        env = get_docker_subprocess_env()
         workspace_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         existing_pythonpath = env.get("PYTHONPATH", "")
         if existing_pythonpath:
