@@ -72,6 +72,76 @@ class TestSharedLibraryResolution(unittest.TestCase):
         for p in staged:
             self.assertFalse(os.path.exists(p) or os.path.islink(p))
 
+    def test_stage_shared_library_dependencies_strictly_excludes_core_system_libs(self):
+        """Validates that _stage_shared_library_dependencies NEVER copies or stages libc, ld-linux, libm, libpthread."""
+        bin_dir = os.path.join(self.test_dir, "build", "bin")
+        lib_dir = os.path.join(self.test_dir, "build", "lib")
+        os.makedirs(bin_dir, exist_ok=True)
+        os.makedirs(lib_dir, exist_ok=True)
+
+        exe_path = os.path.join(bin_dir, "target_app")
+        with open(exe_path, "w") as f:
+            f.write("dummy_exe")
+
+        # Create both application library and core system libraries in lib_dir
+        app_so = os.path.join(lib_dir, "libcustomapp.so.1.0.0")
+        with open(app_so, "w") as f:
+            f.write("app_so")
+
+        system_libs = ["libc.so.6", "ld-linux-x86-64.so.2", "libm.so.6", "libpthread.so.0", "libdl.so.2", "libresolv.so.2"]
+        for sys_lib in system_libs:
+            with open(os.path.join(lib_dir, sys_lib), "w") as f:
+                f.write("sys_so")
+
+        # Mock readelf to return both application and system NEEDED entries
+        readelf_output = (
+            " 0x0000000000000001 (NEEDED)             Shared library: [libcustomapp.so.1]\n"
+            " 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n"
+            " 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]\n"
+            " 0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]\n"
+        )
+        with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout=readelf_output, stderr="")):
+            staged = _stage_shared_library_dependencies(exe_path)
+
+        staged_names = [os.path.basename(p) for p in staged]
+        # Must contain application library
+        self.assertIn("libcustomapp.so.1.0.0", staged_names)
+        self.assertIn("libcustomapp.so.1", staged_names)
+
+        # Must NEVER contain any core system/glibc libraries
+        for sys_lib in system_libs:
+            self.assertNotIn(sys_lib, staged_names)
+            self.assertFalse(os.path.exists(os.path.join(bin_dir, sys_lib)))
+
+        _cleanup_staged_dependencies(staged)
+
+    def test_stage_shared_library_dependencies_cleans_up_stale_system_libs(self):
+        """Validates that _stage_shared_library_dependencies proactively purges pre-existing stale system libs in exe_dir."""
+        bin_dir = os.path.join(self.test_dir, "build", "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+
+        exe_path = os.path.join(bin_dir, "target_app")
+        with open(exe_path, "w") as f:
+            f.write("dummy_exe")
+
+        # Place a pre-existing spurious libc.so.6 and ld-linux in bin_dir (e.g. from an older buggy run)
+        stale_libc = os.path.join(bin_dir, "libc.so.6")
+        stale_ld = os.path.join(bin_dir, "ld-linux-x86-64.so.2")
+        with open(stale_libc, "w") as f:
+            f.write("stale_libc")
+        with open(stale_ld, "w") as f:
+            f.write("stale_ld")
+
+        self.assertTrue(os.path.exists(stale_libc))
+        self.assertTrue(os.path.exists(stale_ld))
+
+        with patch("subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr="")):
+            _stage_shared_library_dependencies(exe_path)
+
+        # Verify spurious system libs were purged
+        self.assertFalse(os.path.exists(stale_libc))
+        self.assertFalse(os.path.exists(stale_ld))
+
     @patch("subprocess.run")
     def test_cmake_build_prefers_static_linking(self, mock_run):
         """Validates that build_with_native_tool passes -DBUILD_SHARED_LIBS=OFF for CMake builds."""

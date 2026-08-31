@@ -231,11 +231,51 @@ def _resolve_target_ld_library_path(exe_dir: str) -> str:
     return ":".join(container_lib_dirs)
 
 
+SYSTEM_SHARED_LIB_EXCLUSIONS = {
+    "libc.so", "ld-linux", "ld-linux-x86-64.so", "ld-linux-aarch64.so", "ld64.so", "ld.so",
+    "libm.so", "libpthread.so", "libdl.so", "librt.so", "libresolv.so",
+    "libutil.so", "libnss_", "libnss_files.so", "libnss_dns.so", "libnss_compat.so",
+    "libgcc_s.so", "libstdc++.so", "linux-vdso.so", "libcrypt.so", "libanl.so",
+}
+
+def is_system_shared_library(filename: str, fullpath: str = "") -> bool:
+    """
+    Returns True if the shared library is a core OS/glibc runtime library that must
+    NEVER be copied, symlinked, or overridden in container environments.
+    """
+    f_lower = os.path.basename(filename).lower()
+
+    # 1. Direct pattern / prefix matching
+    for pattern in SYSTEM_SHARED_LIB_EXCLUSIONS:
+        if f_lower == pattern or f_lower.startswith(pattern):
+            return True
+        if ".so" in f_lower:
+            stem = f_lower.split(".so")[0] + ".so"
+            if stem == pattern or stem.startswith(pattern):
+                return True
+
+    # 2. Check if the source path resides in a standard system directory
+    if fullpath:
+        norm_full = fullpath.replace("\\", "/").lower()
+        system_roots = [
+            "/lib/", "/lib64/", "/usr/lib/", "/usr/lib64/",
+            "/lib/x86_64-linux-gnu/", "/usr/lib/x86_64-linux-gnu/",
+            "/lib/aarch64-linux-gnu/", "/usr/lib/aarch64-linux-gnu/",
+            "/lib32/", "/usr/lib32/", "/system/lib/",
+        ]
+        # If it comes from a system root and is NOT in a project build folder, treat as system lib
+        if any(sr in norm_full for sr in system_roots) and not any(proj in norm_full for proj in ["/build/", "/target/", "/workspace/", "/out/"]):
+            return True
+
+    return False
+
+
 def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
     """
     Scans the executable directory and adjacent project directories for built
-    shared libraries (.so, .so.*, .dylib, .dll) and ensures they are staged/aliased
+    application-specific shared libraries (.so, .so.*, .dylib, .dll) and ensures they are staged/aliased
     in exe_dir so the dynamic linker inside the Docker container (/target) can resolve them.
+    Core OS/glibc libraries are strictly excluded.
     Returns a list of created file/symlink paths for cleanup.
     """
     staged_items: list[str] = []
@@ -247,7 +287,20 @@ def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
     if not os.path.isdir(exe_dir):
         return staged_items
 
-    # 1. Determine search roots (exe_dir, parent, grandparent, workspace)
+    # 0. Proactively remove any stale core system libraries previously copied into exe_dir
+    try:
+        for f in os.listdir(exe_dir):
+            if is_system_shared_library(f):
+                full_spurious = os.path.join(exe_dir, f)
+                if os.path.abspath(full_spurious) != abs_exe and (os.path.islink(full_spurious) or os.path.isfile(full_spurious)):
+                    try:
+                        os.remove(full_spurious)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    # 1. Determine search roots (exe_dir, parent, grandparent)
     search_roots = [exe_dir]
     parent = os.path.dirname(exe_dir)
     if parent and parent != exe_dir:
@@ -256,7 +309,7 @@ def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
         if grandparent and grandparent != parent:
             search_roots.append(grandparent)
 
-    # 2. Collect all shared library files across search roots
+    # 2. Collect application-specific shared library files across project search roots
     found_libs: dict[str, str] = {}  # filename -> full_path
     for sroot in search_roots:
         if not os.path.isdir(sroot):
@@ -266,8 +319,11 @@ def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
             for f in files:
                 f_lower = f.lower()
                 if ".so" in f_lower or f_lower.endswith(".dylib") or f_lower.endswith(".dll"):
+                    full_p = os.path.join(root, f)
+                    if is_system_shared_library(f, full_p):
+                        continue
                     if f not in found_libs:
-                        found_libs[f] = os.path.join(root, f)
+                        found_libs[f] = full_p
 
     # 3. If objdump / readelf / ldd is available on host, inspect NEEDED libraries
     needed_libs: set[str] = set()
@@ -277,7 +333,7 @@ def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
             for line in res.stdout.splitlines():
                 if "NEEDED" in line and "[" in line and "]" in line:
                     lib = line.split("[")[1].split("]")[0].strip()
-                    if lib:
+                    if lib and not is_system_shared_library(lib):
                         needed_libs.add(lib)
     except Exception:
         pass
@@ -290,13 +346,17 @@ def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
                     if "NEEDED" in line:
                         parts = line.strip().split()
                         if len(parts) >= 2:
-                            needed_libs.add(parts[-1])
+                            lib = parts[-1]
+                            if not is_system_shared_library(lib):
+                                needed_libs.add(lib)
         except Exception:
             pass
 
     # 4. Helper to safely copy or symlink (ensuring container volume mount compatibility)
     import shutil
     def _stage_file(src_path: str, dest_name: str) -> None:
+        if is_system_shared_library(dest_name, src_path):
+            return
         dest_path = os.path.join(exe_dir, dest_name)
         if os.path.abspath(src_path) == os.path.abspath(dest_path):
             return
@@ -317,7 +377,7 @@ def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
                 except Exception:
                     pass
 
-    # 5. Stage required NEEDED libraries and generic .so/.dylib files
+    # 5. Stage required NEEDED libraries and project .so/.dylib files
     for lib_filename, lib_fullpath in found_libs.items():
         _stage_file(lib_fullpath, lib_filename)
 
