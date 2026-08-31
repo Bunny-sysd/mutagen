@@ -279,13 +279,14 @@ def analyze_source(code: str, target_functions: list[str] = None) -> PreTargetin
             func_f = [f for f in result.findings if f.function_name == fname]
             score = 0
             for f in func_f:
-                if any(c in f.cwe for c in ["787", "119", "122", "125", "416"]):
+                if any(c in f.cwe for c in ["787", "119", "120", "122", "125", "416", "415", "78"]):
                     score += 10
-                elif "190" in f.cwe or "681" in f.cwe:
+                elif "190" in f.cwe or "681" in f.cwe or "134" in f.cwe:
                     score += 5
                 else:
                     score += 2
-            if fname in ("main", "target_function", "png_do_quantize", "png_combine_row"):
+            # Prioritize standard entry points and harness test interfaces
+            if fname.lower() in ("main", "target_function", "entry", "llvm_fuzzertestoneinput", "fuzz_target", "process_input", "parse_data"):
                 score += 15
             return score
 
@@ -302,7 +303,7 @@ def analyze_source(code: str, target_functions: list[str] = None) -> PreTargetin
     # Limit preamble lines to essential headers (max 35 lines)
     preamble_lines = preamble.splitlines()
     if len(preamble_lines) > 35:
-        compact_preamble = [line for line in preamble_lines if any(line.strip().startswith(kw) for kw in ["#include", "typedef", "struct", "#define PNG_"])]
+        compact_preamble = [line for line in preamble_lines if any(line.strip().startswith(kw) for kw in ["#include", "typedef", "struct", "#define", "using", "import", "enum"])]
         preamble = "\n".join(compact_preamble[:35])
 
     if preamble.strip():
