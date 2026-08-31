@@ -360,7 +360,29 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
     container_name = ""
     image = ""
     image_digest = ""
-    is_docker_sandbox = (sandbox != "none" and _check_docker_functional())
+    docker_ok = _check_docker_functional()
+    if sandbox != "none" and not docker_ok:
+        import sys
+        ci_mode = bool(os.environ.get("CI")) or not sys.stdin.isatty() or "pytest" in sys.modules or "unittest" in sys.modules
+        if not ci_mode and not os.environ.get("MUTAGEN_ALLOW_UNSANDBOXED"):
+            try:
+                from rich.console import Console
+                c = Console(force_terminal=True, force_jupyter=False)
+                c.print("\n[bold yellow]⚠️  DOCKER DAEMON NOT DETECTED[/bold yellow]")
+                c.print("[yellow]Docker is not responsive or not installed on this machine.[/yellow]")
+                c.print("[yellow]Fuzzing payloads are crafted to trigger memory corruptions and crashes.[/yellow]")
+                choice = input("[?] Run unsandboxed directly on your host computer? [y/N]: ").strip().lower()
+                if choice in ("y", "yes", "1"):
+                    os.environ["MUTAGEN_ALLOW_UNSANDBOXED"] = "1"
+                    c.print("[yellow][!] Proceeding with host execution (user confirmed).[/yellow]\n")
+                else:
+                    c.print("[bold red]Aborting run: Docker daemon required.[/bold red]")
+                    sys.exit(1)
+            except (KeyboardInterrupt, EOFError):
+                sys.exit(1)
+        is_docker_sandbox = False
+    else:
+        is_docker_sandbox = (sandbox != "none" and docker_ok)
     staged_deps: list[str] = []
 
     abs_exe_path = os.path.abspath(exe_path)
