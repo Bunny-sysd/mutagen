@@ -153,6 +153,17 @@ def main():
                         path = line
 
                     abs_path = os.path.abspath(os.path.join(workspace_dir, path))
+                    rel_path = os.path.relpath(abs_path, workspace_dir).replace("\\", "/")
+                    if (
+                        rel_path.startswith("mutagen/")
+                        or rel_path.startswith("tests/")
+                        or rel_path.startswith(".github/")
+                        or rel_path.startswith("docs/")
+                        or rel_path.startswith("scratch/")
+                        or rel_path in ("setup.py", "run_all.py", "mutagen.py", "pyproject.toml")
+                    ):
+                        continue
+
                     is_source = is_supported_language(os.path.splitext(path)[1])
                     is_binary = is_binary_target(path)
                     if is_binary and os.path.exists(abs_path):
@@ -208,6 +219,10 @@ def main():
             api_key = os.environ.get("ANTHROPIC_API_KEY", "") or os.environ.get("MUTAGEN_API_KEY", "")
 
     if not api_key and args.provider != "ollama":
+        if args.ci:
+            console.print(f"[bold yellow][!] CI/CD Notice: No API key provided for '{args.provider}'.[/bold yellow]")
+            console.print("[yellow]    Skipping AI fuzzing in CI (configure GEMINI_API_KEY secret in repo settings to enable).[/yellow]")
+            sys.exit(0)
         console.print(f"[red]X API key for {args.provider} not provided.[/red]")
         console.print("[dim]  Pass it via --api-key or set the corresponding environment variable.[/dim]")
         sys.exit(1)

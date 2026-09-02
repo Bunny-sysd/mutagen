@@ -206,4 +206,8 @@ def generate_fallback_payloads(max_payloads: int = 20, delivery_mode: str = "arg
         random.shuffle(remaining)
         selected.extend(remaining[:budget])
 
-    return selected[:max_payloads]
+    res = selected[:max_payloads]
+    for p in res:
+        p["is_fallback"] = True
+        p["synthesis_failed"] = True
+    return res

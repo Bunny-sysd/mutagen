@@ -24,16 +24,62 @@ import os
 DEFAULT_PROVIDER: str = os.environ.get("MUTAGEN_PROVIDER", "gemini")
 
 #: Default Gemini model name when no --model flag is given.
-DEFAULT_MODEL_GEMINI: str = os.environ.get("MUTAGEN_MODEL", "gemini-2.5-flash")
+DEFAULT_MODEL_GEMINI: str = os.environ.get("MUTAGEN_MODEL_GEMINI", os.environ.get("MUTAGEN_MODEL", "gemini-2.5-flash"))
 
-#: Verified active Gemini fallback models supporting generateContent.
+#: Verified active Gemini fallback models supporting generateContent across GA tiers.
 DEFAULT_GEMINI_FALLBACK_MODELS: list[str] = [
     "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.5-pro",
+    "gemini-1.5-pro",
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
     "gemini-flash-latest",
     "gemini-2.5-flash-lite",
-    "gemini-flash-lite-latest",
-    "gemini-2.5-pro",
     "gemini-pro-latest",
+]
+
+#: Default Claude model name when no --model flag is given.
+DEFAULT_MODEL_CLAUDE: str = os.environ.get("MUTAGEN_MODEL_CLAUDE", "claude-3-7-sonnet-latest")
+
+#: Verified active Claude fallback models supporting Messages & Structured Outputs.
+DEFAULT_CLAUDE_FALLBACK_MODELS: list[str] = [
+    "claude-3-7-sonnet-latest",
+    "claude-3-5-sonnet-latest",
+    "claude-3-5-haiku-latest",
+    "claude-3-7-sonnet-20250219",
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-20241022",
+    "claude-sonnet-5",
+    "claude-opus-5",
+    "claude-haiku-4-5-20251001",
+]
+
+#: Default OpenAI model name when no --model flag is given.
+DEFAULT_MODEL_OPENAI: str = os.environ.get("MUTAGEN_MODEL_OPENAI", "gpt-4o")
+
+#: Verified active OpenAI fallback models supporting Chat Completions & Structured Outputs.
+DEFAULT_OPENAI_FALLBACK_MODELS: list[str] = [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "o3-mini",
+    "o1",
+    "o1-mini",
+    "gpt-4.5-preview",
+    "gpt-4-turbo",
+]
+
+#: Default Ollama model name when no --model flag is given.
+DEFAULT_MODEL_OLLAMA: str = os.environ.get("MUTAGEN_MODEL_OLLAMA", "qwen2.5-coder:7b")
+
+#: Verified active Ollama fallback models.
+DEFAULT_OLLAMA_FALLBACK_MODELS: list[str] = [
+    "qwen2.5-coder:7b",
+    "qwen2.5-coder:14b",
+    "deepseek-coder-v2:16b",
+    "codellama:7b",
+    "llama3:8b",
 ]
 
 # ---------------------------------------------------------------------------

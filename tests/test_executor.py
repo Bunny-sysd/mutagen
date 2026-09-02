@@ -14,7 +14,7 @@ def test_execute_payload_success():
         mock_res.stderr = ""
         mock_run.return_value = mock_res
 
-        result = execute_payload("some_exe", ["arg1"], "", "args", 5)
+        result = execute_payload("some_exe", ["arg1"], "", "args", 5, "none")
 
         assert result["crashed"] is False
         assert result["crash_type"] == "none"
@@ -29,7 +29,7 @@ def test_execute_payload_stdin_success():
         mock_res.stderr = ""
         mock_run.return_value = mock_res
 
-        result = execute_payload("some_exe", [], "hello input", "stdin", 5)
+        result = execute_payload("some_exe", [], "hello input", "stdin", 5, "none")
 
         assert result["crashed"] is False
         assert result["crash_type"] == "none"
@@ -41,6 +41,7 @@ def test_execute_payload_stdin_success():
             input=b"hello input",
             capture_output=True,
             timeout=5,
+            cwd=ANY,
             env=ANY
         )
 
@@ -130,13 +131,14 @@ def test_execute_payload_tcp_success():
          patch("socket.socket", return_value=mock_sock), \
          patch("time.sleep"):  # Skip the 0.5s wait in tests
 
-        result = execute_payload("some_exe", [], "AAAA", "tcp:8888", 5)
+        result = execute_payload("some_exe", [], "AAAA", "tcp:8888", 5, "none")
 
         # Verify the server process was launched
         mock_popen.assert_called_once_with(
             ["some_exe"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            cwd=ANY,
             env=ANY
         )
 

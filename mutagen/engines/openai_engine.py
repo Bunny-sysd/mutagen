@@ -3,35 +3,73 @@ import time
 
 from rich.console import Console
 
-from mutagen.engines.base import BaseEngine
+from mutagen.constants import DEFAULT_MODEL_OPENAI, DEFAULT_OPENAI_FALLBACK_MODELS
+from mutagen.engines.base import AiActivityHeartbeat, BaseEngine
 
 console = Console(force_terminal=True, force_jupyter=False)
 
 class OpenAIEngine(BaseEngine):
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini", debug: bool = False):
+    def __init__(self, api_key: str, model: str = "", debug: bool = False):
         self.api_key = api_key
-        self.model = model or "gpt-4o-mini"
+        self.model = model or DEFAULT_MODEL_OPENAI
         self.debug = debug
         from openai import OpenAI
-        self.client = OpenAI(api_key=self.api_key, timeout=60.0)
+        self.client = OpenAI(api_key=self.api_key, timeout=90.0)
+
+    def _get_models(self, default_models: list[str] = None) -> list[str]:
+        models = []
+        if self.model and self.model not in models:
+            models.append(self.model)
+        targets = default_models if default_models is not None else DEFAULT_OPENAI_FALLBACK_MODELS
+        for m in targets:
+            if m not in models:
+                models.append(m)
+        return models
+
+    def _classify_and_handle_error(self, e: Exception, attempt: int) -> tuple[str, int]:
+        err_str = str(e).upper()
+        if any(k in err_str for k in ["API_KEY", "INVALID_API_KEY", "AUTHENTICATION", "UNAUTHORIZED", "PERMISSION_DENIED"]):
+            console.print("[red]  Critical Auth Error: The provided OpenAI API Key is invalid.[/red]")
+            return "abort_all", 0
+        if any(k in err_str for k in ["NOT_FOUND", "404", "MODEL_NOT_FOUND", "DOES NOT EXIST", "INVALID_REQUEST_ERROR"]):
+            console.print("[dim]  OpenAI model not found/supported. Skipping to next fallback candidate...[/dim]")
+            return "skip_model", 0
+        if any(k in err_str for k in ["RESOURCE_EXHAUSTED", "429", "RATE_LIMIT", "RATE LIMIT", "QUOTA", "INSUFFICIENT_QUOTA"]):
+            console.print("[yellow]  Rate limit (429) on OpenAI. Waiting 20s to cool down API quota...[/yellow]")
+            return "retry", 20
+        if any(k in err_str for k in ["500", "503", "504", "TIMEOUT", "SERVER_ERROR", "DEADLINE_EXCEEDED", "INTERNAL_SERVER_ERROR"]):
+            wait_time = (attempt + 1) * 4
+            if attempt >= 1:
+                console.print(f"[yellow]  Transient OpenAI timeout ({str(e)[:120]}). Switching to fallback model...[/yellow]")
+                return "skip_model", 0
+            else:
+                console.print(f"[yellow]  Transient OpenAI timeout ({str(e)[:120]}). Retrying in {wait_time}s (attempt {attempt + 1}/2)...[/yellow]")
+                return "retry", wait_time
+        wait_time = (attempt + 1) * 5
+        console.print(f"[red]  OpenAI API Error: {str(e)[:200]}[/red]")
+        return "retry" if attempt < 1 else "skip_model", wait_time
 
     def _create_chat_completion(self, **kwargs) -> any:
-        for attempt in range(3):
-            try:
-                return self.client.chat.completions.create(**kwargs)
-            except Exception as e:
-                err_str = str(e).lower()
-                if "rate limit" in err_str or "429" in err_str or "quota" in err_str:
-                    wait_time = 20
-                    console.print(f"[yellow]  Rate limit (429) hit on OpenAI. Waiting {wait_time}s to cool down...[/yellow]")
-                    time.sleep(wait_time)
-                elif "500" in err_str or "503" in err_str or "timeout" in err_str:
-                    wait_time = (attempt + 1) * 5
-                    console.print(f"[yellow]  OpenAI transient error. Waiting {wait_time}s before retry...[/yellow]")
-                    time.sleep(wait_time)
-                else:
-                    raise e
-        raise Exception("OpenAI API call failed after multiple retries.")
+        models_to_try = self._get_models(DEFAULT_OPENAI_FALLBACK_MODELS)
+        for model_name in models_to_try:
+            for attempt in range(2):
+                try:
+                    call_kwargs = dict(kwargs)
+                    call_kwargs["model"] = model_name
+                    # Reasoning models (o1, o3, o4) do not accept custom temperature or system role in standard completions
+                    if any(r in model_name.lower() for r in ["o1", "o3", "o4"]):
+                        call_kwargs.pop("temperature", None)
+                    with AiActivityHeartbeat(task_name=f"querying OpenAI with {model_name}"):
+                        return self.client.chat.completions.create(**call_kwargs)
+                except Exception as e:
+                    action, wait_time = self._classify_and_handle_error(e, attempt)
+                    if action == "abort_all":
+                        raise e
+                    elif action == "skip_model":
+                        break
+                    elif action == "retry" and wait_time > 0:
+                        time.sleep(wait_time)
+        raise Exception("OpenAI API call failed across all fallback models.")
 
     def _parse_generate(self, prompt: str, response_model: type, list_key: str, system: str = "") -> list[dict] | dict:
         messages = []
@@ -40,65 +78,69 @@ class OpenAIEngine(BaseEngine):
         messages.append({"role": "user", "content": prompt})
 
         expect_dict = bool(hasattr(response_model, "__annotations__") and "suggested_delivery_mode" in response_model.__annotations__)
+        models_to_try = self._get_models(DEFAULT_OPENAI_FALLBACK_MODELS)
 
-        for attempt in range(3):
+        for model_name in models_to_try:
+            for attempt in range(2):
+                try:
+                    parse_kwargs = {
+                        "model": model_name,
+                        "messages": messages,
+                        "response_format": response_model,
+                    }
+                    if not any(r in model_name.lower() for r in ["o1", "o3", "o4"]):
+                        parse_kwargs["temperature"] = 0.7
+
+                    with AiActivityHeartbeat(task_name=f"parsing structured output with {model_name}"):
+                        response = self.client.beta.chat.completions.parse(**parse_kwargs)
+                    parsed = response.choices[0].message.parsed
+                    if parsed is not None:
+                        if hasattr(parsed, "suggested_delivery_mode"):
+                            return parsed.model_dump()
+                        items = getattr(parsed, list_key, [])
+                        return [item.model_dump() for item in items]
+                except Exception as e:
+                    action, wait_time = self._classify_and_handle_error(e, attempt)
+                    if action == "abort_all":
+                        return {} if expect_dict else []
+                    elif action == "skip_model":
+                        break
+                    elif action == "retry" and wait_time > 0:
+                        time.sleep(wait_time)
+
+            # JSON fallback if beta parse is unsupported on this OpenAI model
             try:
-                response = self.client.beta.chat.completions.parse(
-                    model=self.model,
-                    messages=messages,
-                    temperature=0.7,
-                    response_format=response_model
-                )
-                parsed = response.choices[0].message.parsed
-                if parsed is not None:
-                    if hasattr(parsed, "suggested_delivery_mode"):
-                        return parsed.model_dump()
-                    items = getattr(parsed, list_key, [])
-                    return [item.model_dump() for item in items]
-                return []
-            except Exception as e:
-                err_str = str(e).lower()
-                if "rate limit" in err_str or "429" in err_str or "quota" in err_str:
-                    wait_time = 20
-                    console.print(f"[yellow]  Rate limit (429) hit on OpenAI. Waiting {wait_time}s to cool down...[/yellow]")
-                    time.sleep(wait_time)
-                elif "500" in err_str or "503" in err_str or "timeout" in err_str:
-                    wait_time = (attempt + 1) * 5
-                    console.print(f"[yellow]  OpenAI transient error. Waiting {wait_time}s before retry...[/yellow]")
-                    time.sleep(wait_time)
-                else:
-                    console.print(f"[yellow]  OpenAI Structured Output failed: {e}. Falling back to standard JSON mode...[/yellow]")
-                    try:
-                        fallback_prompt = prompt + f"\n\nRespond strictly with a JSON object containing a '{list_key}' key."
-                        fallback_messages = []
-                        if system:
-                            fallback_messages.append({"role": "system", "content": system})
-                        fallback_messages.append({"role": "user", "content": fallback_prompt})
+                fallback_prompt = prompt + f"\n\nRespond strictly with a JSON object containing a '{list_key}' key."
+                fallback_messages = []
+                if system:
+                    fallback_messages.append({"role": "system", "content": system})
+                fallback_messages.append({"role": "user", "content": fallback_prompt})
 
-                        response = self.client.chat.completions.create(
-                            model=self.model,
-                            messages=fallback_messages,
-                            temperature=0.7,
-                            response_format={"type": "json_object"}
-                        )
-                        raw = response.choices[0].message.content.strip()
-                        data = json.loads(raw)
-                        if isinstance(data, dict):
-                            if expect_dict:
-                                return data
-                            if list_key in data:
-                                return data[list_key]
-                            for k, v in data.items():
-                                if isinstance(v, list):
-                                    return v
-                            return [data]
-                        elif isinstance(data, list):
-                            return data if not expect_dict else {"vulnerabilities": data}
-                        return [] if not expect_dict else {}
-                    except Exception as fallback_err:
-                        console.print(f"[red]OpenAI JSON fallback failed: {fallback_err}[/red]")
-                        return []
-        return []
+                call_kwargs = {
+                    "model": model_name,
+                    "messages": fallback_messages,
+                    "response_format": {"type": "json_object"}
+                }
+                if not any(r in model_name.lower() for r in ["o1", "o3", "o4"]):
+                    call_kwargs["temperature"] = 0.7
+
+                response = self.client.chat.completions.create(**call_kwargs)
+                raw = response.choices[0].message.content.strip()
+                data = json.loads(raw)
+                if isinstance(data, dict):
+                    if expect_dict:
+                        return data
+                    if list_key in data:
+                        return data[list_key]
+                    for k, v in data.items():
+                        if isinstance(v, list):
+                            return v
+                    return [data]
+                elif isinstance(data, list):
+                    return data if not expect_dict else {"vulnerabilities": data}
+            except Exception:
+                pass
+        return {} if expect_dict else []
 
     def analyze_code(self, source_code: str, max_payloads: int, delivery_mode: str, debug: bool, profile: str = "legacy-audit") -> list[dict]:
         decompile_context = ""
@@ -414,13 +456,16 @@ Return ONLY the refactored, commented, and readable C code."""
             return raw_code
 
     def generate_payloads(self, source_code: str, prompt: str, max_payloads: int, debug: bool = False) -> list[dict]:
-        from mutagen.models import FuzzSequenceList
+        from mutagen.models import FuzzSequenceList, PayloadList
         full_prompt = f"{prompt}\n\nSOURCE CODE:\n```\n{source_code}\n```"
-        sequences = self._parse_generate(full_prompt, FuzzSequenceList, "sequences", system="You are an automated code audit assistant.")
+        if "payloads" in prompt.lower():
+            res = self._parse_generate(full_prompt, PayloadList, "payloads", system="You are an automated code audit and fuzzing assistant.")
+        else:
+            res = self._parse_generate(full_prompt, FuzzSequenceList, "sequences", system="You are an automated code audit assistant.")
         if debug:
             with open("mutagen_debug.log", "a", encoding="utf-8") as f:
-                f.write(f"--- OpenAI GENERATE PAYLOADS RAW RESPONSE ---\n{json.dumps(sequences, indent=2)}\n\n")
-        return sequences
+                f.write(f"--- OpenAI GENERATE PAYLOADS RAW RESPONSE ---\n{json.dumps(res, indent=2)}\n\n")
+        return res if isinstance(res, list) else (res.get("payloads", []) if isinstance(res, dict) else [])
 
 
 

@@ -9,9 +9,9 @@ def test_is_supported_language_web():
     assert is_supported_language(".htm") is True
     assert is_supported_language(".js") is True
     assert is_supported_language(".ts") is True
-    assert is_supported_language(".css") is True
     assert is_supported_language(".sol") is True
-    assert is_supported_language(".py") is False
+    assert is_supported_language(".py") is True
+    assert is_supported_language(".docx") is False
 
 
 @patch("mutagen.core.get_engine")

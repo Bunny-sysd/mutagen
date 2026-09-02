@@ -75,20 +75,54 @@ OFFLINE_CVE_REGISTRY: dict[str, dict[str, Any]] = {
 }
 
 
+def normalize_cve_id(cve_id: str) -> str:
+    """
+    Normalizes arbitrary CVE strings and fixes common typos (extra zeros in year, punctuation, lowercase).
+    Example: 'cve-20250-64505' -> 'CVE-2025-64505'
+    """
+    if not cve_id:
+        return ""
+    clean = cve_id.strip().upper()
+    clean = re.sub(r'[\s_]+', '-', clean)
+    if not clean.startswith("CVE-") and clean.startswith("CVE"):
+        clean = "CVE-" + clean[3:].lstrip("-")
+
+    # Match pattern CVE-(YEAR)-(SEQ)
+    m = re.match(r'^CVE-(\d+)-(\d+)$', clean)
+    if m:
+        year_str, seq_str = m.group(1), m.group(2)
+        # If year has 5 digits ending in 0 (e.g. 20250 -> 2025)
+        if len(year_str) == 5 and year_str.endswith("0") and 1990 <= int(year_str[:4]) <= 2040:
+            normalized_candidate = f"CVE-{year_str[:4]}-{seq_str}"
+            return normalized_candidate
+        # If seq has leading zeros and trimming them matches registry
+        if seq_str.startswith("0") and len(seq_str) > 4:
+            trimmed_candidate = f"CVE-{year_str}-{seq_str.lstrip('0')}"
+            if trimmed_candidate in OFFLINE_CVE_REGISTRY:
+                return trimmed_candidate
+    return clean
+
+
 def fetch_cve_metadata(cve_id: str) -> dict[str, Any]:
     """
     Retrieves CVE metadata from online OSV/NVD APIs or the built-in CVE registry.
-    Works for any CVE identifier.
+    Works for any CVE identifier with automatic typo normalization.
     """
     clean_id = cve_id.strip().upper()
+    normalized_id = normalize_cve_id(clean_id)
 
     # 1. Check built-in registry
+    if normalized_id in OFFLINE_CVE_REGISTRY:
+        if normalized_id != clean_id:
+            console.print(f"[dim]  [GroundTruthValidator] Normalized CVE identifier '{clean_id}' -> '{normalized_id}'.[/dim]")
+        return OFFLINE_CVE_REGISTRY[normalized_id]
     if clean_id in OFFLINE_CVE_REGISTRY:
         return OFFLINE_CVE_REGISTRY[clean_id]
 
     # 2. Try querying OSV API (Open Source Vulnerabilities)
+    query_id = normalized_id or clean_id
     try:
-        url = f"https://api.osv.dev/v1/vulns/{urllib.parse.quote(clean_id)}"
+        url = f"https://api.osv.dev/v1/vulns/{urllib.parse.quote(query_id)}"
         req = urllib.request.Request(url, headers={"User-Agent": "Mutagen-CVE-Validator/2.0"})
         with urllib.request.urlopen(req, timeout=3) as resp:
             if resp.status == 200:
@@ -248,7 +282,10 @@ def evaluate_cve_validation_outcome(
       C. NOT REPRODUCED — PIPELINE GAP: Affected target version, but pipeline failed to crash.
       D. UNGROUNDED: Source code at target function/line could not be grounded.
     """
-    active_crashes = [p for p in context.active_payloads if p.crash_type is not None]
+    active_crashes = [
+        p for p in context.active_payloads
+        if p.crash_type is not None and not getattr(p, "is_fallback", False) and not getattr(p, "synthesis_failed", False)
+    ]
     cve_id = cve_meta.get("cve_id", "CVE-UNKNOWN")
     cve_name = cve_meta.get("name", "")
 
@@ -263,7 +300,31 @@ def evaluate_cve_validation_outcome(
             "diagnostic": None,
         }
 
-    # Category A: Active crash reproduced via targeted payloads!
+    # Category F: INCONCLUSIVE — SYNTHESIS FAILED
+    # If payload synthesis failed (LLM timeout / API error) and only fallback payloads were executed,
+    # and no active crashes were reproduced from real targeted synthesis, mark as Category F.
+    synthesis_failed = getattr(context, "synthesis_failed", False)
+    synthesis_error = getattr(context, "synthesis_error", "")
+    all_payloads_fallback = len(context.active_payloads) > 0 and all(
+        getattr(p, "is_fallback", False) or getattr(p, "synthesis_failed", False) for p in context.active_payloads
+    )
+
+    if (synthesis_failed or all_payloads_fallback) and len(context.active_payloads) > 0 and not active_crashes:
+        return {
+            "category": "F",
+            "status": "INCONCLUSIVE — SYNTHESIS FAILED",
+            "cve_id": cve_id,
+            "cve_name": cve_name,
+            "summary": f"Payload synthesis failed ({synthesis_error or 'LLM API error/timeout'}) and only generic fallback payloads were executed. Generic inputs cannot confirm CVE mechanisms — run is inconclusive.",
+            "diagnostic": {
+                "synthesis_failed": True,
+                "synthesis_error": synthesis_error or "Payload synthesis failed or produced only fallback payloads",
+                "target_path": context.target_path,
+                "logs": context.logs[-15:],
+            }
+        }
+
+    # Category A: Active crash reproduced via real targeted payloads!
     if active_crashes:
         return {
             "category": "A",
@@ -277,17 +338,6 @@ def evaluate_cve_validation_outcome(
                 "exit_codes": [p.exit_code for p in active_crashes],
             }
         }
-
-    # Category F: INCONCLUSIVE — SYNTHESIS FAILED
-    # If payload synthesis failed (LLM timeout / API error) and only fallback payloads were executed,
-    # and no active crashes were reproduced, mark as Category F.
-    synthesis_failed = getattr(context, "synthesis_failed", False)
-    synthesis_error = getattr(context, "synthesis_error", "")
-    all_payloads_fallback = len(context.active_payloads) > 0 and all(
-        getattr(p, "is_fallback", False) or getattr(p, "synthesis_failed", False) for p in context.active_payloads
-    )
-
-    if (synthesis_failed or all_payloads_fallback) and len(context.active_payloads) > 0:
         return {
             "category": "F",
             "status": "INCONCLUSIVE — SYNTHESIS FAILED",

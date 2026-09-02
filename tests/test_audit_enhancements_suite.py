@@ -1,6 +1,6 @@
 import os
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from mutagen.cli import is_supported_language
 from mutagen.cve_validator import render_cve_validation_panel
@@ -28,7 +28,7 @@ class TestAuditEnhancementsSuite(unittest.TestCase):
         self.assertTrue(os.path.exists(html_file))
         self.assertIn("crashes", html_file)
         # Verify HTML contains report content
-        with open(html_file, "r", encoding="utf-8") as f:
+        with open(html_file, encoding="utf-8") as f:
             content = f.read()
             self.assertIn("MUTAGEN", content)
             self.assertIn("buffer_overflow", content)
@@ -96,7 +96,8 @@ class TestAuditEnhancementsSuite(unittest.TestCase):
     def test_claude_openai_structured_output_fields(self):
         """Verify _parse_generate preserves top-level fields like suggested_delivery_mode."""
         from pydantic import BaseModel
-        from mutagen.models import VulnItem
+
+        from mutagen.agents.triage import VulnItem
 
         class MockTriageResult(BaseModel):
             vulnerabilities: list[VulnItem]
@@ -140,7 +141,11 @@ class TestAuditEnhancementsSuite(unittest.TestCase):
     def test_make_png_chunk_and_repair(self):
         """Verify _make_png_chunk builds valid chunks and _repair_png parses and recalculates CRCs."""
         import zlib
-        from mutagen.agents.synthesizer import _make_png_chunk, _generate_file_mode_fallback_payloads
+
+        from mutagen.agents.synthesizer import (
+            _generate_file_mode_fallback_payloads,
+            _make_png_chunk,
+        )
         from mutagen.binary_repair import repair_binary_payload
 
         # Test _make_png_chunk

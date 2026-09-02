@@ -76,16 +76,18 @@ def validate_and_sanitize_delivery_mode(source_code: str, requested_mode: str, l
     return mode if mode in ("args", "stdin", "file", "tcp", "http") else "args"
 
 
+class VulnItem(BaseModel):
+    vuln_type: str
+    cwe: str = "CWE-Unknown"
+    severity: str = "medium"
+    line_number: int = 0
+    code_snippet: str = ""
+    reason: str = ""
+
 class TriageResult(BaseModel):
-    class VulnItem(BaseModel):
-        vuln_type: str
-        cwe: str
-        severity: str
-        line_number: int
-        code_snippet: str
-        reason: str
+    VulnItem: type = VulnItem
     vulnerabilities: list[VulnItem]
-    suggested_delivery_mode: str  # Must be "args", "stdin", "file", "tcp", or "http"
+    suggested_delivery_mode: str = "args"  # Must be "args", "stdin", "file", "tcp", or "http"
 
 class TriageAgent(BaseAgent):
     def __init__(self, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, api_key: str = None):
@@ -232,12 +234,26 @@ class TriageAgent(BaseAgent):
                         import time
                         console.print("[yellow]  Rate limit (429) on triage. Waiting 15s to cool down...[/yellow]")
                         time.sleep(15)
-                    elif any(k in err_upper for k in ["504", "TIMEOUT", "503", "SERVER_ERROR", "DEADLINE_EXCEEDED", "NOT_FOUND", "404"]):
-                        console.print(f"[yellow]  Model '{model_candidate}' timed out (504/timeout). Switching to fallback model candidate...[/yellow]")
+                        continue
+                    elif any(k in err_upper for k in ["NOT_FOUND", "404", "INVALID_ARGUMENT"]):
+                        console.print(f"[dim]  Model '{model_candidate}' not available (404/unsupported). Trying next candidate...[/dim]")
                         break
+                    elif any(k in err_upper for k in ["504", "TIMEOUT", "503", "SERVER_ERROR", "DEADLINE_EXCEEDED", "READTIMEOUT"]):
+                        if attempt < 1:
+                            wait_time = (attempt + 1) * 3
+                            console.print(f"[yellow]  Transient timeout on '{model_candidate}'. Retrying triage in {wait_time}s (attempt 2/2)...[/yellow]")
+                            import time
+                            time.sleep(wait_time)
+                            continue
+                        else:
+                            console.print(f"[yellow]  Model '{model_candidate}' timed out after retry. Switching to fallback candidate...[/yellow]")
+                            break
                     elif attempt < 1:
                         import time
                         time.sleep(2)
+                        continue
+                    else:
+                        break
             if data is not None and isinstance(data, dict):
                 break
 

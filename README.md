@@ -291,6 +291,8 @@ on: [pull_request]
 
 This enables you to automatically detect new vulnerabilities the moment a developer opens a PR — the same approach used by top security teams at major tech companies.
 
+> **⚠️ CI/CD Sandbox Safety Enforcement**: When running in CI or non-interactive environments (`CI=1` or non-TTY), Mutagen strictly requires a responsive Docker daemon. Unsandboxed host execution is strictly blocked in CI mode and will immediately abort with exit code 1, even if `MUTAGEN_ALLOW_UNSANDBOXED=1` or `--no-sandbox` is set.
+
 ---
 
 ## Project Structure

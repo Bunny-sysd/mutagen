@@ -3,93 +3,129 @@ import time
 
 from rich.console import Console
 
-from mutagen.engines.base import BaseEngine
+from mutagen.constants import DEFAULT_CLAUDE_FALLBACK_MODELS, DEFAULT_MODEL_CLAUDE
+from mutagen.engines.base import AiActivityHeartbeat, BaseEngine
 
 console = Console(force_terminal=True, force_jupyter=False)
 
 class ClaudeEngine(BaseEngine):
     def __init__(self, api_key: str, model: str = "", debug: bool = False):
         self.api_key = api_key
-        self.model = model or "claude-3-5-sonnet-latest"
+        self.model = model or DEFAULT_MODEL_CLAUDE
         self.debug = debug
         from anthropic import Anthropic
-        self.client = Anthropic(api_key=self.api_key, timeout=60.0)
+        self.client = Anthropic(api_key=self.api_key, timeout=90.0)
+
+    def _get_models(self, default_models: list[str] = None) -> list[str]:
+        models = []
+        if self.model and self.model not in models:
+            models.append(self.model)
+        targets = default_models if default_models is not None else DEFAULT_CLAUDE_FALLBACK_MODELS
+        for m in targets:
+            if m not in models:
+                models.append(m)
+        return models
+
+    def _classify_and_handle_error(self, e: Exception, attempt: int) -> tuple[str, int]:
+        err_str = str(e).upper()
+        if any(k in err_str for k in ["API_KEY", "AUTHENTICATION_ERROR", "PERMISSION_DENIED", "UNAUTHORIZED", "FORBIDDEN"]):
+            console.print("[red]  Critical Auth Error: The provided Anthropic API Key is invalid.[/red]")
+            return "abort_all", 0
+        if any(k in err_str for k in ["NOT_FOUND", "404", "NOT FOUND", "MODEL_NOT_FOUND", "INVALID_REQUEST_ERROR"]):
+            console.print("[dim]  Claude model not found/supported. Skipping to next fallback candidate...[/dim]")
+            return "skip_model", 0
+        if any(k in err_str for k in ["RESOURCE_EXHAUSTED", "429", "RATE_LIMIT", "RATE LIMIT", "QUOTA"]):
+            console.print("[yellow]  Rate limit (429) on Claude. Waiting 20s to cool down API quota...[/yellow]")
+            return "retry", 20
+        if any(k in err_str for k in ["500", "503", "504", "TIMEOUT", "OVERLOADED", "SERVER_ERROR", "DEADLINE_EXCEEDED"]):
+            wait_time = (attempt + 1) * 4
+            if attempt >= 1:
+                console.print(f"[yellow]  Transient Claude timeout ({str(e)[:120]}). Switching to fallback model...[/yellow]")
+                return "skip_model", 0
+            else:
+                console.print(f"[yellow]  Transient Claude timeout ({str(e)[:120]}). Retrying in {wait_time}s (attempt {attempt + 1}/2)...[/yellow]")
+                return "retry", wait_time
+        wait_time = (attempt + 1) * 5
+        console.print(f"[red]  Claude API Error: {str(e)[:200]}[/red]")
+        return "retry" if attempt < 1 else "skip_model", wait_time
 
     def _generate(self, prompt: str, system: str = "") -> str:
-        kwargs = {
-            "model": self.model,
-            "max_tokens": 4000,
-            "temperature": 0.2,
-            "messages": [{"role": "user", "content": prompt}]
-        }
-        if system:
-            kwargs["system"] = system
-
-        for attempt in range(3):
-            try:
-                message = self.client.messages.create(**kwargs)
-                return message.content[0].text.strip()
-            except Exception as e:
-                err_str = str(e).lower()
-                if "rate limit" in err_str or "429" in err_str or "quota" in err_str:
-                    wait_time = 20
-                    console.print(f"[yellow]  Rate limit (429) hit on Claude. Waiting {wait_time}s to cool down...[/yellow]")
-                    time.sleep(wait_time)
-                elif "500" in err_str or "503" in err_str or "timeout" in err_str:
-                    wait_time = (attempt + 1) * 5
-                    console.print(f"[yellow]  Claude transient error. Waiting {wait_time}s before retry...[/yellow]")
-                    time.sleep(wait_time)
-                else:
-                    console.print(f"[red]Claude API error: {e}[/red]")
-                    return ""
-        console.print("[red]Claude API failed after multiple retries.[/red]")
+        models_to_try = self._get_models(DEFAULT_CLAUDE_FALLBACK_MODELS)
+        for model_name in models_to_try:
+            for attempt in range(2):
+                try:
+                    kwargs = {
+                        "model": model_name,
+                        "max_tokens": 4000,
+                        "temperature": 0.2,
+                        "messages": [{"role": "user", "content": prompt}]
+                    }
+                    if system:
+                        kwargs["system"] = system
+                    if "thinking" in kwargs or getattr(self, "thinking_enabled", False):
+                        kwargs.pop("temperature", None)
+                    with AiActivityHeartbeat(task_name=f"generating response with {model_name}"):
+                        message = self.client.messages.create(**kwargs)
+                    return message.content[0].text.strip()
+                except Exception as e:
+                    action, wait_time = self._classify_and_handle_error(e, attempt)
+                    if action == "abort_all":
+                        return ""
+                    elif action == "skip_model":
+                        break
+                    elif action == "retry" and wait_time > 0:
+                        time.sleep(wait_time)
+        console.print("[red]Claude API failed across all fallback models.[/red]")
         return ""
 
     def _parse_generate(self, prompt: str, response_model: type, list_key: str, system: str = "") -> list[dict] | dict:
-        kwargs = {
-            "model": self.model,
-            "max_tokens": 4000,
-            "temperature": 0.2,
-            "messages": [{"role": "user", "content": prompt}],
-            "response_model": response_model,
-            "betas": ["structured-outputs-2025-11-13"]
-        }
-        if system:
-            kwargs["system"] = system
-
+        models_to_try = self._get_models(DEFAULT_CLAUDE_FALLBACK_MODELS)
         expect_dict = bool(hasattr(response_model, "__annotations__") and "suggested_delivery_mode" in response_model.__annotations__)
 
-        for attempt in range(3):
+        for model_name in models_to_try:
+            for attempt in range(2):
+                try:
+                    kwargs = {
+                        "model": model_name,
+                        "max_tokens": 4000,
+                        "temperature": 0.2,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "response_model": response_model,
+                        "betas": ["structured-outputs-2025-11-13"]
+                    }
+                    if system:
+                        kwargs["system"] = system
+                    if "thinking" in kwargs or getattr(self, "thinking_enabled", False):
+                        kwargs.pop("temperature", None)
+
+                    with AiActivityHeartbeat(task_name=f"parsing structured output with {model_name}"):
+                        message = self.client.beta.messages.parse(**kwargs)
+                    parsed = message.parsed
+                    if parsed is not None:
+                        if hasattr(parsed, "suggested_delivery_mode"):
+                            return parsed.model_dump()
+                        items = getattr(parsed, list_key, [])
+                        return [item.model_dump() for item in items]
+                except Exception as e:
+                    action, wait_time = self._classify_and_handle_error(e, attempt)
+                    if action == "abort_all":
+                        return {} if expect_dict else []
+                    elif action == "skip_model":
+                        break
+                    elif action == "retry" and wait_time > 0:
+                        time.sleep(wait_time)
+
+            # JSON fallback if beta parse is unsupported on this Claude model
             try:
-                message = self.client.beta.messages.parse(**kwargs)
-                parsed = message.parsed
-                if parsed is not None:
-                    if hasattr(parsed, "suggested_delivery_mode"):
-                        return parsed.model_dump()
-                    items = getattr(parsed, list_key, [])
-                    return [item.model_dump() for item in items]
-                return []
-            except Exception as e:
-                err_str = str(e).lower()
-                if "rate limit" in err_str or "429" in err_str or "quota" in err_str:
-                    wait_time = 20
-                    console.print(f"[yellow]  Rate limit (429) hit on Claude. Waiting {wait_time}s to cool down...[/yellow]")
-                    time.sleep(wait_time)
-                elif "500" in err_str or "503" in err_str or "timeout" in err_str:
-                    wait_time = (attempt + 1) * 5
-                    console.print(f"[yellow]  Claude transient error. Waiting {wait_time}s before retry...[/yellow]")
-                    time.sleep(wait_time)
-                else:
-                    console.print(f"[yellow]  Claude Structured Output failed: {e}. Falling back to standard JSON mode...[/yellow]")
-                    try:
-                        fallback_prompt = prompt + f"\n\nRespond strictly with a JSON object containing a '{list_key}' key."
-                        sys_prompt = system + " Respond only in raw JSON."
-                        raw = self._generate(fallback_prompt, system=sys_prompt)
-                        return self._extract_json(raw, expect_dict=expect_dict)
-                    except Exception as fallback_err:
-                        console.print(f"[red]Claude JSON fallback failed: {fallback_err}[/red]")
-                        return []
-        return []
+                fallback_prompt = prompt + f"\n\nRespond strictly with a JSON object containing a '{list_key}' key."
+                sys_prompt = system + " Respond only in raw JSON."
+                raw = self._generate(fallback_prompt, system=sys_prompt)
+                extracted = self._extract_json(raw, expect_dict=expect_dict)
+                if extracted:
+                    return extracted
+            except Exception:
+                pass
+        return {} if expect_dict else []
 
     def _extract_json(self, text: str, expect_dict: bool = False) -> list[dict] | dict:
         text = text.strip()
@@ -330,13 +366,16 @@ Return ONLY the refactored, commented, and readable C code."""
         return text.strip() or raw_code
 
     def generate_payloads(self, source_code: str, prompt: str, max_payloads: int, debug: bool = False) -> list[dict]:
-        from mutagen.models import FuzzSequenceList
+        from mutagen.models import FuzzSequenceList, PayloadList
         full_prompt = f"{prompt}\n\nSOURCE CODE:\n```\n{source_code}\n```"
-        sequences = self._parse_generate(full_prompt, FuzzSequenceList, "sequences", system="You are an automated code audit assistant.")
+        if "payloads" in prompt.lower():
+            res = self._parse_generate(full_prompt, PayloadList, "payloads", system="You are an automated code audit and fuzzing assistant.")
+        else:
+            res = self._parse_generate(full_prompt, FuzzSequenceList, "sequences", system="You are an automated code audit assistant.")
         if debug:
             with open("mutagen_debug.log", "a", encoding="utf-8") as f:
-                f.write(f"--- Claude GENERATE PAYLOADS RAW RESPONSE ---\n{json.dumps(sequences, indent=2)}\n\n")
-        return sequences
+                f.write(f"--- Claude GENERATE PAYLOADS RAW RESPONSE ---\n{json.dumps(res, indent=2)}\n\n")
+        return res if isinstance(res, list) else (res.get("payloads", []) if isinstance(res, dict) else [])
 
 
 

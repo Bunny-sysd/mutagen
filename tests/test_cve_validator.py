@@ -9,6 +9,7 @@ from mutagen.cve_validator import (
     detect_target_version,
     evaluate_cve_validation_outcome,
     fetch_cve_metadata,
+    normalize_cve_id,
 )
 from mutagen.executor import execute_payload
 from mutagen.state import CrashPayload, ProgramContext, VulnerabilityDetail
@@ -20,6 +21,14 @@ def test_fetch_cve_metadata_builtin_and_generic():
     assert meta1["cve_id"] == "CVE-2025-65018"
     assert "png_combine_row" in meta1["affected_functions"]
     assert meta1["fixed_version"] == "1.6.51"
+
+    # 1b. Typo resilience (e.g. 5-digit year 20250 or lowercase)
+    meta_typo = fetch_cve_metadata("CVE-20250-64505")
+    assert meta_typo["cve_id"] == "CVE-2025-64505"
+    assert "png_do_quantize" in meta_typo["affected_functions"]
+
+    assert normalize_cve_id("cve-20250-64505") == "CVE-2025-64505"
+    assert normalize_cve_id("CVE_2025_64505") == "CVE-2025-64505"
 
     # 2. Arbitrary CVE fallback
     meta2 = fetch_cve_metadata("CVE-2024-99999")

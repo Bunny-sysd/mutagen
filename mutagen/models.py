@@ -30,3 +30,15 @@ class FuzzSequenceList(BaseModel):
     sequences: list[FuzzSequence]
 
 
+class PayloadItem(BaseModel):
+    args: list[str] = []
+    input_data: str | None = ""
+    raw_bytes_hex: str | None = None
+    reason: str = ""
+
+
+class PayloadList(BaseModel):
+    payloads: list[PayloadItem]
+
+
+

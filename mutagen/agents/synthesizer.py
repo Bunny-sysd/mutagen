@@ -389,11 +389,18 @@ Return JSON adhering strictly to:
 
                 for model_candidate in models_to_try:
                     for attempt in range(2):
+                        current_prompt = prompt
+                        # On second attempt (if first attempt timed out/errored), condense source context to speed up generation
+                        if attempt == 1 and len(scoped_source.splitlines()) > 60:
+                            condensed_lines = scoped_source.splitlines()[:60]
+                            condensed_source = "\n".join(condensed_lines) + "\n// ... [Context trimmed for fast retry generation]"
+                            current_prompt = prompt.replace(scoped_source, condensed_source)
+
                         try:
                             with AiActivityHeartbeat(task_name=f"synthesizing test payloads with {model_candidate}"):
                                 response = self.engine.client.models.generate_content(
                                     model=model_candidate,
-                                    contents=prompt,
+                                    contents=current_prompt,
                                     config={
                                         "temperature": SYNTHESIZER_TEMPERATURE,
                                         "response_mime_type": "application/json",
@@ -425,12 +432,26 @@ Return JSON adhering strictly to:
                                 import time
                                 console.print("[yellow]  Rate limit (429) on synthesis. Waiting 15s to cool down...[/yellow]")
                                 time.sleep(15)
-                            elif any(k in err_upper for k in ["504", "TIMEOUT", "503", "SERVER_ERROR", "DEADLINE_EXCEEDED", "NOT_FOUND", "404"]):
-                                console.print(f"[yellow]  Model '{model_candidate}' timed out (504/timeout). Switching to fallback model candidate...[/yellow]")
+                                continue
+                            elif any(k in err_upper for k in ["NOT_FOUND", "404", "INVALID_ARGUMENT"]):
+                                console.print(f"[dim]  Model '{model_candidate}' not available (404/unsupported). Trying next candidate...[/dim]")
                                 break
+                            elif any(k in err_upper for k in ["504", "TIMEOUT", "503", "SERVER_ERROR", "DEADLINE_EXCEEDED", "READTIMEOUT"]):
+                                if attempt < 1:
+                                    wait_time = (attempt + 1) * 3
+                                    console.print(f"[yellow]  Transient timeout on '{model_candidate}'. Retrying with condensed context in {wait_time}s (attempt 2/2)...[/yellow]")
+                                    import time
+                                    time.sleep(wait_time)
+                                    continue
+                                else:
+                                    console.print(f"[yellow]  Model '{model_candidate}' timed out after retry. Switching to fallback candidate...[/yellow]")
+                                    break
                             elif attempt < 1:
                                 import time
                                 time.sleep(2)
+                                continue
+                            else:
+                                break
                     if data is not None and data.get("payloads"):
                         break
 

@@ -64,8 +64,12 @@ class GeminiEngine(BaseEngine):
         # 4. Check for 504 Gateway Timeout / Read Timeout / Server Overload (Transient)
         if any(k in err_str for k in ["504", "GATEWAY TIMEOUT", "READTIMEOUT", "TIMEOUT", "503", "500", "SERVER_ERROR", "DEADLINE_EXCEEDED"]):
             wait_time = (attempt + 1) * 3
-            console.print(f"[yellow]  Transient API timeout/gateway error ({str(e)[:120]}). Switching to fallback model...[/yellow]")
-            return "skip_model" if attempt >= 1 else "retry", wait_time
+            if attempt >= 1:
+                console.print(f"[yellow]  Transient API timeout/gateway error ({str(e)[:120]}). Switching to fallback model...[/yellow]")
+                return "skip_model", 0
+            else:
+                console.print(f"[yellow]  Transient API timeout/gateway error ({str(e)[:120]}). Retrying in {wait_time}s (attempt {attempt + 1}/2)...[/yellow]")
+                return "retry", wait_time
 
         # 5. Check for hard network/connectivity/DNS/TLS drop
         if isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, httpx.NetworkError)) or any(k in err_str for k in ["CONNECTERROR", "NAMERESOLUTIONERROR", "CONNECTION REFUSED", "SSL", "HANDSHAKE"]):
@@ -628,9 +632,10 @@ Return ONLY the refactored, commented, and readable C code."""
         return text.strip()
 
     def generate_payloads(self, source_code: str, prompt: str, max_payloads: int, debug: bool = False) -> list[dict]:
-        from mutagen.models import FuzzSequenceList
+        from mutagen.models import FuzzSequenceList, PayloadList
 
         full_prompt = f"{prompt}\n\nSOURCE CODE:\n```\n{source_code}\n```"
+        schema = PayloadList if "payloads" in prompt.lower() else FuzzSequenceList
 
         models_to_try = self._get_models(DEFAULT_GEMINI_FALLBACK_MODELS)
         response = None
@@ -647,7 +652,7 @@ Return ONLY the refactored, commented, and readable C code."""
                         config={
                             "temperature": 0.7,
                             "response_mime_type": "application/json",
-                            "response_schema": FuzzSequenceList,
+                            "response_schema": schema,
                             "safety_settings": GEMINI_SAFETY_OFF,
                         },
                     )
@@ -674,8 +679,11 @@ Return ONLY the refactored, commented, and readable C code."""
                 f.write(f"--- AI GENERATE PAYLOADS RAW RESPONSE ---\n{raw}\n\n")
         try:
             data = json.loads(raw)
-            if isinstance(data, dict) and "sequences" in data:
-                return data["sequences"]
+            if isinstance(data, dict):
+                if "payloads" in data:
+                    return data["payloads"]
+                if "sequences" in data:
+                    return data["sequences"]
             elif isinstance(data, list):
                 return data
             return []

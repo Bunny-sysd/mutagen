@@ -104,3 +104,38 @@ def test_crash_report_contains_sandboxed_metadata(tmp_path):
             assert data["docker_available"] is True
     finally:
         os.chdir(orig_cwd)
+
+
+def test_ci_mode_aborts_even_with_allow_unsandboxed_env_var():
+    """Asserts that orchestrator strictly aborts in CI mode even if MUTAGEN_ALLOW_UNSANDBOXED=1 is set."""
+    from mutagen.orchestrator import AgentOrchestrator
+
+    with patch.dict(os.environ, {"CI": "1", "MUTAGEN_ALLOW_UNSANDBOXED": "1"}):
+        with patch("mutagen.orchestrator.TriageAgent"), \
+             patch("mutagen.orchestrator.PayloadSynthesizerAgent"), \
+             patch("mutagen.orchestrator.FuzzingSupervisorAgent"), \
+             patch("mutagen.orchestrator.PatchEngineerAgent"), \
+             patch("mutagen.orchestrator.StructuralValidatorAgent"):
+            orchestrator = AgentOrchestrator(
+                target_path="targets/dummy.c",
+                source_code="int main(){return 0;}",
+                api_key="test_api_key"
+            )
+
+            with patch("mutagen.executor._check_docker_functional", return_value=False):
+                with pytest.raises(SystemExit) as exc_info:
+                    orchestrator.gate_docker_sandbox_safety(ci_mode=True)
+                assert exc_info.value.code == 1
+                assert any("ABORTED: Docker unavailable in non-interactive/CI mode" in log for log in orchestrator.context.logs)
+
+
+def test_executor_aborts_in_ci_mode_even_with_allow_unsandboxed_env_var():
+    """Asserts that execute_payload strictly aborts in CI mode when Docker is unavailable even if MUTAGEN_ALLOW_UNSANDBOXED=1 is set."""
+    from mutagen.executor import execute_payload
+
+    with patch.dict(os.environ, {"CI": "1", "MUTAGEN_ALLOW_UNSANDBOXED": "1"}):
+        with patch("mutagen.executor._check_docker_functional", return_value=False):
+            with pytest.raises(SystemExit) as exc_info:
+                execute_payload("dummy_exe", ["arg1"], "", "args", 5, sandbox="docker")
+            assert exc_info.value.code == 1
+

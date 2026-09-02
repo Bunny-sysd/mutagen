@@ -27,7 +27,7 @@ def get_docker_subprocess_env() -> dict[str, str]:
 def is_docker_available(force_refresh: bool = False, timeout: int = 10) -> bool:
     """
     Single canonical Docker daemon health-check function used across the entire Mutagen pipeline.
-    
+
     Verifies that the Docker CLI binary is present AND the Docker daemon API socket is responsive.
     Uses 'docker version --format {{.Server.Version}}' (fast lightweight query) with fallback to
     'docker info'. Uses a 10s timeout to prevent false-negative timeouts on Docker Desktop / WSL2.
@@ -483,8 +483,15 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
     docker_ok = _check_docker_functional()
     if sandbox != "none" and not docker_ok:
         import sys
-        ci_mode = bool(os.environ.get("CI")) or not sys.stdin.isatty() or "pytest" in sys.modules or "unittest" in sys.modules
-        if not ci_mode and not os.environ.get("MUTAGEN_ALLOW_UNSANDBOXED"):
+        ci_mode = bool(os.environ.get("CI")) or not sys.stdin.isatty()
+        if ci_mode:
+            from rich.console import Console
+            c = Console(force_terminal=True, force_jupyter=False)
+            c.print("\n[bold red]❌ SAFETY ERROR: Docker daemon is unavailable, and Mutagen is running in CI/non-interactive mode.[/bold red]")
+            c.print("[bold red]Unsandboxed execution in CI environments is strictly prohibited for host safety, regardless of MUTAGEN_ALLOW_UNSANDBOXED. Aborting.[/bold red]")
+            sys.exit(1)
+
+        if not os.environ.get("MUTAGEN_ALLOW_UNSANDBOXED"):
             try:
                 from rich.console import Console
                 c = Console(force_terminal=True, force_jupyter=False)
@@ -1010,47 +1017,15 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 except Exception:
                     pass
 
-            # Automatic Host Fallback: The Docker container environment was unable to execute the binary
-            try:
-                if delivery_mode == "file":
-                    res_host = subprocess.run(
-                        run_cmd + file_args,
-                        capture_output=True,
-                        text=True,
-                        timeout=timeout,
-                        cwd=exe_dir,
-                        env=host_env
-                    )
-                elif delivery_mode == "stdin":
-                    res_host = subprocess.run(
-                        run_cmd,
-                        input=input_bytes,
-                        capture_output=True,
-                        timeout=timeout,
-                        cwd=exe_dir,
-                        env=host_env
-                    )
-                else:
-                    res_host = subprocess.run(
-                        run_cmd + args,
-                        capture_output=True,
-                        text=True,
-                        timeout=timeout,
-                        cwd=exe_dir,
-                        env=host_env
-                    )
-                result = res_host
-                is_docker_err = False
-            except Exception as e:
-                return {
-                    "crashed": False,
-                    "crash_type": f"HOST_FALLBACK_ERROR: {e}",
-                    "return_code": -1,
-                    "stdout": "",
-                    "stderr": str(e),
-                    "coverage": [],
-                    "container_id": container_id,
-                }
+            return {
+                "crashed": False,
+                "crash_type": "EXECUTION_ERROR",
+                "return_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "coverage": [],
+                "container_id": container_id,
+            }
 
         # --- CRASH DETECTION -----------------------------------------------
         # On Windows, an "Access Violation" (segfault equivalent)

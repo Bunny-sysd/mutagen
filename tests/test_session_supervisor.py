@@ -398,3 +398,78 @@ class TestInvalidDeliveryMode:
 
         sup2 = SessionSupervisor("target.exe", "session:tcp:8080")
         assert sup2._inner_mode() == "tcp:8080"
+
+
+class TestTCPSocketDisconnectHandling:
+    """Tests for TCP socket disconnect / broken pipe handling."""
+
+    @patch("mutagen.session_supervisor.socket.socket")
+    @patch("mutagen.session_supervisor.subprocess.Popen")
+    def test_tcp_socket_disconnect_mid_session_handled_gracefully(self, mock_popen, mock_socket_class):
+        """When a TCP socket drops connection mid-sequence, supervisor should record clean failure without hanging."""
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.returncode = None
+        mock_proc.stderr = None
+        mock_popen.return_value = mock_proc
+
+        mock_sock = MagicMock()
+        mock_socket_class.return_value = mock_sock
+
+        # Banner drain succeeds, step 1 succeeds, step 2 disconnects
+        mock_sock.recv.side_effect = [
+            b"READY\n",                                       # Initial banner
+            b"AUTH OK\n",                                     # Step 1 response
+            ConnectionResetError("Connection reset by peer")   # Step 2 disconnect
+        ]
+
+        sup = SessionSupervisor("target.exe", "session:tcp:8888", step_timeout=0.2)
+        sup.start()
+
+        # Execute 2-step sequence
+        result = sup.run_sequence(["AUTH user", "TRIGGER_PAYLOAD"])
+
+        assert len(result.steps) == 2
+        # Step 1 was successful
+        assert result.steps[0].is_alive is True
+        assert "AUTH OK" in result.steps[0].stdout_delta
+        # Step 2 caught the disconnect cleanly
+        assert result.steps[1].is_alive is False
+        assert "PIPE_ERROR" in result.steps[1].crash_type or "Connection reset" in result.steps[1].crash_type
+        sup.kill()
+
+    @patch("mutagen.core.SessionSupervisor")
+    @patch("mutagen.core.get_engine")
+    @patch("mutagen.core.compile_target")
+    def test_run_session_fuzzer_handles_tcp_disconnect(self, mock_compile, mock_get_engine, mock_supervisor_class):
+        """Validates that _run_session_fuzzer logs failure and recovers when TCP supervisor encounters fatal disconnects."""
+        from mutagen.core import _run_session_fuzzer
+
+        mock_engine = MagicMock()
+        mock_engine.generate_payloads.return_value = [
+            {"sequence": ["STEP 1", "STEP 2"], "vuln_type": "tcp_crash", "severity": "high"}
+        ]
+        mock_get_engine.return_value = mock_engine
+
+        mock_supervisor = MagicMock()
+        mock_supervisor.__enter__.return_value = mock_supervisor
+        # Supervisor raises broken connection on run_sequence
+        mock_supervisor.run_sequence.side_effect = BrokenPipeError("Socket connection dropped mid-session")
+        mock_supervisor_class.return_value = mock_supervisor
+
+        # Run session fuzzer
+        crashes_found = _run_session_fuzzer(
+            exe_path="dummy_server.exe",
+            source_code="int main() { return 0; }",
+            source_path="targets/dummy_server.c",
+            delivery_mode="session:tcp:9000",
+            timeout=5,
+            sandbox="none",
+            max_payloads=1,
+            engine=mock_engine,
+            debug=False
+        )
+
+        # Must finish cleanly with 0 crashes without unhandled exception or hanging
+        assert crashes_found == 0
+

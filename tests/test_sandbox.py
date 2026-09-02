@@ -7,15 +7,15 @@ from mutagen.executor import _check_docker_functional, execute_payload
 def test_check_docker_functional_success():
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
-            args=["docker", "ps"], returncode=0, stdout="CONTAINER ID", stderr=""
+            args=["docker", "version", "--format", "{{.Server.Version}}"], returncode=0, stdout="27.0.1", stderr=""
         )
-        assert _check_docker_functional() is True
+        assert _check_docker_functional(force_refresh=True) is True
 
 def test_check_docker_functional_failure():
     with patch("subprocess.run") as mock_run:
         mock_run.side_effect = Exception("Docker not running")
         # Ensure it returns False and doesn't crash the program
-        assert _check_docker_functional() is False
+        assert _check_docker_functional(force_refresh=True) is False
 
 def test_execute_payload_no_sandbox():
     with patch("subprocess.run") as mock_run:
@@ -27,15 +27,18 @@ def test_execute_payload_no_sandbox():
         assert mock_run.call_args[0][0] == ["target_exe", "arg1"]
 
 def test_execute_payload_docker_sandbox_fallback():
-    with patch("mutagen.executor._check_docker_functional", return_value=False):
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=["target_exe", "arg1"], returncode=0, stdout="OK", stderr=""
-            )
-            res = execute_payload("target_exe", ["arg1"], None, "args", 5, "docker")
-            assert res["crashed"] is False
-            # Command should be executed directly on the host (not containerized)
-            assert mock_run.call_args[0][0] == ["target_exe", "arg1"]
+    import os
+    with patch.dict(os.environ, {"CI": "", "MUTAGEN_ALLOW_UNSANDBOXED": "1"}, clear=False):
+        with patch("sys.stdin.isatty", return_value=True):
+            with patch("mutagen.executor._check_docker_functional", return_value=False):
+                with patch("subprocess.run") as mock_run:
+                    mock_run.return_value = subprocess.CompletedProcess(
+                        args=["target_exe", "arg1"], returncode=0, stdout="OK", stderr=""
+                    )
+                    res = execute_payload("target_exe", ["arg1"], None, "args", 5, "docker")
+                    assert res["crashed"] is False
+                    # Command should be executed directly on the host (not containerized)
+                    assert mock_run.call_args[0][0] == ["target_exe", "arg1"]
 
 def test_execute_payload_docker_sandbox_active():
     with patch("mutagen.executor._check_docker_functional", return_value=True):

@@ -76,7 +76,7 @@ class AgentOrchestrator:
             execution_timeout=execution_timeout,
         )
 
-    def gate_docker_sandbox_safety(self, ci_mode: bool = False, force_no_sandbox: bool = False) -> None:
+    def gate_docker_sandbox_safety(self, ci_mode: bool | None = None, force_no_sandbox: bool = False) -> None:
         """
         CROSS-CUTTING SAFETY GATE:
         Detects Docker daemon availability upfront using 'docker info'.
@@ -90,9 +90,17 @@ class AgentOrchestrator:
         from mutagen.executor import _check_docker_functional
         docker_available = _check_docker_functional()
         self.context.docker_available = docker_available
-        self.context.ci_mode = ci_mode or bool(os.environ.get("CI")) or not sys.stdin.isatty()
+        if ci_mode is not None:
+            self.context.ci_mode = bool(ci_mode)
+        else:
+            self.context.ci_mode = bool(os.environ.get("CI")) or not sys.stdin.isatty()
 
         if force_no_sandbox:
+            if self.context.ci_mode:
+                console.print("[bold red]❌ SAFETY ERROR: Explicit --no-sandbox flag provided in CI/non-interactive mode.[/bold red]")
+                console.print("[bold red]Unsandboxed execution in CI environments is strictly prohibited for host safety, regardless of MUTAGEN_ALLOW_UNSANDBOXED. Aborting.[/bold red]")
+                self.context.logs.append("[SafetyGate] ABORTED: --no-sandbox in CI mode.")
+                sys.exit(1)
             self.context.sandboxed = False
             self.context.user_confirmed_unsandboxed = True
             self.context.logs.append("[SafetyGate] Explicit --no-sandbox flag provided. Proceeding unsandboxed.")
