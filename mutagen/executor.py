@@ -172,6 +172,22 @@ def ensure_docker_image_ready(image: str = None) -> None:
         pass
 
 
+def _is_system_or_root_dir(p: str) -> bool:
+    """Returns True if the path is a filesystem root or standard OS directory that must not be traversed recursively."""
+    if not p:
+        return True
+    norm = os.path.abspath(p).replace("\\", "/").rstrip("/")
+    if not norm or norm in ("/", "") or (len(norm) <= 2 and norm.endswith(":")):
+        return True
+    system_roots = {
+        "/tmp", "/var", "/usr", "/etc", "/sys", "/proc", "/dev", "/boot",
+        "/run", "/lib", "/lib64", "/bin", "/sbin", "/opt", "/root", "/home"
+    }
+    if norm.lower() in system_roots:
+        return True
+    return False
+
+
 def _resolve_target_ld_library_path(exe_dir: str) -> str:
     """
     Recursively scans the executable directory and adjacent project directories
@@ -200,16 +216,20 @@ def _resolve_target_ld_library_path(exe_dir: str) -> str:
         abs_exe_dir = os.path.abspath(exe_dir)
         search_roots = [abs_exe_dir]
         parent = os.path.dirname(abs_exe_dir)
-        if parent and parent != abs_exe_dir:
+        if parent and parent != abs_exe_dir and not _is_system_or_root_dir(parent):
             search_roots.append(parent)
             grandparent = os.path.dirname(parent)
-            if grandparent and grandparent != parent:
+            if grandparent and grandparent != parent and not _is_system_or_root_dir(grandparent):
                 search_roots.append(grandparent)
 
         for sroot in search_roots:
-            if not os.path.isdir(sroot):
+            if not os.path.isdir(sroot) or _is_system_or_root_dir(sroot):
                 continue
             for root, dirs, files in os.walk(sroot):
+                rel_from_root = os.path.relpath(root, sroot)
+                if rel_from_root != "." and len(rel_from_root.split(os.sep)) >= 4:
+                    dirs.clear()
+                    continue
                 dirs[:] = [d for d in dirs if not d.startswith(".") or d == ".libs"]
                 if any(".so" in f.lower() or f.lower().endswith(".dylib") for f in files):
                     try:
@@ -303,18 +323,22 @@ def _stage_shared_library_dependencies(exe_path: str) -> list[str]:
     # 1. Determine search roots (exe_dir, parent, grandparent)
     search_roots = [exe_dir]
     parent = os.path.dirname(exe_dir)
-    if parent and parent != exe_dir:
+    if parent and parent != exe_dir and not _is_system_or_root_dir(parent):
         search_roots.append(parent)
         grandparent = os.path.dirname(parent)
-        if grandparent and grandparent != parent:
+        if grandparent and grandparent != parent and not _is_system_or_root_dir(grandparent):
             search_roots.append(grandparent)
 
     # 2. Collect application-specific shared library files across project search roots
     found_libs: dict[str, str] = {}  # filename -> full_path
     for sroot in search_roots:
-        if not os.path.isdir(sroot):
+        if not os.path.isdir(sroot) or _is_system_or_root_dir(sroot):
             continue
         for root, dirs, files in os.walk(sroot):
+            rel_from_root = os.path.relpath(root, sroot)
+            if rel_from_root != "." and len(rel_from_root.split(os.sep)) >= 4:
+                dirs.clear()
+                continue
             dirs[:] = [d for d in dirs if not d.startswith(".") or d == ".libs"]
             for f in files:
                 f_lower = f.lower()
@@ -559,7 +583,7 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
             if os.path.isdir(sub_path):
                 host_lib_paths.append(sub_path)
         parent_exe_dir = os.path.dirname(exe_dir)
-        if parent_exe_dir and parent_exe_dir != exe_dir:
+        if parent_exe_dir and parent_exe_dir != exe_dir and not _is_system_or_root_dir(parent_exe_dir):
             host_lib_paths.append(parent_exe_dir)
             for candidate_sub in [".libs", "lib", "build", "src", "libs"]:
                 sub_path = os.path.join(parent_exe_dir, candidate_sub)
