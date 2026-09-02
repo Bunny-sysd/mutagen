@@ -359,9 +359,9 @@ class TestEnsureCompatibleJavaHome:
                             ensure_compatible_java_home()
                             assert os.environ["JAVA_HOME"] == "C:\\Program Files\\Microsoft\\jdk-21.0.11-hotspot"
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Linux/macOS specific path resolution test")
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux specific path resolution test")
     def test_invalid_java_home_resolved_from_common_dir_linux(self):
-        """If JAVA_HOME is invalid or empty on Linux/macOS, it should scan system dirs and configure it."""
+        """If JAVA_HOME is invalid or empty on Linux, it should scan system dirs and configure it."""
         with patch.dict(os.environ, {"JAVA_HOME": ""}):
             with patch("os.path.isdir", side_effect=lambda p: "jvm" in p or "jdk-21" in p):
                 with patch("os.path.exists", return_value=True):
@@ -374,4 +374,19 @@ class TestEnsureCompatibleJavaHome:
                             from mutagen.decompiler import ensure_compatible_java_home
                             ensure_compatible_java_home()
                             assert os.environ["JAVA_HOME"] == "/usr/lib/jvm/jdk-21.0.11"
+
+    @pytest.mark.skipif(sys.platform != "darwin", reason="macOS specific path resolution test")
+    def test_invalid_java_home_resolved_from_common_dir_darwin(self):
+        """If JAVA_HOME is invalid or empty on macOS, it should scan /Library/Java/JavaVirtualMachines and configure it."""
+        with patch.dict(os.environ, {"JAVA_HOME": ""}):
+            with patch("os.path.isdir", return_value=True):
+                with patch("os.path.exists", return_value=True):
+                    with patch("glob.glob", return_value=["/Library/Java/JavaVirtualMachines/jdk-21.0.11.jdk"]):
+                        mock_res = MagicMock()
+                        mock_res.stderr = 'openjdk version "21.0.11"'
+                        mock_res.stdout = ''
+                        with patch("subprocess.run", return_value=mock_res):
+                            from mutagen.decompiler import ensure_compatible_java_home
+                            ensure_compatible_java_home()
+                            assert os.environ["JAVA_HOME"] == "/Library/Java/JavaVirtualMachines/jdk-21.0.11.jdk/Contents/Home"
 
