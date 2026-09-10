@@ -7,7 +7,17 @@ from pydantic import BaseModel, Field
 
 from mutagen.agents.base import BaseAgent
 from mutagen.agents.prompts import get_synthesizer_rules
-from mutagen.binary_repair import repair_binary_payload
+from mutagen.binary_repair import (
+    MAGIC_ELF,
+    MAGIC_GIF,
+    MAGIC_GZ,
+    MAGIC_JPEG,
+    MAGIC_PNG,
+    MAGIC_RIFF,
+    MAGIC_SQLITE,
+    MAGIC_ZIP,
+    repair_binary_payload,
+)
 from mutagen.constants import (
     DEFAULT_GEMINI_FALLBACK_MODELS,
     DEFAULT_MODEL_GEMINI,
@@ -262,6 +272,44 @@ def _detect_file_extension(target_path: str = "", source_code: str = "") -> str:
     return ".bin"
 
 
+# Real magic bytes per detected extension, used to give the synthesis prompt a
+# format-appropriate example instead of always showing PNG's -- reused directly
+# from binary_repair.py so the example always matches what repair_binary_payload
+# actually recognizes for that format.
+_EXAMPLE_MAGIC_BY_EXT: dict[str, bytes] = {
+    ".png": MAGIC_PNG,
+    ".jpg": MAGIC_JPEG,
+    ".jpeg": MAGIC_JPEG,
+    ".gif": MAGIC_GIF,
+    ".zip": MAGIC_ZIP,
+    ".gz": MAGIC_GZ,
+    ".db": MAGIC_SQLITE,
+    ".wav": MAGIC_RIFF,
+    ".webp": MAGIC_RIFF,
+    ".elf": MAGIC_ELF,
+}
+
+# Format-specific structural guidance for the synthesis prompt, keyed by detected
+# extension. Only the format actually detected for THIS target is shown to the
+# AI -- previously every target's prompt always showed PNG chunk names (IHDR,
+# PLTE, IDAT) as the sole worked example, which could anchor payload synthesis
+# toward PNG-shaped output even for targets with nothing to do with PNG.
+_FORMAT_GUIDANCE_BY_EXT: dict[str, str] = {
+    ".png": "This target parses PNG: construct structurally valid chunks (IHDR, PLTE, IDAT, IEND) with correct chunk lengths and CRC32 checksums, placing the boundary trigger inside chunk data so the parser processes it deeply.",
+    ".jpg": "This target parses JPEG: construct a valid SOI marker and segment structure with correct segment length fields, placing the boundary trigger inside segment data.",
+    ".jpeg": "This target parses JPEG: construct a valid SOI marker and segment structure with correct segment length fields, placing the boundary trigger inside segment data.",
+    ".gif": "This target parses GIF: construct a valid GIF87a/GIF89a header and logical screen descriptor, placing the boundary trigger inside image/color-table data.",
+    ".zip": "This target parses ZIP: construct a valid local file header (and matching Central Directory entry) with correct CRC32/size fields, placing the boundary trigger inside entry data.",
+    ".elf": "This target parses ELF: construct a valid ELF header (correct magic, class, and endianness fields) with the boundary trigger in section/segment data.",
+    ".db": "This target parses SQLite: construct a valid 16-byte SQLite header, placing the boundary trigger in page data.",
+    ".wav": "This target parses RIFF/WAV: construct a valid RIFF header with a correct outer size field, placing the boundary trigger inside chunk data.",
+    ".pdf": "This target parses PDF: construct a valid PDF header/trailer/xref structure, placing the boundary trigger inside a stream or object value.",
+    ".json": "This target parses JSON: construct syntactically valid JSON, placing the boundary trigger in a string/number value or via deep nesting.",
+    ".xml": "This target parses XML: construct well-formed XML, placing the boundary trigger in an attribute/element value or entity definition.",
+}
+_DEFAULT_FORMAT_GUIDANCE = "Construct a structurally valid file for this target's actual format (correct magic bytes, header fields, and any length/checksum fields the parser validates before reaching the vulnerable code), placing the boundary trigger inside the data fields so the parser processes the test case deeply."
+
+
 class PayloadSynthesizerAgent(BaseAgent):
     def __init__(self, model_provider: str = DEFAULT_PROVIDER, model_name: str = DEFAULT_MODEL_GEMINI, api_key: str = None):
         super().__init__("Payload Synthesizer Agent", model_provider, model_name, api_key)
@@ -332,6 +380,16 @@ class PayloadSynthesizerAgent(BaseAgent):
                 f"- PoC Synthesis Guidance: {cve_meta.get('poc_guidance', '')}\n"
             )
 
+        # Detect this target's actual format once, up front, so the prompt's own
+        # example and structural guidance match THIS target instead of always
+        # showing PNG -- computed once here and reused below rather than
+        # recomputed from the same inputs multiple times later in this method.
+        target_ext = _detect_file_extension(context.target_path or "", context.source_code or "")
+        example_filename = f"test_boundary{target_ext}"
+        example_magic = _EXAMPLE_MAGIC_BY_EXT.get(target_ext)
+        example_hex = (example_magic.hex() + "...") if example_magic else "<raw byte stream as hex>"
+        format_guidance = _FORMAT_GUIDANCE_BY_EXT.get(target_ext, _DEFAULT_FORMAT_GUIDANCE)
+
         prompt = f"""You are an expert Software Quality Assurance & Test Verification Engineer.
 Objective:
 Construct targeted boundary test case inputs (command arguments, raw byte buffers, or structured file streams) designed to thoroughly test edge-case memory handling, array bounds, format parsers, and arithmetic limits for automated regression verification.
@@ -346,11 +404,11 @@ Source Code Context:
 
 Test Case Construction Guidelines:
 1. Delivery Mode Alignment:
-   - For 'file' delivery mode: Supply the complete raw binary byte stream as a hex string in 'raw_bytes_hex' (e.g. "89504e470d0a1a0a..."). Provide target filename in 'args' (e.g. ["test_boundary.png"]).
+   - For 'file' delivery mode: Supply the complete raw binary byte stream as a hex string in 'raw_bytes_hex' (e.g. "{example_hex}"). Provide target filename in 'args' (e.g. ["{example_filename}"]) -- vary the filename per payload, do not reuse this literal example.
    - For 'args' delivery mode: Supply target argument arrays in 'args' (do not prepend target executable name).
    - For 'stdin' / 'tcp' / 'http' delivery modes: Supply payload strings in 'input_data'.
 2. Structural Integrity:
-   - For binary image or file formats (PNG, JPEG, PDF, etc.), construct structurally valid headers and chunks (e.g. IHDR, PLTE, IDAT, IEND) with valid checksums (CRC32), placing the out-of-bounds index or boundary trigger inside the data fields so parsers process the test case deeply.
+   - {format_guidance}
    - Ensure all JSON string fields are valid, single-line text without unescaped control characters.
 {lang_rules}
 
@@ -359,9 +417,9 @@ Return JSON adhering strictly to:
 {{
   "payloads": [
     {{
-      "args": ["test_boundary.png"],
+      "args": ["{example_filename}"],
       "input_data": "",
-      "raw_bytes_hex": "89504e47...",
+      "raw_bytes_hex": "{example_hex}",
       "reason": "Technical rationale explaining test case structure and boundary parameters"
     }}
   ]
@@ -513,7 +571,6 @@ Return JSON adhering strictly to:
 
                 # SYSTEMIC VALIDATION & FALLBACK RECOVERY:
                 is_empty_payload = (not args or len(args) == 0) and (not input_data or not str(input_data).strip()) and not raw_bytes_hex
-                target_ext = _detect_file_extension(context.target_path or "", context.source_code or "")
                 if is_empty_payload:
                     item_is_fallback = True
                     context.logs.append(f"[PayloadSynthesizerAgent] WARNING: Payload produced reasoning without args/input_data (Reason: {reason}). Auto-recovering payload...")
@@ -569,7 +626,6 @@ Return JSON adhering strictly to:
 
             # For file delivery mode, append format-aware structural binary fallback payloads
             if context.delivery_mode == "file" and not is_synthesis_fallback:
-                target_ext = _detect_file_extension(context.target_path or "", context.source_code or "")
                 for i, fb in enumerate(_generate_file_mode_fallback_payloads(context.target_path or "", context.source_code or "")):
                     context.add_payload({
                         "args": [f"payload_fallback_{i+1}{target_ext}"],
@@ -585,7 +641,6 @@ Return JSON adhering strictly to:
             if valid_payloads_added == 0:
                 context.synthesis_failed = True
                 context.logs.append("[PayloadSynthesizerAgent] WARNING: Zero payloads generated by synthesis. Inserting format fallback...")
-                target_ext = _detect_file_extension(context.target_path or "", context.source_code or "")
                 if context.delivery_mode == "file":
                     for i, fb in enumerate(_generate_file_mode_fallback_payloads(context.target_path or "", context.source_code or "")):
                         context.add_payload(CrashPayload(args=[f"poc_fallback_{i+1}{target_ext}"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"], is_fallback=True, synthesis_failed=True))
@@ -596,10 +651,10 @@ Return JSON adhering strictly to:
             context.synthesis_failed = True
             context.synthesis_error = str(e)
             context.logs.append(f"[PayloadSynthesizerAgent] Error generating payloads: {e}")
-            target_ext = _detect_file_extension(getattr(context, "target_path", "") or "", getattr(context, "source_code", "") or "")
+            except_target_ext = _detect_file_extension(getattr(context, "target_path", "") or "", getattr(context, "source_code", "") or "")
             if context.delivery_mode == "file":
-                for fb in _generate_file_mode_fallback_payloads(getattr(context, "target_path", "") or "", getattr(context, "source_code", "") or ""):
-                    context.add_payload(CrashPayload(args=[f"poc_fallback{target_ext}"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"], is_fallback=True, synthesis_failed=True))
+                for i, fb in enumerate(_generate_file_mode_fallback_payloads(getattr(context, "target_path", "") or "", getattr(context, "source_code", "") or "")):
+                    context.add_payload(CrashPayload(args=[f"poc_fallback_{i+1}{except_target_ext}"], input_data="", raw_bytes_hex=fb["raw_bytes_hex"], is_fallback=True, synthesis_failed=True))
             else:
                 context.add_payload(CrashPayload(args=["A" * 64], input_data="A" * 64, reason="Fallback due to execution error", is_fallback=True, synthesis_failed=True))
             context.logs.append("[PayloadSynthesizerAgent] Added safe fallback payload")
