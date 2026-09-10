@@ -124,3 +124,23 @@ async def test_supervisor_falls_back_to_triage_finding_without_cve_metadata():
         assert mock_extract.call_count == 1
         assert mock_extract.call_args.args == ("dummy.c", 42)
         assert mock_compile.call_args.kwargs.get("vuln_function") == "triage_flagged_func"
+
+
+def test_reachability_reason_prioritizes_actual_target_over_aliases(tmp_path):
+    """
+    Regression test: target_symbols (the requested function plus any expanded
+    aliases) is an unordered set. Iterating it directly could report whichever
+    alias happened to come first in arbitrary set-iteration order as "the
+    evidence", even when the actual requested function is also genuinely
+    present in the binary -- e.g. reporting "png_set_quantize found" instead of
+    "png_do_quantize found" when both symbols happen to be present. The actual
+    requested function must always take priority over any alias.
+    """
+    binary = tmp_path / "pngtest.exe"
+    # Binary contains both the real target symbol and an unrelated alias-shaped
+    # string, simulating a case where set iteration order could pick either.
+    binary.write_bytes(b"garbage_png_set_quantize_also_here_png_do_quantize_present_too")
+
+    res = verify_binary_reachability(str(binary), "png_do_quantize", target_dir=str(tmp_path))
+    assert res["reachable"] is True
+    assert "png_do_quantize" in res["reason"]

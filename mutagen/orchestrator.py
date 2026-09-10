@@ -206,7 +206,14 @@ class AgentOrchestrator:
                 batch_num -= 1  # this attempt tested nothing; don't count it in the final summary
                 break
 
-            batch_signatures = {(tuple(p.args), p.raw_bytes_hex, p.input_data) for p in new_batch}
+            # Signature is based on actual payload CONTENT (bytes/input), not the
+            # displayed filename in args -- filenames are auto-uniquified across
+            # the whole run (see PayloadSynthesizerAgent) for report clarity, so
+            # including them here would make every batch look "new" even when the
+            # underlying content is byte-for-byte identical (e.g. persistent API
+            # failures repeating the same deterministic fallback templates),
+            # defeating this exact stagnation check.
+            batch_signatures = {(p.raw_bytes_hex, p.input_data) for p in new_batch}
             if batch_signatures and batch_signatures == prev_batch_signatures:
                 console.print("[bold yellow][!] Synthesizer repeated the same payloads as the previous batch (no progress). Stopping fuzz loop.[/bold yellow]")
                 self.context.logs.append(f"[Orchestrator] Batch {batch_num}: identical to previous batch; stopping to avoid an unproductive loop.")

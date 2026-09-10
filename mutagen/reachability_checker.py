@@ -300,12 +300,19 @@ def verify_binary_reachability(candidate_binary: str, vuln_function: str, candid
     clean_func = vuln_function.strip()
     search_scope_path = target_dir or (os.path.dirname(candidate_source) if candidate_source else os.path.dirname(candidate_binary))
     target_symbols = get_expanded_reachability_set(search_scope_path, clean_func)
+    # Always check the actual requested function first, deterministically, before
+    # any expanded aliases -- target_symbols is an unordered set, so iterating it
+    # directly could report an alias as "the evidence" (e.g. "png_set_quantize
+    # found") even when the real target function is also present and should take
+    # priority. Aliases remain a fallback signal for when the exact function
+    # itself isn't found (e.g. inlined/stripped), but never outrank it.
+    ordered_symbols = [clean_func] + sorted(s for s in target_symbols if s != clean_func)
 
     # 1. Direct Binary Byte/String Read (Fast, 0ms check)
     try:
         with open(candidate_binary, "rb") as f:
             content_bytes = f.read()
-        for sym in target_symbols:
+        for sym in ordered_symbols:
             if sym.encode("utf-8") in content_bytes:
                 return {
                     "reachable": True,
@@ -320,7 +327,7 @@ def verify_binary_reachability(candidate_binary: str, vuln_function: str, candid
         try:
             with open(candidate_source, encoding="utf-8", errors="ignore") as f:
                 src_content = f.read()
-            for sym in target_symbols:
+            for sym in ordered_symbols:
                 if sym in src_content:
                     return {
                         "reachable": True,
@@ -338,7 +345,7 @@ def verify_binary_reachability(candidate_binary: str, vuln_function: str, candid
         try:
             res = subprocess.run(tool_cmd, capture_output=True, text=True, timeout=1)
             if res.returncode == 0 and res.stdout:
-                for sym in target_symbols:
+                for sym in ordered_symbols:
                     if sym in res.stdout:
                         return {
                             "reachable": True,
@@ -357,7 +364,7 @@ def verify_binary_reachability(candidate_binary: str, vuln_function: str, candid
                 try:
                     with open(lib_path, "rb") as lf:
                         lib_bytes = lf.read()
-                    for sym in target_symbols:
+                    for sym in ordered_symbols:
                         if sym.encode("utf-8") in lib_bytes:
                             return {
                                 "reachable": True,

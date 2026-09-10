@@ -135,3 +135,54 @@ async def test_orchestrator_discards_untested_duplicate_batch(mock_supervisor, m
     # duplicate and must be discarded before testing.
     assert mock_synthesizer.call_count == 2
     assert len(final_context.active_payloads) == 3
+
+
+@pytest.mark.anyio
+@patch("mutagen.engines.get_engine")
+@patch("mutagen.agents.triage.TriageAgent.process")
+@patch("mutagen.agents.synthesizer.PayloadSynthesizerAgent.process")
+@patch("mutagen.agents.supervisor.FuzzingSupervisorAgent.process")
+async def test_orchestrator_detects_stagnation_despite_deduped_filenames(mock_supervisor, mock_synthesizer, mock_triage, mock_get_engine):
+    """Regression test: PayloadSynthesizerAgent auto-uniquifies each payload's
+    displayed filename across the whole run (so reports don't show duplicate
+    labels for genuinely different content). The stagnation guard must not be
+    fooled by that into thinking every batch is "new" -- it needs to compare
+    actual payload content (raw_bytes_hex/input_data), not the filename, or a
+    run stuck on persistent synthesis failure (same fallback content every
+    batch, different auto-deduped filename each time) would never stop."""
+    mock_get_engine.return_value = MagicMock()
+
+    async def triage_side_effect(ctx):
+        ctx.vulnerabilities.append(VulnerabilityDetail(
+            vuln_type="Buffer Overflow", cwe="CWE-120", severity="critical", line_number=10, code_snippet=""
+        ))
+        return ctx
+
+    call_count = {"n": 0}
+
+    async def synth_side_effect(ctx):
+        # Same content every batch, but a distinct (auto-deduped-style) filename
+        # per payload per batch -- matches real PayloadSynthesizerAgent behavior
+        # under persistent synthesis failure.
+        call_count["n"] += 1
+        base = (call_count["n"] - 1) * 3
+        for i in range(3):
+            ctx.add_payload(CrashPayload(args=[f"poc_fallback_{base + i + 1}.png"], input_data="", raw_bytes_hex=f"deadbeef0{i}"))
+        return ctx
+
+    async def supervisor_side_effect(ctx):
+        return ctx  # never crashes
+
+    mock_triage.side_effect = triage_side_effect
+    mock_synthesizer.side_effect = synth_side_effect
+    mock_supervisor.side_effect = supervisor_side_effect
+
+    orchestrator = AgentOrchestrator(
+        target_path="dummy.c", source_code="int main() { return 0; }",
+        provider="gemini", model="gemini-2.5-flash", compiler="gcc", api_key="mock_key",
+        max_payloads=0,
+    )
+    final_context = await orchestrator.run()
+
+    assert call_count["n"] == 2, f"expected the loop to detect content-level stagnation and stop after batch 2, got {call_count['n']} batches"
+    assert len(final_context.active_payloads) == 3
