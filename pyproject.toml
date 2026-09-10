@@ -65,10 +65,10 @@ dev = [
 mutagen = "mutagen.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/mutagen"
-Documentation = "https://github.com/yourusername/mutagen#readme"
-Repository = "https://github.com/yourusername/mutagen"
-Issues = "https://github.com/yourusername/mutagen/issues"
+Homepage = "https://github.com/Bunny-sysd/mutagen"
+Documentation = "https://github.com/Bunny-sysd/mutagen#readme"
+Repository = "https://github.com/Bunny-sysd/mutagen"
+Issues = "https://github.com/Bunny-sysd/mutagen/issues"
 
 [tool.setuptools.packages.find]
 include = ["mutagen*"]

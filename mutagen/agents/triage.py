@@ -85,7 +85,6 @@ class VulnItem(BaseModel):
     reason: str = ""
 
 class TriageResult(BaseModel):
-    VulnItem: type = VulnItem
     vulnerabilities: list[VulnItem]
     suggested_delivery_mode: str = "args"  # Must be "args", "stdin", "file", "tcp", or "http"
 
