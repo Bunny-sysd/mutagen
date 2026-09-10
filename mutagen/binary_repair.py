@@ -219,25 +219,75 @@ def _repair_elf(buf: bytes) -> bytes:
 
 def _repair_zip(buf: bytes) -> bytes:
     """
-    Recalculates local file header CRC32 and compressed size for ZIP buffers.
+    Recalculates CRC32 for every ZIP local file header entry (not just the first),
+    and syncs each fix into the matching Central Directory entry's CRC field.
+
+    ZIP stores each file's checksum in two places: the local file header (right
+    before the file's data) and the Central Directory (a separate index at the end
+    of the archive). Real archive tools validate against the Central Directory, so
+    fixing only the local header's copy silently fails to repair any archive with
+    more than one entry, or leaves the Central Directory's copy stale. Trusts each
+    entry's declared compressed_size to locate its data — never resizes or moves
+    entries, only recalculates checksums.
     """
     if len(buf) < 30:
         return buf
 
     out = bytearray(buf)
-    try:
-        # Local file header CRC32 is at offset 14..18, data starts after header
-        fname_len = struct.unpack("<H", out[26:28])[0]
-        extra_len = struct.unpack("<H", out[28:30])[0]
-        header_size = 30 + fname_len + extra_len
+    buf_len = len(out)
+    local_sig = b"PK\x03\x04"
+    central_sig = b"PK\x01\x02"
 
-        if len(out) > header_size:
-            data = out[header_size:]
-            crc = zlib.crc32(data) & 0xFFFFFFFF
-            struct.pack_into("<I", out, 14, crc)
-            struct.pack_into("<I", out, 18, len(data))
-    except Exception:
-        pass
+    # Pass 1: walk local file header entries, recompute each one's CRC over its
+    # declared data span, and remember (filename -> new_crc) for the Central
+    # Directory pass below.
+    entry_crcs: dict[bytes, int] = {}
+    pos = 0
+    while pos + 30 <= buf_len and bytes(out[pos : pos + 4]) == local_sig:
+        try:
+            general_flag = struct.unpack("<H", out[pos + 6 : pos + 8])[0]
+            compressed_size = struct.unpack("<I", out[pos + 18 : pos + 22])[0]
+            fname_len = struct.unpack("<H", out[pos + 26 : pos + 28])[0]
+            extra_len = struct.unpack("<H", out[pos + 28 : pos + 30])[0]
+        except struct.error:
+            break
+
+        # Streaming entries (general-purpose bit 3 set) store the real size in a
+        # trailing data descriptor rather than the local header, so the data span
+        # isn't knowable from the header alone — leave these untouched.
+        if general_flag & 0x0008:
+            break
+
+        header_size = 30 + fname_len + extra_len
+        data_start = pos + header_size
+        if data_start + compressed_size > buf_len:
+            break
+
+        fname = bytes(out[pos + 30 : pos + 30 + fname_len])
+        data = out[data_start : data_start + compressed_size]
+        crc = zlib.crc32(data) & 0xFFFFFFFF
+        struct.pack_into("<I", out, pos + 14, crc)
+        entry_crcs[fname] = crc
+
+        pos = data_start + compressed_size
+
+    # Pass 2: sync the Central Directory's copy of each entry's CRC to match.
+    # Search for the Central Directory rather than assuming it immediately follows
+    # the last local entry (there may be a data descriptor or padding in between).
+    if entry_crcs:
+        cd_start = bytes(out).find(central_sig, pos)
+        cpos = cd_start if cd_start != -1 else pos
+        while cpos + 46 <= buf_len and bytes(out[cpos : cpos + 4]) == central_sig:
+            try:
+                fname_len = struct.unpack("<H", out[cpos + 28 : cpos + 30])[0]
+                extra_len = struct.unpack("<H", out[cpos + 30 : cpos + 32])[0]
+                comment_len = struct.unpack("<H", out[cpos + 32 : cpos + 34])[0]
+            except struct.error:
+                break
+            fname = bytes(out[cpos + 46 : cpos + 46 + fname_len])
+            if fname in entry_crcs:
+                struct.pack_into("<I", out, cpos + 16, entry_crcs[fname])
+            cpos += 46 + fname_len + extra_len + comment_len
 
     return bytes(out)
 
