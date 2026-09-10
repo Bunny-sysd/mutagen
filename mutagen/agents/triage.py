@@ -261,7 +261,13 @@ class TriageAgent(BaseAgent):
             context.triage_error = f"{type(triage_api_error).__name__}: {triage_api_error}"
             context.logs.append(f"[TriageAgent] Error during triage LLM call: {context.triage_error}. Executing static analyzer fallback.")
             console.print(f"[bold yellow]⚠️  Triage AI API unavailable ({context.triage_error}). Falling back to static AST analyzer findings.[/bold yellow]")
-            context.delivery_mode = "args"
+            # Run the same I/O-primitive-based validation/upgrade used on the AI
+            # success path -- a prior version hardcoded "args" here unconditionally,
+            # discarding any --delivery override and ignoring file I/O primitives
+            # genuinely present in the source (e.g. libpng's png_create_read_struct/
+            # png_init_io), which forced a file-parsing target into the wrong
+            # delivery mode whenever the AI call failed.
+            context.delivery_mode = validate_and_sanitize_delivery_mode(context.source_code, context.delivery_mode, context.logs)
             # Fallback to static analyzer findings if LLM fails (with strict deduplication)
             if pretarget.findings:
                 from mutagen.type_verifier import verify_finding_type_safety
@@ -272,6 +278,32 @@ class TriageAgent(BaseAgent):
                     if f_key not in seen_fallback_keys:
                         seen_fallback_keys.add(f_key)
                         deduped_findings.append(finding)
+
+                # A large source file's raw static analyzer output can run into the
+                # hundreds of findings, which drowns any real signal (and buries the
+                # actual CVE-relevant finding among noise) once every single one is
+                # turned into a full vulnerability the synthesizer must try to
+                # handle. In Ground-Truth CVE mode, always keep every finding whose
+                # enclosing function or call matches the CVE's own documented
+                # affected function(s) and sort them first; then cap the total.
+                MAX_FALLBACK_FINDINGS = 25
+                if cve_target_functions:
+                    clean_targets = {tf.strip().lower() for tf in cve_target_functions if tf and tf.strip() not in ("target_function", "")}
+
+                    def _is_cve_relevant(f):
+                        return f.function_name.lower() in clean_targets or f.call_name.lower() in clean_targets
+
+                    cve_matched = [f for f in deduped_findings if _is_cve_relevant(f)]
+                    others = [f for f in deduped_findings if not _is_cve_relevant(f)]
+                    if cve_matched:
+                        context.logs.append(f"[TriageAgent Fallback] {len(cve_matched)} static finding(s) match Ground-Truth CVE target function(s) {sorted(clean_targets)}; prioritizing them.")
+                    remaining_budget = max(0, MAX_FALLBACK_FINDINGS - len(cve_matched))
+                    if len(deduped_findings) > len(cve_matched) + remaining_budget:
+                        context.logs.append(f"[TriageAgent Fallback] Static analyzer produced {len(deduped_findings)} findings; capping to {len(cve_matched) + remaining_budget} (CVE-matched findings always kept) to keep results actionable.")
+                    deduped_findings = cve_matched + others[:remaining_budget]
+                elif len(deduped_findings) > MAX_FALLBACK_FINDINGS:
+                    context.logs.append(f"[TriageAgent Fallback] Static analyzer produced {len(deduped_findings)} findings; capping to the top {MAX_FALLBACK_FINDINGS} to keep results actionable.")
+                    deduped_findings = deduped_findings[:MAX_FALLBACK_FINDINGS]
 
                 for finding in deduped_findings:
                     detail = context.add_vulnerability(finding)

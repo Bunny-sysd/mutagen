@@ -33,12 +33,13 @@ DEFAULT_MODEL_GEMINI: str = os.environ.get("MUTAGEN_MODEL_GEMINI", os.environ.ge
 #: generation despite GEMINI_SAFETY_OFF (mutagen/safety.py) -- likely built-in policy
 #: enforcement on top of the 4 adjustable HarmCategory settings. If --model explicitly
 #: requests one of these, it is still tried first regardless of this ordering.
+#: gemini-2.0-flash, gemini-1.5-flash, and gemini-1.5-pro are excluded: Google has
+#: fully retired them (2.0 Flash shut down June 2026; all Gemini 1.5 models are
+#: shut down), so every call to them just wastes a retry/timeout cycle before
+#: falling through to a model that's actually live.
 DEFAULT_GEMINI_FALLBACK_MODELS: list[str] = [
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
     "gemini-2.5-pro",
-    "gemini-1.5-pro",
     "gemini-2.5-flash-lite",
     "gemini-flash-latest",
     "gemini-pro-latest",

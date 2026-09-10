@@ -81,6 +81,86 @@ def test_triage_agent_gemini_failure_fallback():
     asyncio.run(run_test())
 
 
+def test_triage_failure_fallback_upgrades_delivery_mode_for_file_io_target():
+    """
+    Regression test: a prior version hardcoded delivery_mode to "args"
+    unconditionally on triage failure, discarding whatever the correct mode
+    should actually be. For a file-parsing target (e.g. libpng, with genuine
+    file I/O primitives like png_create_read_struct/png_init_io), this forced
+    the fallback synthesis path to treat the target as an args-mode CLI tool,
+    producing a junk "AAAA..." payload that could never reach the parser at
+    all instead of a real file-shaped payload.
+    """
+    async def run_test():
+        c_code = """
+        #include "png.h"
+        void read_target(const char *filename) {
+            png_structp png_ptr = png_create_read_struct(NULL, NULL, NULL, NULL);
+            FILE *fp = fopen(filename, "rb");
+            png_init_io(png_ptr, fp);
+        }
+        """
+        context = ProgramContext(
+            target_path="pngtest.c",
+            language="c",
+            os_platform="linux",
+            source_code=c_code,
+            delivery_mode="args",
+        )
+
+        with patch("mutagen.agents.triage.get_engine") as mock_get_engine, patch("time.sleep"):
+            mock_engine = MagicMock()
+            mock_engine.client.models.generate_content.side_effect = Exception("429 RESOURCE_EXHAUSTED")
+            mock_get_engine.return_value = mock_engine
+
+            agent = TriageAgent(model_provider="gemini", model_name="gemini-2.5-flash")
+            res_context = await agent.process(context)
+
+            assert res_context.delivery_mode == "file"
+
+    asyncio.run(run_test())
+
+
+def test_triage_failure_fallback_prioritizes_and_caps_cve_findings():
+    """
+    Regression test: the static analyzer fallback added every single finding
+    to context.vulnerabilities with no limit -- a large source file could
+    produce hundreds of findings, burying the one finding that actually
+    matches the Ground-Truth CVE's documented target function among noise
+    (and risking it being dropped entirely once downstream stages sample or
+    truncate the list). In CVE mode, any finding whose enclosing function or
+    call matches the CVE's affected function(s) must always survive, and the
+    total must be capped to stay actionable.
+    """
+    async def run_test():
+        lines = ['#include "png.h"']
+        for i in range(60):
+            lines.append(f"void noise_func_{i}(char *p) {{ char b[8]; strcpy(b, p); }}")
+        lines.append("void png_read_row(png_structp png_ptr) { png_init_io(png_ptr, NULL); png_do_quantize(png_ptr); }")
+        c_code = "\n".join(lines)
+
+        context = ProgramContext(
+            target_path="pngrtran.c", language="c", os_platform="linux",
+            source_code=c_code, delivery_mode="args",
+        )
+        context.cve_meta = {"cve_id": "CVE-2025-64505", "affected_functions": ["png_do_quantize", "png_set_quantize", "png_quantize"]}
+        context.validate_cve = "CVE-2025-64505"
+
+        with patch("mutagen.agents.triage.get_engine") as mock_get_engine, patch("time.sleep"):
+            mock_engine = MagicMock()
+            mock_engine.client.models.generate_content.side_effect = Exception("429 RESOURCE_EXHAUSTED")
+            mock_get_engine.return_value = mock_engine
+
+            agent = TriageAgent(model_provider="gemini", model_name="gemini-2.5-flash")
+            res_context = await agent.process(context)
+
+            assert len(res_context.vulnerabilities) <= 25
+            matched = [v for v in res_context.vulnerabilities if "png_do_quantize" in (v.code_snippet or "") or "png_do_quantize" in v.vuln_type]
+            assert len(matched) >= 1, "the CVE-relevant finding must survive the cap"
+
+    asyncio.run(run_test())
+
+
 @patch("mutagen.core.get_engine")
 @patch("mutagen.core.compile_target")
 @patch("mutagen.core.execute_payload")
