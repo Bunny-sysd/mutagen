@@ -123,6 +123,81 @@ def test_cli_binary_routing(mock_run_fuzzer, mock_load_env):
 
 @patch("mutagen.cli.load_env")
 @patch("mutagen.cli.run_fuzzer")
+def test_cli_binary_routing_passes_through_mode(mock_run_fuzzer, mock_load_env):
+    """
+    Regression test: the binary-target call site in cli.py previously never
+    passed mode=args.mode, skip_flagged_findings, or validate_cve through to
+    run_fuzzer at all -- so `--target foo.exe --binary --mode agents` silently
+    ran in pipeline mode instead (run_fuzzer's mode parameter defaults to
+    "pipeline"), regardless of the user's explicit --mode agents request.
+    """
+    test_args = [
+        "mutagen",
+        "--target", "targets/01_buffer_overflow.exe",
+        "--provider", "gemini",
+        "--mode", "agents",
+    ]
+    with patch.dict(os.environ, {
+        "GEMINI_API_KEY": "specific_gemini_key",
+    }, clear=True), patch("sys.argv", test_args):
+        with patch("os.path.exists", return_value=True):
+            main()
+            mock_run_fuzzer.assert_called_once()
+            _, called_kwargs = mock_run_fuzzer.call_args
+            assert called_kwargs["mode"] == "agents"
+            assert called_kwargs["skip_flagged_findings"] is False
+            assert called_kwargs["validate_cve"] == ""
+
+
+@patch("mutagen.cli.load_env")
+@patch("mutagen.cli.run_fuzzer")
+def test_cli_validate_cve_requires_agents_mode(mock_run_fuzzer, mock_load_env):
+    """
+    Regression test: --validate-cve was previously silently ignored (a full
+    fuzzing run would proceed) whenever it was combined with anything other
+    than --mode agents, since Ground-Truth CVE validation is only implemented
+    in that code path. It must now fail fast instead of wasting a run.
+    """
+    test_args = [
+        "mutagen",
+        "--target", "targets/01_buffer_overflow.c",
+        "--provider", "gemini",
+        "--validate-cve", "CVE-2025-64505",
+        # --mode defaults to "pipeline", which does not support this
+    ]
+    with patch.dict(os.environ, {
+        "GEMINI_API_KEY": "specific_gemini_key",
+    }, clear=True), patch("sys.argv", test_args):
+        with patch("os.path.exists", return_value=True):
+            with pytest.raises(SystemExit) as exc_info:
+                main()
+            assert exc_info.value.code == 1
+            assert not mock_run_fuzzer.called
+
+
+@patch("mutagen.cli.load_env")
+@patch("mutagen.cli.run_fuzzer")
+def test_cli_validate_cve_allowed_with_agents_mode(mock_run_fuzzer, mock_load_env):
+    """--validate-cve with --mode agents must proceed normally (no exit)."""
+    test_args = [
+        "mutagen",
+        "--target", "targets/01_buffer_overflow.c",
+        "--provider", "gemini",
+        "--mode", "agents",
+        "--validate-cve", "CVE-2025-64505",
+    ]
+    with patch.dict(os.environ, {
+        "GEMINI_API_KEY": "specific_gemini_key",
+    }, clear=True), patch("sys.argv", test_args):
+        with patch("os.path.exists", return_value=True):
+            main()
+            mock_run_fuzzer.assert_called_once()
+            _, called_kwargs = mock_run_fuzzer.call_args
+            assert called_kwargs["validate_cve"] == "CVE-2025-64505"
+
+
+@patch("mutagen.cli.load_env")
+@patch("mutagen.cli.run_fuzzer")
 def test_cli_ci_mode_ignores_binaries(mock_run_fuzzer, mock_load_env):
     """Test that CI/CD mode diff checking ignores binary targets."""
     mock_run_fuzzer.return_value = 0

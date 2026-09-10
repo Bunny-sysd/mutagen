@@ -437,6 +437,31 @@ def _run_session_fuzzer(
     return len(unique_crashes)
 
 
+def deduplicate_payloads(payloads: list[dict]) -> list[dict]:
+    """
+    Removes exact-duplicate payloads before execution, preserving order.
+
+    Two payloads are duplicates only if args, input_data, AND raw_bytes_hex
+    all match. raw_bytes_hex must be included: for file delivery mode, the
+    actual payload bytes live there (input_data is empty), and the AI
+    frequently reuses the same declared filename across genuinely different
+    attempts -- without raw_bytes_hex in the key, every such payload would
+    collapse into a single test, silently dropping the rest before they ever run.
+    """
+    seen = set()
+    unique_payloads = []
+    for p in payloads:
+        p_args = p.get("args", [])
+        if isinstance(p_args, str):
+            p_args = [p_args]
+        p_args = [str(a) for a in p_args]
+        p_key = (tuple(p_args), p.get("input_data") or "", p.get("raw_bytes_hex") or "")
+        if p_key not in seen:
+            seen.add(p_key)
+            unique_payloads.append(p)
+    return unique_payloads
+
+
 def _normalize_sequences(raw_payloads) -> list[dict]:
     """Normalize AI output into a list of sequence dicts.
 
@@ -1370,23 +1395,33 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
     # --- Parallel Phase: fire all payloads concurrently ---
     # Deduplicate payloads before execution and track them globally
-    executed_payloads = set()
     executed_container_ids = []
     executed_container_images = []
     executed_container_digests = []
 
-    unique_payloads = []
+    payloads = deduplicate_payloads(payloads)
+
+    # Track every payload tested in this run so the agentic-retry loop below
+    # can skip a refined payload that exactly matches something already tried,
+    # instead of wasting a retry slot re-testing an identical repeat. Seeded
+    # from the initial deduplicated batch using the same bridged-content key
+    # format the retry loop uses (raw_bytes_hex decoded to actual bytes, not
+    # left as a separate hex field) so both stay consistent.
+    executed_payloads = set()
     for p in payloads:
         p_args = p.get("args", [])
-        p_input = p.get("input_data", "")
         if isinstance(p_args, str):
             p_args = [p_args]
         p_args = [str(a) for a in p_args]
-        p_key = (tuple(p_args), p_input or "")
-        if p_key not in executed_payloads:
-            executed_payloads.add(p_key)
-            unique_payloads.append(p)
-    payloads = unique_payloads
+        p_input = p.get("input_data") or ""
+        p_raw_hex = p.get("raw_bytes_hex")
+        if p_raw_hex and (not p_input or not str(p_input).strip()):
+            try:
+                p_input = bytes.fromhex(p_raw_hex)
+            except ValueError:
+                pass
+        p_key = (tuple(p_args), p_input if isinstance(p_input, str) else p_input.hex())
+        executed_payloads.add(p_key)
 
     # Set worker count to 1 for TCP port delivery to avoid socket bind conflicts
     worker_count = 1 if delivery_mode.startswith("tcp:") else min(4, len(payloads))

@@ -227,6 +227,23 @@ def main():
         console.print("[dim]  Pass it via --api-key or set the corresponding environment variable.[/dim]")
         sys.exit(1)
 
+    # --- VALIDATE --validate-cve MODE COMPATIBILITY -----------------------
+    # Ground-Truth CVE validation (version-gate checking, CVE-affected-function
+    # prioritization, and CVE-driven reachability verification) is only
+    # implemented in the --mode agents code path. Passing --validate-cve with
+    # any other mode was previously silently ignored -- the flag was accepted,
+    # a full fuzzing run proceeded, and nothing indicated CVE validation never
+    # actually happened. Fail fast instead of wasting a run under a false premise.
+    if args.validate_cve:
+        if args.defects4c:
+            console.print("[bold red]X --validate-cve is not supported with --defects4c (Ground-Truth CVE validation is only implemented for source/binary targets in --mode agents).[/bold red]")
+            console.print("[dim]  Drop --validate-cve, or run without --defects4c.[/dim]")
+            sys.exit(1)
+        if args.mode != "agents":
+            console.print("[bold red]X --validate-cve requires --mode agents (Ground-Truth CVE validation is only implemented for the multi-agent swarm pipeline).[/bold red]")
+            console.print("[dim]  Add --mode agents, or drop --validate-cve.[/dim]")
+            sys.exit(1)
+
     # --- FIND GCC (Standard C/C++ Fallback) ------------------------------
     # Build gcc candidate list: constants list + TCC bundled fallback
     tcc_fallback = os.path.join(workspace_dir, "tcc", "tcc", "tcc.exe")
@@ -299,6 +316,9 @@ def main():
                     webhook_headers=args.webhook_header,
                     decompiler=args.decompiler,
                     decompiler_path=args.decompiler_path,
+                    mode=args.mode,
+                    skip_flagged_findings=args.skip_flagged_findings,
+                    validate_cve=args.validate_cve,
                 )
                 total_crashes += (crashes_found or 0)
                 console.print()
