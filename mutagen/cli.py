@@ -61,7 +61,7 @@ def main():
     parser.add_argument("-t", "--target", help="Path to the target C source file (e.g., targets/01_buffer_overflow.c)")
     parser.add_argument("--ci", action="store_true", help="CI/CD mode: scan and fuzz modified C files via git diff")
     parser.add_argument("-k", "--api-key", help="API Key. If not provided, falls back to environment variables.")
-    parser.add_argument("--max-payloads", type=int, default=5, help="Maximum number of payloads the AI should generate (default: 5)")
+    parser.add_argument("--max-payloads", type=int, default=5, help="Maximum number of payloads the AI should generate. In --mode agents, this caps total payloads tested across fuzzing batches; pass 0 to keep synthesizing and testing new batches until a crash is reproduced or the AI stops making progress (default: 5)")
     parser.add_argument("--timeout", type=int, default=5, help="Execution timeout in seconds (default: 5)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging to mutagen_debug.log")
     parser.add_argument("--provider", default=os.environ.get("MUTAGEN_PROVIDER", "gemini"), choices=["gemini", "openai", "ollama", "claude"], help="LLM Provider (default: gemini)")

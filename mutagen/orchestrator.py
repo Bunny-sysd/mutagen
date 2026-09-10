@@ -30,10 +30,15 @@ class AgentOrchestrator:
         api_key: str = None,
         max_patch_retries: int = DEFAULT_MAX_PATCH_RETRIES,
         execution_timeout: int = DEFAULT_EXEC_TIMEOUT,
+        max_payloads: int = 5,
     ):
         platform = sys.platform
         self.default_delivery_mode = delivery_mode
         self.max_patch_retries = max_patch_retries
+        # Total payloads to synthesize+test across all fuzzing batches before giving up
+        # if none crash. 0 means unlimited: keep generating fresh batches until a crash
+        # is reproduced or the synthesizer stops making progress (see run()).
+        self.max_payloads = max_payloads
         ext = target_path.lower().split(".")[-1] if "." in target_path else ""
         lang_map = {
             "c": "c",
@@ -175,27 +180,74 @@ class AgentOrchestrator:
         self.supervisor_agent.sandbox = "docker" if self.context.sandboxed else "none"
         self.validator_agent.sandbox = "docker" if self.context.sandboxed else "none"
 
-        console.print(Panel(
-            f"[bold yellow]PHASE 2/4 [50%]: PAYLOAD SYNTHESIS[/bold yellow]\n"
-            f"[dim]PayloadSynthesizerAgent is constructing targeted exploit payloads for {len(self.context.vulnerabilities)} vulnerability findings...[/dim]",
-            border_style="yellow"
-        ))
+        # 2+3. Payload Synthesis & Supervisor Fuzzing, repeated in batches until a crash is
+        # reproduced, the synthesizer stops making progress, or the configured payload
+        # budget (self.max_payloads; 0 = unlimited) is exhausted.
+        total_tested = 0
+        batch_num = 0
+        active_crashes: list = []
+        prev_batch_signatures: set = set()
 
-        # 2. Run Payload Synthesizer Agent to generate test inputs
-        self.context = await self.synthesizer_agent.process(self.context)
+        while True:
+            batch_num += 1
+            console.print(Panel(
+                f"[bold yellow]PHASE 2/4 [50%]: PAYLOAD SYNTHESIS (Batch {batch_num})[/bold yellow]\n"
+                f"[dim]PayloadSynthesizerAgent is constructing targeted exploit payloads for {len(self.context.vulnerabilities)} vulnerability findings...[/dim]",
+                border_style="yellow"
+            ))
 
-        console.print(Panel(
-            f"[bold magenta]PHASE 3/4 [75%]: SUPERVISOR FUZZING & CRASH REPRODUCTION[/bold magenta]\n"
-            f"[dim]FuzzingSupervisorAgent is executing {len(self.context.active_payloads)} test payloads (Delivery Mode: {active_mode})...[/dim]",
-            border_style="magenta"
-        ))
+            start_idx = len(self.context.active_payloads)
+            self.context = await self.synthesizer_agent.process(self.context)
+            new_batch = self.context.active_payloads[start_idx:]
 
-        # 3. Run Fuzzing Supervisor to test compile & record crashes
-        self.context = await self.supervisor_agent.process(self.context)
-        active_crashes = [p for p in self.context.active_payloads if p.crash_type is not None]
+            if not new_batch:
+                console.print("[bold yellow][!] Synthesizer produced no further payloads. Stopping fuzz loop.[/bold yellow]")
+                self.context.logs.append(f"[Orchestrator] Batch {batch_num}: synthesizer produced 0 payloads; stopping.")
+                break
+
+            batch_signatures = {(tuple(p.args), p.raw_bytes_hex, p.input_data) for p in new_batch}
+            if batch_signatures and batch_signatures == prev_batch_signatures:
+                console.print("[bold yellow][!] Synthesizer repeated the same payloads as the previous batch (no progress). Stopping fuzz loop.[/bold yellow]")
+                self.context.logs.append(f"[Orchestrator] Batch {batch_num}: identical to previous batch; stopping to avoid an unproductive loop.")
+                break
+            prev_batch_signatures = batch_signatures
+
+            console.print(Panel(
+                f"[bold magenta]PHASE 3/4 [75%]: SUPERVISOR FUZZING & CRASH REPRODUCTION (Batch {batch_num})[/bold magenta]\n"
+                f"[dim]FuzzingSupervisorAgent is executing {len(new_batch)} test payloads (Delivery Mode: {active_mode})...[/dim]",
+                border_style="magenta"
+            ))
+
+            # Test only this round's new batch — earlier batches were already executed.
+            full_history = self.context.active_payloads
+            self.context.active_payloads = new_batch
+            self.context = await self.supervisor_agent.process(self.context)
+            self.context.active_payloads = full_history[:start_idx] + self.context.active_payloads
+
+            total_tested += len(new_batch)
+            active_crashes = [p for p in new_batch if p.crash_type is not None]
+            if active_crashes:
+                break
+
+            if self.context.reachability_status == "COMPILATION_FAILED":
+                console.print("[bold red][!] Target failed to compile. Stopping fuzz loop.[/bold red]")
+                self.context.logs.append(f"[Orchestrator] Batch {batch_num}: aborting fuzz loop, target failed to compile.")
+                break
+
+            if self.max_payloads > 0 and total_tested >= self.max_payloads:
+                self.context.logs.append(f"[Orchestrator] Reached configured payload budget ({self.max_payloads}); stopping fuzz loop.")
+                break
+
+            # Feed a short failure summary back into shared swarm memory so the next
+            # synthesis round tries a structurally different approach instead of repeating itself.
+            for p in new_batch[:3]:
+                self.context.notepad.append(
+                    f"[Batch {batch_num}] Payload {p.args or '(stdin)'} did not crash "
+                    f"(exit={p.exit_code}, stderr={(p.stderr or '')[:150]!r}). Try a different structural approach."
+                )
 
         if not active_crashes:
-            console.print(f"[bold yellow][100%] [!] Execution Complete: Tested {len(self.context.active_payloads)} payload(s). No active crashes reproduced (target may contain mitigations or require specific inputs).[/bold yellow]")
+            console.print(f"[bold yellow][100%] [!] Execution Complete: Tested {total_tested} payload(s) across {batch_num} batch(es). No active crashes reproduced (target may contain mitigations or require specific inputs).[/bold yellow]")
             self.context.logs.append("[Orchestrator] No active crashes were reproduced by fuzzing.")
             return self.context
 

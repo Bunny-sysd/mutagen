@@ -75,20 +75,14 @@ def repair_binary_payload(raw_data: bytes | str, target_hint: str = "") -> bytes
     return buf
 
 
-def _repair_png(buf: bytes) -> bytes:
-    """
-    Scans PNG chunks, recalculates chunk length and 32-bit CRC32 checksums
-    so target parsers do not drop payloads at early header validation.
-    """
-    if len(buf) < 8:
-        return buf
-
-    out = bytearray(buf[:8])  # Keep 8-byte PNG header
+def _parse_png_chunks(buf: bytes) -> list[tuple[bytes, bytes]]:
+    """Parses a PNG buffer (which may carry AI-mutated/stale lengths or CRCs) into an
+    ordered list of (chunk_type, chunk_data) tuples, tolerating a missing/stale CRC."""
+    chunks = []
     pos = 8
     buf_len = len(buf)
 
     while pos + 8 <= buf_len:
-        # Read 4-byte length and 4-byte chunk type
         length = struct.unpack(">I", buf[pos : pos + 4])[0]
         chunk_type = buf[pos + 4 : pos + 8]
         pos += 8
@@ -96,27 +90,103 @@ def _repair_png(buf: bytes) -> bytes:
         # Prevent reading past end of buffer
         data_end = min(pos + length, buf_len)
         chunk_data = buf[pos:data_end]
-        actual_data_len = len(chunk_data)
         pos = data_end
 
         # PNG chunks always carry a trailing 4-byte CRC (mandatory per spec).
         # Always step over the stale CRC here so the next chunk's [length][type]
-        # header is read from the correct offset; we recompute a fresh CRC below.
+        # header is read from the correct offset; we recompute a fresh CRC on output.
         if pos + 4 <= buf_len:
             pos += 4
 
-        # Recalculate 32-bit CRC over (chunk_type + chunk_data)
-        crc = zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF
+        chunks.append((chunk_type, bytes(chunk_data)))
+        if chunk_type == b"IEND":
+            break
 
-        # Append length, chunk_type, chunk_data, and recalculated CRC
-        out.extend(struct.pack(">I", actual_data_len))
+    return chunks
+
+
+# PNG color_type -> channel count, per the spec (used for the mandatory rowbytes formula).
+_PNG_CHANNELS_BY_COLOR_TYPE = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+
+
+def _ensure_png_idat_size(chunks: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
+    """
+    Tops up an undersized IDAT stream so it satisfies the PNG spec's mandatory byte count
+    for the declared IHDR dimensions: height * (1 filter byte + ceil(width * channels *
+    bit_depth / 8)). AI-generated payloads reliably get this exact arithmetic wrong, which
+    makes decoders reject the file ("not enough image data") before ever reaching the
+    AI's intended trigger content deeper in the pixel-processing code.
+
+    Only pads — never truncates or alters the bytes the AI already supplied — and only
+    handles non-interlaced images (interlace=0); Adam7 interlacing has substantially
+    different per-pass sizing math and is left untouched.
+    """
+    ihdr = next((data for ctype, data in chunks if ctype == b"IHDR"), None)
+    if not ihdr or len(ihdr) < 13:
+        return chunks
+
+    width, height = struct.unpack(">II", ihdr[0:8])
+    bit_depth, color_type, _compression, _filter_method, interlace = ihdr[8:13]
+    if interlace != 0 or width == 0 or height == 0:
+        return chunks
+
+    channels = _PNG_CHANNELS_BY_COLOR_TYPE.get(color_type)
+    if channels is None:
+        return chunks
+
+    rowbytes = (width * channels * bit_depth + 7) // 8
+    expected_len = height * (1 + rowbytes)
+    # Guard against absurd declared dimensions (e.g. deliberate integer-overflow payloads)
+    # so this never tries to allocate/pad an unreasonable amount of memory.
+    if expected_len <= 0 or expected_len > 64 * 1024 * 1024:
+        return chunks
+
+    idat_indices = [i for i, (ctype, _) in enumerate(chunks) if ctype == b"IDAT"]
+    if not idat_indices:
+        return chunks
+
+    compressed = b"".join(chunks[i][1] for i in idat_indices)
+    try:
+        raw = zlib.decompress(compressed)
+    except zlib.error:
+        # Not a valid zlib stream — likely intentional (e.g. targeting inflate itself).
+        return chunks
+
+    if len(raw) >= expected_len:
+        return chunks
+
+    padded = raw + b"\x00" * (expected_len - len(raw))
+    new_idat = zlib.compress(padded)
+
+    new_chunks = list(chunks)
+    new_chunks[idat_indices[0]] = (b"IDAT", new_idat)
+    for i in reversed(idat_indices[1:]):
+        del new_chunks[i]
+    return new_chunks
+
+
+def _repair_png(buf: bytes) -> bytes:
+    """
+    Scans PNG chunks, recalculates chunk length and 32-bit CRC32 checksums so target
+    parsers do not drop payloads at early header validation, and tops up an undersized
+    IDAT stream (see _ensure_png_idat_size) so parsers do not reject the file before
+    reaching the AI's intended trigger content.
+    """
+    if len(buf) < 8:
+        return buf
+
+    chunks = _parse_png_chunks(buf)
+    if not chunks:
+        return buf
+    chunks = _ensure_png_idat_size(chunks)
+
+    out = bytearray(buf[:8])  # Keep 8-byte PNG header
+    for chunk_type, chunk_data in chunks:
+        crc = zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF
+        out.extend(struct.pack(">I", len(chunk_data)))
         out.extend(chunk_type)
         out.extend(chunk_data)
         out.extend(struct.pack(">I", crc))
-
-        # Stop if IEND chunk reached
-        if chunk_type == b"IEND":
-            break
 
     return bytes(out)
 

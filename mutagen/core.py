@@ -526,6 +526,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
             delivery_mode=delivery_mode,
             max_patch_retries=max_patch_retries,
             execution_timeout=timeout,
+            max_payloads=max_payloads,
         )
         orchestrator.context.is_binary = is_bin_flag
         orchestrator.context.decompiler_used = decompiler_name
