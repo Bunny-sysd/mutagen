@@ -27,17 +27,23 @@ DEFAULT_PROVIDER: str = os.environ.get("MUTAGEN_PROVIDER", "gemini")
 DEFAULT_MODEL_GEMINI: str = os.environ.get("MUTAGEN_MODEL_GEMINI", os.environ.get("MUTAGEN_MODEL", "gemini-2.5-flash"))
 
 #: Verified active Gemini fallback models supporting generateContent across GA tiers.
+#: Ordered to try established, fast, historically permissive models first; the
+#: newest flagship models (e.g. gemini-3.7-flash) are tried later since they've been
+#: observed to occasionally return an empty/refused response for exploit-payload
+#: generation despite GEMINI_SAFETY_OFF (mutagen/safety.py) -- likely built-in policy
+#: enforcement on top of the 4 adjustable HarmCategory settings. If --model explicitly
+#: requests one of these, it is still tried first regardless of this ordering.
 DEFAULT_GEMINI_FALLBACK_MODELS: list[str] = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
     "gemini-2.5-pro",
     "gemini-1.5-pro",
-    "gemini-3.7-flash",
-    "gemini-3.5-flash",
-    "gemini-flash-latest",
     "gemini-2.5-flash-lite",
+    "gemini-flash-latest",
     "gemini-pro-latest",
+    "gemini-3.5-flash",
+    "gemini-3.7-flash",
 ]
 
 #: Default Claude model name when no --model flag is given.
