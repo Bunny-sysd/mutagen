@@ -1,6 +1,11 @@
 import os
+from unittest.mock import patch
 
+import pytest
+
+from mutagen.agents.supervisor import FuzzingSupervisorAgent
 from mutagen.reachability_checker import select_best_reachable_binary, verify_binary_reachability
+from mutagen.state import ProgramContext, VulnerabilityDetail
 
 
 def test_reachability_checker_libpng_classic_vs_simplified_api(tmp_path):
@@ -64,3 +69,58 @@ def test_reachability_checker_unconfirmed_fallback_message():
     assert selected is None
     assert status["reachable"] is False
     assert "no build target exercises this code path" in status["reason"]
+
+
+@pytest.mark.anyio
+async def test_supervisor_verifies_cve_affected_function_not_triage_finding():
+    """
+    Regression test: in Ground-Truth CVE mode, reachability must be verified for
+    the CVE's own documented affected function (e.g. png_do_quantize for
+    CVE-2025-64505), not whichever function the triage step happened to flag.
+    Triage findings can legitimately land in an unrelated function (or drift
+    between runs), which previously caused reachability results like "reaches
+    png_set_quantize" to be reported for a CVE actually targeting a different
+    function entirely.
+    """
+    ctx = ProgramContext(target_path="dummy.c", language="c", os_platform="win32", source_code="int main(){return 0;}")
+    ctx.vulnerabilities.append(VulnerabilityDetail(
+        vuln_type="Unrelated Finding", cwe="CWE-125", severity="high", line_number=999, code_snippet=""
+    ))
+    ctx.cve_meta = {"cve_id": "CVE-2025-64505", "affected_functions": ["png_do_quantize"]}
+
+    agent = FuzzingSupervisorAgent(api_key="k")
+    with patch("mutagen.agents.supervisor.compile_target") as mock_compile, \
+         patch("mutagen.reachability_checker.verify_binary_reachability") as mock_verify, \
+         patch("mutagen.reachability_checker.extract_vulnerable_function_name") as mock_extract, \
+         patch("os.path.exists", return_value=True):
+        mock_compile.return_value = "pngtest.exe"
+        mock_verify.return_value = {"reachable": True, "reason": "Symbol 'png_do_quantize' found"}
+        await agent.process(ctx)
+
+        assert mock_compile.call_args.kwargs.get("vuln_function") == "png_do_quantize"
+        assert mock_extract.call_count == 0
+        assert ctx.reachability_status == "REACHABLE"
+
+
+@pytest.mark.anyio
+async def test_supervisor_falls_back_to_triage_finding_without_cve_metadata():
+    """Non-CVE-mode runs must keep deriving the target function from the triage
+    finding's enclosing function, unchanged from prior behavior."""
+    ctx = ProgramContext(target_path="dummy.c", language="c", os_platform="win32", source_code="int main(){return 0;}")
+    ctx.vulnerabilities.append(VulnerabilityDetail(
+        vuln_type="X", cwe="CWE-125", severity="high", line_number=42, code_snippet=""
+    ))
+
+    agent = FuzzingSupervisorAgent(api_key="k")
+    with patch("mutagen.agents.supervisor.compile_target") as mock_compile, \
+         patch("mutagen.reachability_checker.verify_binary_reachability") as mock_verify, \
+         patch("mutagen.reachability_checker.extract_vulnerable_function_name") as mock_extract, \
+         patch("os.path.exists", return_value=True):
+        mock_compile.return_value = "a.exe"
+        mock_verify.return_value = {"reachable": True, "reason": "ok"}
+        mock_extract.return_value = "triage_flagged_func"
+        await agent.process(ctx)
+
+        assert mock_extract.call_count == 1
+        assert mock_extract.call_args.args == ("dummy.c", 42)
+        assert mock_compile.call_args.kwargs.get("vuln_function") == "triage_flagged_func"

@@ -90,3 +90,48 @@ async def test_orchestrator_flow(mock_validator, mock_patcher, mock_supervisor, 
     assert final_context.active_payloads[0].crash_type == "ACCESS_VIOLATION"
     assert final_context.proposed_patches["primary_patch"] == "void main() {}"
     assert final_context.verification_status == "VERIFIED_SECURE"
+
+
+@pytest.mark.anyio
+@patch("mutagen.engines.get_engine")
+@patch("mutagen.agents.triage.TriageAgent.process")
+@patch("mutagen.agents.synthesizer.PayloadSynthesizerAgent.process")
+@patch("mutagen.agents.supervisor.FuzzingSupervisorAgent.process")
+async def test_orchestrator_discards_untested_duplicate_batch(mock_supervisor, mock_synthesizer, mock_triage, mock_get_engine):
+    """Regression test: when the stagnation guard detects a synthesizer batch
+    identical to the previous one and stops the loop, that batch was already
+    appended to active_payloads by the synthesizer but never tested by the
+    supervisor. It must be discarded, not left in the final payload count."""
+    mock_get_engine.return_value = MagicMock()
+
+    async def triage_side_effect(ctx):
+        ctx.vulnerabilities.append(VulnerabilityDetail(
+            vuln_type="Buffer Overflow", cwe="CWE-120", severity="critical", line_number=10, code_snippet=""
+        ))
+        return ctx
+
+    async def synth_side_effect(ctx):
+        # Synthesizes the exact same 3 payloads every batch (e.g. persistent API
+        # quota exhaustion falling back to the same deterministic template each time).
+        for i in range(3):
+            ctx.add_payload(CrashPayload(args=[f"fallback_{i}.png"], input_data="", raw_bytes_hex="deadbeef"))
+        return ctx
+
+    async def supervisor_side_effect(ctx):
+        return ctx  # never crashes
+
+    mock_triage.side_effect = triage_side_effect
+    mock_synthesizer.side_effect = synth_side_effect
+    mock_supervisor.side_effect = supervisor_side_effect
+
+    orchestrator = AgentOrchestrator(
+        target_path="dummy.c", source_code="int main() { return 0; }",
+        provider="gemini", model="gemini-2.5-flash", compiler="gcc", api_key="mock_key",
+        max_payloads=0,
+    )
+    final_context = await orchestrator.run()
+
+    # Batch 1 (3 payloads) gets tested; batch 2 is detected as an identical
+    # duplicate and must be discarded before testing.
+    assert mock_synthesizer.call_count == 2
+    assert len(final_context.active_payloads) == 3

@@ -17,9 +17,18 @@ class FuzzingSupervisorAgent(BaseAgent):
     async def process(self, context: ProgramContext) -> ProgramContext:
         context.logs.append("[FuzzingSupervisorAgent] Compiling target file...")
 
-        # 1. Extract target function from triage vulnerabilities if available
+        # 1. Determine target function for reachability verification. In Ground-Truth
+        # CVE mode, use the CVE's own documented affected function(s) -- triage
+        # findings can legitimately land in a different function than the CVE itself
+        # (or drift between runs), so trusting the first triage finding here would
+        # verify reachability of the wrong function and mislabel the result.
         target_vuln_func = None
-        if context.vulnerabilities:
+        cve_meta = getattr(context, "cve_meta", None)
+        cve_affected_functions = (cve_meta.get("affected_functions") or []) if cve_meta else []
+        if cve_affected_functions:
+            target_vuln_func = cve_affected_functions[0]
+            context.logs.append(f"[FuzzingSupervisorAgent] Ground-Truth CVE mode: verifying reachability of '{target_vuln_func}' (from CVE metadata), not the triage finding.")
+        elif context.vulnerabilities:
             v0 = context.vulnerabilities[0]
             from mutagen.reachability_checker import extract_vulnerable_function_name
             target_vuln_func = extract_vulnerable_function_name(context.target_path, v0.line_number)

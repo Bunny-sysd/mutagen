@@ -203,12 +203,19 @@ class AgentOrchestrator:
             if not new_batch:
                 console.print("[bold yellow][!] Synthesizer produced no further payloads. Stopping fuzz loop.[/bold yellow]")
                 self.context.logs.append(f"[Orchestrator] Batch {batch_num}: synthesizer produced 0 payloads; stopping.")
+                batch_num -= 1  # this attempt tested nothing; don't count it in the final summary
                 break
 
             batch_signatures = {(tuple(p.args), p.raw_bytes_hex, p.input_data) for p in new_batch}
             if batch_signatures and batch_signatures == prev_batch_signatures:
                 console.print("[bold yellow][!] Synthesizer repeated the same payloads as the previous batch (no progress). Stopping fuzz loop.[/bold yellow]")
                 self.context.logs.append(f"[Orchestrator] Batch {batch_num}: identical to previous batch; stopping to avoid an unproductive loop.")
+                # This batch was synthesized (and so already appended to
+                # active_payloads by synthesizer_agent.process()) but deliberately
+                # never tested -- discard it so the final payload list/count only
+                # reflects payloads actually executed against the target.
+                self.context.active_payloads = self.context.active_payloads[:start_idx]
+                batch_num -= 1
                 break
             prev_batch_signatures = batch_signatures
 
