@@ -182,7 +182,47 @@ def get_expanded_reachability_set(target_path_or_dir: str, vuln_function: str) -
 
     # 1. Macro Alias Resolution (#define ALIAS ... TARGET_FUNC ...)
     macro_regex = re.compile(r'#\s*define\s+([a-zA-Z_][a-zA-Z0-9_]*)\b')
-    func_def_regex = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_*\s]+\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^;]*$')
+
+    # 2. Parent caller functions: which functions actually call a target symbol.
+    # This must be scoped to each function's real body (via tree-sitter's AST), not
+    # a line-by-line heuristic with no brace tracking -- a prior implementation
+    # attributed "curr_func" as a caller whenever the symbol's text appeared
+    # anywhere later in the file after any function-signature-looking line, with
+    # no scope awareness at all. On a large multi-file codebase that reliably
+    # misattributes unrelated functions (comments, string literals, or code in a
+    # later, unrelated function all counted as a "call").
+    try:
+        import tree_sitter_c as tsc
+        from tree_sitter import Language, Parser
+        c_lang = Language(tsc.language())
+        parser = Parser(c_lang)
+    except Exception:
+        parser = None
+
+    def _find_function_name(declarator_node):
+        if declarator_node is None:
+            return None
+        if declarator_node.type == "identifier":
+            return declarator_node.text.decode("utf-8")
+        for child in declarator_node.children:
+            name = _find_function_name(child)
+            if name:
+                return name
+        return None
+
+    # Skip comment/string/char nodes so a symbol merely mentioned in a comment or
+    # string literal inside a function body isn't mistaken for a real reference.
+    _NON_CODE_NODE_TYPES = ("comment", "string_literal", "char_literal")
+
+    def _body_references_symbol(node, sym):
+        if node.type in _NON_CODE_NODE_TYPES:
+            return False
+        if node.type == "identifier" and node.text.decode("utf-8", errors="ignore") == sym:
+            return True
+        for child in node.children:
+            if _body_references_symbol(child, sym):
+                return True
+        return False
 
     for root, _, files in os.walk(search_dir):
         if any(ignored in root.lower() for ignored in ["build", "cmakefiles", "cmaketmp"]):
@@ -206,18 +246,36 @@ def get_expanded_reachability_set(target_path_or_dir: str, vuln_function: str) -
                                         if alias_name != sym:
                                             reachability_set.add(alias_name)
 
-                            # Scan for caller function definitions in this source file
-                            if file.endswith((".c", ".cpp")):
-                                curr_func = None
-                                for line in content.splitlines():
-                                    line_str = line.strip()
-                                    m_func = func_def_regex.match(line_str)
-                                    if m_func:
-                                        fname = m_func.group(1)
-                                        if fname.lower() not in ("if", "while", "for", "switch", "return", "main", "winmain", "dllmain", "_start"):
-                                            curr_func = fname
-                                    elif curr_func and sym in line_str:
-                                        reachability_set.add(curr_func)
+                    # Scan for caller functions whose actual AST-delimited body
+                    # references a target symbol.
+                    if file.endswith((".c", ".cpp")) and parser is not None:
+                        code_bytes = content.encode("utf-8")
+                        try:
+                            tree = parser.parse(code_bytes)
+                        except Exception:
+                            tree = None
+                        if tree is not None:
+                            target_syms = list(reachability_set)
+
+                            def _scan(node):
+                                if node.type == "function_definition":
+                                    fname = _find_function_name(node.child_by_field_name("declarator"))
+                                    body = node.child_by_field_name("body")
+                                    # Exclude generic program entry points: they appear in
+                                    # virtually every C file and provide no discriminating
+                                    # reachability signal, so treating one as a "caller
+                                    # alias" pollutes results across unrelated files.
+                                    if fname and fname.lower() in ("main", "winmain", "dllmain", "_start"):
+                                        fname = None
+                                    if fname and body is not None:
+                                        for sym in target_syms:
+                                            if fname != sym and _body_references_symbol(body, sym):
+                                                reachability_set.add(fname)
+                                                break
+                                for child in node.children:
+                                    _scan(child)
+
+                            _scan(tree.root_node)
                 except Exception:
                     pass
 

@@ -63,3 +63,31 @@ int main() {
     selected, status = select_best_reachable_binary([str(main_app_bin)], target_hint=str(tmp_path), vuln_function="internal_vulnerable_func")
     assert selected == str(main_app_bin)
     assert status["reachable"] is True
+
+
+def test_caller_alias_expansion_is_scoped_to_actual_function_body(tmp_path):
+    """
+    Regression test: a prior line-by-line heuristic (no brace/scope tracking)
+    attributed ANY function whose signature-looking line preceded a later
+    occurrence of the target symbol's text anywhere in the file -- including in
+    a comment, string, or a completely unrelated function -- as a "caller".
+    This produced real false positives (e.g. reachability reported an unrelated
+    function as reaching the CVE target). The AST-scoped implementation must
+    only add a function whose actual body references the symbol.
+    """
+    source_file = tmp_path / "lib.c"
+    source_file.write_text("""
+void real_caller(int x) {
+    vulnerable_target(x);
+}
+
+void unrelated_function(int y) {
+    do_something_else(y);
+    // Just a comment mentioning vulnerable_target for documentation purposes,
+    // this function does not call it.
+}
+""")
+
+    symbols = get_expanded_reachability_set(str(tmp_path), "vulnerable_target")
+    assert "real_caller" in symbols
+    assert "unrelated_function" not in symbols

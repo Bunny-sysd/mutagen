@@ -1,3 +1,6 @@
+import json
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from mutagen.agents.synthesizer import PayloadSynthesizerAgent
@@ -70,3 +73,68 @@ async def test_synthesizer_prevents_empty_payload_args():
     assert len(context.active_payloads[0].args) > 0
     assert context.active_payloads[0].args[0] == "overflow_poc.png"
     assert context.active_payloads[0].raw_bytes_hex is not None
+
+
+@pytest.mark.anyio
+async def test_synthesizer_deduplicates_ai_echoed_filenames():
+    """Regression test: the synthesis prompt's JSON schema example includes a
+    literal filename ("test_boundary.png"). If the AI echoes that example
+    verbatim across multiple distinct payloads instead of varying it, every
+    payload in the report/logs becomes indistinguishable by name -- reading as
+    duplicate/overwritten payloads even though execution (which uses a separate
+    UUID temp file per payload) was never actually affected. Filenames must be
+    auto-uniquified so reporting stays unambiguous."""
+    context = ProgramContext(
+        target_path="pngrtran.c", language="c", os_platform="linux",
+        source_code="void f() {}", delivery_mode="file",
+        vulnerabilities=[VulnerabilityDetail(
+            vuln_type="Heap Over-read", cwe="CWE-125", severity="critical",
+            line_number=1, code_snippet=""
+        )],
+    )
+    agent = PayloadSynthesizerAgent(api_key="dummy_key")
+
+    fake_response = MagicMock()
+    fake_response.text = json.dumps({
+        "payloads": [
+            {"args": ["test_boundary.png"], "input_data": "", "raw_bytes_hex": "89504e470d0a1a0a", "reason": "r1"},
+            {"args": ["test_boundary.png"], "input_data": "", "raw_bytes_hex": "89504e470d0a1a0a01", "reason": "r2"},
+            {"args": ["test_boundary.png"], "input_data": "", "raw_bytes_hex": "89504e470d0a1a0a02", "reason": "r3"},
+            {"args": ["test_boundary.png"], "input_data": "", "raw_bytes_hex": "89504e470d0a1a0a03", "reason": "r4"},
+        ]
+    })
+
+    with patch.object(agent.engine, "client", MagicMock()) as mock_client:
+        mock_client.models.generate_content.return_value = fake_response
+        await agent.process(context)
+
+    names = [p.args[-1] for p in context.active_payloads if p.args]
+    assert names[:4] == ["test_boundary.png", "test_boundary_2.png", "test_boundary_3.png", "test_boundary_4.png"]
+    assert len(names) == len(set(names)), f"expected every payload filename to be unique, got {names}"
+
+
+@pytest.mark.anyio
+async def test_synthesizer_enumerates_total_failure_fallback_filenames():
+    """Regression test: when synthesis fails entirely (e.g. every model
+    candidate errors), the deterministic fallback payloads must each get a
+    distinct filename -- this loop previously reused the exact same literal
+    filename for every fallback payload in the batch."""
+    context = ProgramContext(
+        target_path="pngrtran.c", language="c", os_platform="linux",
+        source_code="void f() { png_do_quantize(); }", delivery_mode="file",
+        vulnerabilities=[VulnerabilityDetail(
+            vuln_type="Heap Over-read", cwe="CWE-125", severity="critical",
+            line_number=1, code_snippet=""
+        )],
+    )
+    agent = PayloadSynthesizerAgent(api_key="dummy_key")
+
+    with patch.object(agent.engine, "client", MagicMock()) as mock_client, \
+         patch("time.sleep"):
+        mock_client.models.generate_content.side_effect = Exception("503 UNAVAILABLE")
+        await agent.process(context)
+
+    assert context.synthesis_failed is True
+    names = [p.args[-1] for p in context.active_payloads if p.args]
+    assert len(names) > 1
+    assert len(names) == len(set(names)), f"expected every fallback payload filename to be unique, got {names}"
