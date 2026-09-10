@@ -32,6 +32,9 @@ mutagen_debug.log
 secret.txt
 memory.md
 
+# Claude Code local guidance (not needed in repo, README covers it)
+CLAUDE.md
+
 
 # Bundled compiler archive
 tcc.zip
