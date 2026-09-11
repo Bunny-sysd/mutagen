@@ -161,6 +161,87 @@ def test_triage_failure_fallback_prioritizes_and_caps_cve_findings():
     asyncio.run(run_test())
 
 
+def test_triage_success_path_injects_cve_target_when_ai_drifts():
+    """
+    Regression test: the CVE-prioritization fix above only applies when the
+    AI triage call fails entirely and falls back to static analysis. When the
+    AI call SUCCEEDS but reports findings unrelated to the CVE's documented
+    target function -- observed in practice: the AI reporting an unrelated
+    integer-overflow or buffer-overlap finding instead of the CVE's actual
+    target -- nothing enforced that the real function ever got represented,
+    so synthesis could spend an entire run never generating a single payload
+    for the actual vulnerability. If none of the AI's own findings reference
+    the CVE's target function, a real, AST-verified static finding for it
+    must be injected and prioritized first.
+    """
+    import json
+
+    async def run_test():
+        lines = ['#include "png.h"']
+        for i in range(20):
+            lines.append(f"void noise_func_{i}(char *p) {{ char b[8]; strcpy(b, p); }}")
+        lines.append("void png_do_read_transformations(png_structp png_ptr) { png_do_quantize(png_ptr); }")
+        c_code = "\n".join(lines)
+
+        context = ProgramContext(
+            target_path="pngrtran.c", language="c", os_platform="linux",
+            source_code=c_code, delivery_mode="file",
+        )
+        context.cve_meta = {"cve_id": "CVE-2025-64505", "affected_functions": ["png_do_quantize", "png_set_quantize", "png_quantize"]}
+        context.validate_cve = "CVE-2025-64505"
+
+        agent = TriageAgent(api_key="k")
+        fake_response = MagicMock()
+        fake_response.text = json.dumps({
+            "vulnerabilities": [
+                {"vuln_type": "Integer Overflow in num_entries", "cwe": "CWE-190", "severity": "high", "line_number": 2, "code_snippet": "char b[8]; strcpy(b, p);", "reason": "unrelated to the CVE"},
+            ],
+            "suggested_delivery_mode": "file",
+        })
+
+        with patch.object(agent.engine, "client", MagicMock()) as mock_client:
+            mock_client.models.generate_content.return_value = fake_response
+            await agent.process(context)
+
+        assert len(context.vulnerabilities) == 2
+        first = context.vulnerabilities[0]
+        assert "png_do_quantize" in first.code_snippet or "png_do_quantize" in first.vuln_type
+
+    asyncio.run(run_test())
+
+
+def test_triage_success_path_does_not_duplicate_when_ai_already_targets_cve():
+    """When the AI's own finding already references the CVE's target
+    function, no synthetic finding should be injected."""
+    import json
+
+    async def run_test():
+        c_code = '#include "png.h"\nvoid png_do_read_transformations(png_structp png_ptr) { png_do_quantize(png_ptr); }\n'
+        context = ProgramContext(
+            target_path="pngrtran.c", language="c", os_platform="linux",
+            source_code=c_code, delivery_mode="file",
+        )
+        context.cve_meta = {"cve_id": "CVE-2025-64505", "affected_functions": ["png_do_quantize"]}
+        context.validate_cve = "CVE-2025-64505"
+
+        agent = TriageAgent(api_key="k")
+        fake_response = MagicMock()
+        fake_response.text = json.dumps({
+            "vulnerabilities": [
+                {"vuln_type": "Heap over-read in png_do_quantize", "cwe": "CWE-125", "severity": "critical", "line_number": 2, "code_snippet": "png_do_quantize(png_ptr);", "reason": "correct"},
+            ],
+            "suggested_delivery_mode": "file",
+        })
+
+        with patch.object(agent.engine, "client", MagicMock()) as mock_client:
+            mock_client.models.generate_content.return_value = fake_response
+            await agent.process(context)
+
+        assert len(context.vulnerabilities) == 1
+
+    asyncio.run(run_test())
+
+
 @patch("mutagen.core.get_engine")
 @patch("mutagen.core.compile_target")
 @patch("mutagen.core.execute_payload")

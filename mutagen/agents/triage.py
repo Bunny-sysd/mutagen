@@ -409,5 +409,35 @@ class TriageAgent(BaseAgent):
                 context.logs.append(f"[TriageAgent] Identified {detail.vuln_type} at line {detail.line_number} ({detail.cwe})")
                 context.notepad.append(f"Triage: Found {detail.vuln_type} at line {detail.line_number} ({detail.cwe}) [Status: {v_res.verification_status}]")
 
+            # Ground-Truth CVE enforcement: the AI succeeding at triage doesn't
+            # mean it actually targeted the CVE. A prior fix only enforced this
+            # in the AI-failure fallback path (below); here, when the AI
+            # returns real findings, they were trusted as-is with no check
+            # that any of them actually reference the CVE's documented
+            # function -- observed in practice: the AI reporting an unrelated
+            # integer-overflow or overlap finding instead of the CVE's actual
+            # target, with nothing ever pointing synthesis back at the real
+            # function. If none of the AI's findings reference it, inject a
+            # real, AST-verified static finding for it (reusing pretarget,
+            # already computed above) and prioritize it first.
+            if cve_target_functions:
+                clean_targets = {tf.strip().lower() for tf in cve_target_functions if tf and tf.strip() not in ("target_function", "")}
+
+                def _finding_matches_cve(v):
+                    vt = (v.vuln_type or "").lower()
+                    cs = (v.code_snippet or "").lower()
+                    return any(t in vt or t in cs for t in clean_targets)
+
+                if clean_targets and not any(_finding_matches_cve(v) for v in context.vulnerabilities):
+                    cve_matches = [f for f in pretarget.findings if f.function_name.lower() in clean_targets or f.call_name.lower() in clean_targets]
+                    if cve_matches:
+                        injected = context.add_vulnerability(cve_matches[0])
+                        if injected in context.vulnerabilities:
+                            context.vulnerabilities.remove(injected)
+                        context.vulnerabilities.insert(0, injected)
+                        msg = f"None of the AI's findings referenced the CVE's target function(s) {sorted(clean_targets)}; injected and prioritized a verified static finding for it instead."
+                        context.logs.append(f"[TriageAgent] Ground-Truth CVE mode: {msg}")
+                        console.print(f"[bold cyan]  [GroundTruthCVE] {msg}[/bold cyan]")
+
         context.notepad.append(f"Triage: Dynamically selected input delivery mode: {context.delivery_mode}")
         return context
