@@ -82,6 +82,46 @@ def test_execute_payload_logical_exploit():
         assert "access granted" in result["crash_type"]
         assert result["return_code"] == 0
 
+def test_execute_payload_does_not_flag_echoed_arg_as_heap_corruption():
+    """
+    Regression test: the heap-corruption oracle searched the RAW combined
+    stdout/stderr for signature substrings (e.g. "buffer overflow"), unlike
+    the logical-exploit oracle right above it, which strips the payload's own
+    args/input_data from the output first specifically to avoid this. A
+    program that never crashed (clean rc=2 "unsupported format" exit) but
+    merely echoed back its own filename argument -- which happened to
+    contain "buffer overflow" as a substring -- was falsely flagged as
+    HEAP_CORRUPTION. Same false-positive class documented for sasl_bufover.
+    """
+    with patch("subprocess.run") as mock_run:
+        mock_res = MagicMock()
+        mock_res.returncode = 2  # plain non-crash "unsupported format" exit
+        mock_res.stdout = "Error: could not parse 'test file (buffer overflow case).png' -- unsupported format."
+        mock_res.stderr = ""
+        mock_run.return_value = mock_res
+
+        result = execute_payload("some_exe", ["--file", "test file (buffer overflow case).png"], "", "args", 5, "none")
+
+        assert result["crashed"] is False
+        assert result["crash_type"] == "none"
+
+
+def test_execute_payload_still_detects_genuine_heap_corruption_signature():
+    """The oracle must still catch a real corruption message that ISN'T just
+    an echo of the payload's own args/input_data."""
+    with patch("subprocess.run") as mock_run:
+        mock_res = MagicMock()
+        mock_res.returncode = 2
+        mock_res.stdout = "malloc(): corrupted top size"
+        mock_res.stderr = ""
+        mock_run.return_value = mock_res
+
+        result = execute_payload("some_exe", ["--file", "innocuous.png"], "", "args", 5, "none")
+
+        assert result["crashed"] is True
+        assert "HEAP_CORRUPTION" in result["crash_type"]
+
+
 def test_compiler_check_sanitizer_support():
     from mutagen.compiler import check_sanitizer_support
 

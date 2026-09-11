@@ -1184,7 +1184,15 @@ def execute_payload(exe_path: str, args: list[str], input_data, delivery_mode: s
                 "_crtisvalidheappointer",
             ]
             for sig in heap_corruption_signatures:
-                if sig in combined_lower:
+                # Search the echo-stripped output, not the raw combined output: if
+                # the payload's own args/input_data happen to contain a signature
+                # substring (e.g. a filename like "test (buffer overflow case).png"),
+                # a program that merely echoes it back -- without ever actually
+                # crashing or corrupting anything -- would otherwise be falsely
+                # flagged as HEAP_CORRUPTION. This is the same false-positive class
+                # documented for sasl_bufover (see memory.md); that fix was applied
+                # to the LOGICAL_EXPLOIT oracle above but not carried over here.
+                if sig in clean_output:
                     # Globally differentiate safe handled program exit (rc=1, typical for safe error/assert exit)
                     # from unhandled crash states when checking soft signatures.
                     # Hard indicators (asan/ubsan/corrupted size) remain crashes regardless of rc.
