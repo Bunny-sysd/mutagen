@@ -82,6 +82,31 @@ def test_virtual_editor_search_replace_and_rollback():
     assert "strcpy(buffer, input);" in editor.active_scope.body
 
 
+def test_virtual_editor_search_replace_whitespace_mismatch_actually_applies():
+    """
+    Regression test: when search_block doesn't literally match the buffer
+    (e.g. different spacing/indentation) but a whitespace-normalized version
+    does, the replacement must actually be applied. A prior version checked
+    whether a *normalized* match existed, then still ran the replacement
+    using the original, non-matching search_block -- str.replace() silently
+    replaces zero occurrences (never an error) when the target isn't found,
+    so the buffer was left completely unchanged while the method still
+    returned True, claiming the patch succeeded.
+    """
+    source = "void f(void) {\n    char  buffer[16];   // irregular spacing\n    strcpy(buffer, input);\n}\n"
+    editor = VirtualCodeEditor(source, language="c", filename="test.c")
+    editor.open_vulnerable_scope(target_line=2)
+
+    sr_success = editor.apply_search_replace(
+        search_block="char buffer[16];",  # single-space version; buffer has double spaces
+        replace_block="char buffer[64];",
+    )
+
+    assert sr_success is True
+    assert "buffer[64]" in editor.active_scope.body
+    assert "buffer[16]" not in editor.active_scope.body
+
+
 def test_virtual_editor_large_file_splicing():
     # Construct a 1,000-line synthetic C file
     lines = [f"int dummy_func_{i}(void) {{ return {i}; }}" for i in range(1, 500)]

@@ -125,15 +125,28 @@ class VirtualCodeEditor:
         if not self.active_scope:
             return False
 
-        if search_block not in self.active_scope.body:
-            # Try normalized whitespace match
-            s_norm = re.sub(r'\s+', ' ', search_block.strip())
-            curr_norm = re.sub(r'\s+', ' ', self.active_scope.body)
-            if s_norm not in curr_norm:
-                return False
+        if search_block in self.active_scope.body:
+            self.history.append(self.active_scope.body)
+            self.active_scope.body = self.active_scope.body.replace(search_block, replace_block, 1)
+            return True
+
+        # Fall back to a whitespace-flexible match: build a regex from
+        # search_block where runs of whitespace become \s+, so differences in
+        # spacing/indentation (not the actual code) don't block the
+        # replacement. A prior version only checked whether a
+        # whitespace-*normalized* match existed, then still ran the ORIGINAL
+        # non-normalized str.replace() -- which silently replaced zero
+        # occurrences (str.replace() is a no-op, never an error, when the
+        # target isn't found) while still returning True, claiming success on
+        # a patch that never actually changed the buffer.
+        escaped = re.escape(search_block.strip())
+        pattern = r'\s+'.join(re.split(r'(?:\\\s)+', escaped))
+        match = re.search(pattern, self.active_scope.body)
+        if not match:
+            return False
 
         self.history.append(self.active_scope.body)
-        self.active_scope.body = self.active_scope.body.replace(search_block, replace_block, 1)
+        self.active_scope.body = self.active_scope.body[:match.start()] + replace_block + self.active_scope.body[match.end():]
         return True
 
     def run_pre_flight_check(self) -> tuple[bool, str]:
