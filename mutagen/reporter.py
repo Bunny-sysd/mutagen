@@ -698,15 +698,24 @@ def save_crash_report(crashes: list[dict], target_name: str, total_tested: int, 
                     key, val = header.split(":", 1)
                     headers[key.strip()] = val.strip()
 
+        # Serialize the payload once and send those exact bytes as the request
+        # body. Signing this serialization and then sending the report via
+        # requests' own json= parameter would sign different bytes than what
+        # actually goes on the wire (requests re-serializes independently,
+        # with different key/comma spacing) -- any receiver that does the
+        # standard, correct thing and recomputes HMAC-SHA256 over the bytes it
+        # actually received would always see a signature mismatch, silently
+        # defeating the entire point of --webhook-secret.
+        payload_bytes = json.dumps(report, separators=(',', ':')).encode('utf-8')
+
         if webhook_secret:
             import hashlib
             import hmac
-            payload_bytes = json.dumps(report, separators=(',', ':')).encode('utf-8')
             signature = hmac.new(webhook_secret.encode('utf-8'), payload_bytes, hashlib.sha256).hexdigest()
             headers["X-Mutagen-Signature"] = signature
 
         try:
-            requests.post(webhook_url, json=report, headers=headers, timeout=10)
+            requests.post(webhook_url, data=payload_bytes, headers=headers, timeout=10)
         except Exception:
             pass
 
