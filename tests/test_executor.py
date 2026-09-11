@@ -141,6 +141,32 @@ def test_compiler_check_sanitizer_support():
     with patch("subprocess.run", side_effect=Exception("error")):
         assert check_sanitizer_support("gcc") is False
 
+def test_compile_target_output_path_survives_dot_c_in_directory_name(tmp_path):
+    """
+    Regression test: output_path was built with source_path.replace(".c",
+    ".out"/".exe"), which corrupts ANY ".c" substring in the path, not just
+    the actual file extension -- e.g. a directory named "libpng.compat"
+    became "libpng.outompat". Must use os.path.splitext instead.
+    """
+    from mutagen.compiler import compile_target
+
+    project_dir = tmp_path / "libpng.compat"
+    project_dir.mkdir()
+    source_file = project_dir / "pngrtran.c"
+    source_file.write_text("int main() { return 0; }\n")
+
+    with patch("subprocess.run") as mock_run:
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_res.stderr = ""
+        mock_run.return_value = mock_res
+
+        result_path = compile_target(str(source_file), "gcc")
+
+    assert "libpng.compat" in result_path
+    assert "outompat" not in result_path
+
+
 def test_compile_target_raises_compilation_error():
     from mutagen.compiler import CompilationError, compile_target
 

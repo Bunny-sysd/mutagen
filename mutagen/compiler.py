@@ -144,11 +144,12 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False, vuln
         if native_out and os.path.exists(native_out):
             return native_out
 
-    # Dynamically determine output extension based on OS
-    if os.name == 'nt':
-        output_path = source_path.replace(".c", ".exe").replace(".cpp", ".exe")
-    else:
-        output_path = source_path.replace(".c", ".out").replace(".cpp", ".out")
+    # Dynamically determine output extension based on OS. Uses splitext (not
+    # str.replace) since replace() corrupts any ".c"/".cpp" substring that
+    # happens to appear earlier in the path -- e.g. a directory named
+    # "libpng.compat" -- not just the actual file extension.
+    stem = os.path.splitext(source_path)[0]
+    output_path = stem + (".exe" if os.name == 'nt' else ".out")
 
     # 1. Discover local include paths (-I) across target_dir, parent_dir, and repo_root
     abs_target_dir = os.path.abspath(target_dir)
