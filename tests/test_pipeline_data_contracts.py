@@ -159,3 +159,41 @@ def test_patcher_and_validator_agent_contract():
             assert res_patcher.get_primary_patch() == "int main() { return 0; }"
 
     asyncio.run(run_test())
+
+
+def test_patcher_agent_extracts_line_number_from_cpp_log_reference():
+    """
+    Regression test: the fallback line-number extraction regex was
+    `[\\w\\-]+\\.[c|cpp|h]:(\\d+)` -- a character class, not the intended
+    alternation between file extensions. `[c|cpp|h]` matches any ONE of the
+    characters c/p/h/|, so it happened to match ".c:" and ".h:" by
+    coincidence but could never match ".cpp:" (the next required literal ':'
+    never lines up). Any C++ target relying on this log/notepad fallback to
+    locate the vulnerable line silently got the wrong (default) line number.
+    """
+    async def run_test():
+        code = "int main() { return 0; }"
+        payload = CrashPayload(args=["A" * 100], crash_type="SIGSEGV")
+        context = ProgramContext(
+            target_path="main.cpp", language="c++", os_platform="win32",
+            source_code=code, active_payloads=[payload],
+            logs=["target.cpp:456 -- SIGSEGV during payload execution"],
+        )
+
+        with patch("mutagen.agents.patcher.get_engine") as mock_get_engine, \
+             patch("mutagen.editor.VirtualCodeEditor") as mock_editor_cls:
+            mock_engine = MagicMock()
+            mock_engine.generate_patch.return_value = "int main() { return 0; }"
+            mock_get_engine.return_value = mock_engine
+
+            mock_editor = MagicMock()
+            mock_editor.active_scope = None
+            mock_editor.apply_patch_candidate.return_value = False
+            mock_editor_cls.return_value = mock_editor
+
+            patcher = PatchEngineerAgent()
+            await patcher.process(context)
+
+            mock_editor.open_vulnerable_scope.assert_called_once_with(456)
+
+    asyncio.run(run_test())

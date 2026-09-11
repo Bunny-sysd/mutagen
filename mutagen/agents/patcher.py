@@ -74,7 +74,7 @@ class PatchEngineerAgent(BaseAgent):
         # Check logs and notepad for crashing function name or line numbers
         if (target_line == 1 and not target_func):
             combined_history = " ".join(context.notepad + context.logs)
-            m_line = re.search(r'[\w\-]+\.[c|cpp|h]:(\d+)', combined_history)
+            m_line = re.search(r'[\w\-]+\.(?:c|cpp|h):(\d+)', combined_history)
             if m_line:
                 target_line = int(m_line.group(1))
             m_fn = re.search(r'(?:in|function|called|at)\s+[`\'"]?([a-zA-Z_][a-zA-Z0-9_]{3,})[`\'"]?', combined_history)
