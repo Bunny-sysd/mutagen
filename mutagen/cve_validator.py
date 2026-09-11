@@ -243,9 +243,37 @@ def detect_target_version(target_path: str, source_code: str = "") -> str | None
 
 
 def _parse_semver(ver_str: str) -> tuple[int, ...]:
-    """Extracts integer tuple from version string for comparison (e.g. '1.6.50' -> (1, 6, 50))."""
-    nums = re.findall(r'\d+', ver_str)
-    return tuple(int(n) for n in nums) if nums else (0,)
+    """
+    Extracts a fixed-length, directly-comparable tuple from a version string:
+    the leading dotted numeric core (padded/truncated to 4 components) plus a
+    trailing pre-release flag.
+
+    Two things this fixes over a naive re.findall(r'\\d+', ...) over the whole
+    string:
+    1. A pre-release qualifier's own digits (e.g. the "1" in "-rc1") must not
+       be folded into the comparison as if they were another version
+       component -- that made "1.6.50-rc1" parse to (1, 6, 50, 1), which
+       compares as *greater than* the final release "1.6.50" it precedes,
+       wrongly classifying the pre-release build as already patched.
+    2. A pre-release build must still sort *before* the bare release of the
+       same numeric core (standard semver pre-release ordering, and
+       consistent with this module's "assume affected when ambiguous"
+       philosophy for missing-version cases). Simply stopping at the
+       qualifier and comparing bare numeric cores would make "1.6.50-rc1"
+       and "1.6.50" compare as *equal*, which is equally wrong when the
+       fixed version is exactly "1.6.50" -- the padded core plus explicit
+       suffix flag disambiguates this without depending on tuple-length
+       tie-breaking (which is itself unreliable once cores have differing
+       numbers of components).
+    """
+    ver_str = ver_str.strip()
+    m = re.match(r'\d+(?:\.\d+)*', ver_str)
+    if not m:
+        return (0, 0, 0, 0, 0)
+    parts = [int(n) for n in m.group(0).split('.')]
+    parts = (parts + [0, 0, 0, 0])[:4]
+    has_suffix = len(m.group(0)) < len(ver_str)
+    return tuple(parts) + (-1 if has_suffix else 0,)
 
 
 def check_version_affected(detected_version: str | None, cve_meta: dict[str, Any]) -> tuple[bool, str]:

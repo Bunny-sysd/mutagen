@@ -70,6 +70,28 @@ def test_version_match_gating():
     assert "PATCHED" in msg
 
 
+def test_version_match_gating_ignores_prerelease_qualifier_digits():
+    """
+    Regression test: version comparison extracted every digit group in the
+    string via re.findall, so a pre-release qualifier's digits (e.g. the "1"
+    in "-rc1") got folded into the comparison tuple as if it were another
+    version component -- (1, 6, 50, 1) compares as GREATER than (1, 6, 50),
+    which misclassified "1.6.50-rc1" (a pre-release build of 1.6.50, and
+    thus still older than the CVE's fixed version of the SAME base version)
+    as already patched. The comparison target must share the same base
+    version as the qualifier-suffixed one for this to actually be exercised
+    -- comparing against a numerically later fixed version (e.g. 1.6.51)
+    would resolve correctly regardless, since the differing third component
+    alone already determines tuple comparison before the spurious 4th
+    element is ever reached.
+    """
+    meta = {"fixed_version": "1.6.50"}
+
+    is_affected, msg = check_version_affected("1.6.50-rc1", meta)
+    assert is_affected is True
+    assert "confirmed affected" in msg
+
+
 def test_evaluate_cve_outcomes():
     cve_meta = {
         "cve_id": "CVE-2025-65018",
