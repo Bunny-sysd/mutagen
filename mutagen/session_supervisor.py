@@ -205,30 +205,42 @@ _HEAP_SOFT_SIGNATURES = [
 ]
 
 
-def _check_oracles(stdout: str, stderr: str, return_code: int) -> tuple[bool, str]:
+def _check_oracles(stdout: str, stderr: str, return_code: int, input_data: str = "") -> tuple[bool, str]:
     """Run logical-exploit and heap-corruption oracle checks on output.
 
     Returns (crashed: bool, crash_type: str).
     """
     combined = (stdout + stderr).lower()
 
+    # Strip the sent input from the output before signature matching: a
+    # session step that merely echoes back its own input (e.g. in an error
+    # message quoting invalid input) but never actually crashed would
+    # otherwise be falsely flagged whenever that input happens to contain a
+    # trigger substring like "buffer overflow" -- the same false-positive
+    # class documented for sasl_bufover (see memory.md) and already fixed
+    # once in executor.py's oracle; this is a separate, duplicated
+    # implementation ("mirrors executor.py logic") that never got it.
+    clean_output = combined
+    if input_data:
+        clean_output = clean_output.replace(str(input_data).lower(), "")
+
     # Materiality check: exclude benign environmental / usage error exits
-    is_mundane_error = any(p in combined for p in _MUNDANE_ERROR_PATTERNS) and return_code in (1, 2, 127, 255)
+    is_mundane_error = any(p in clean_output for p in _MUNDANE_ERROR_PATTERNS) and return_code in (1, 2, 127, 255)
 
     # Logical exploit check
     if not is_mundane_error:
         for indicator in _LOGICAL_INDICATORS:
-            if indicator in combined:
+            if indicator in clean_output:
                 return True, f"LOGICAL_EXPLOIT (Matched signature: '{indicator}')"
 
     # Heap corruption — hard signatures are crashes regardless of exit code
     for sig in _HEAP_HARD_SIGNATURES:
-        if sig in combined:
+        if sig in clean_output:
             return True, f"HEAP_CORRUPTION (Caught overflow signature: '{sig}')"
 
     # Heap corruption — soft signatures need abnormal exit code
     for sig in _HEAP_SOFT_SIGNATURES:
-        if sig in combined:
+        if sig in clean_output:
             if return_code not in (0, 1):
                 return True, f"HEAP_CORRUPTION (Caught overflow signature: '{sig}')"
 
@@ -486,7 +498,7 @@ class SessionSupervisor:
         # Oracle detection on output
         if not crashed_here and (stdout_delta or stderr_delta):
             oracle_crashed, oracle_type = _check_oracles(
-                stdout_delta, stderr_delta, rc if rc is not None else 0
+                stdout_delta, stderr_delta, rc if rc is not None else 0, input_data=input_data
             )
             if oracle_crashed:
                 crash_type = oracle_type

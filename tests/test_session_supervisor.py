@@ -96,6 +96,28 @@ class TestCheckOracles:
         assert crashed is True
         assert "HEAP_CORRUPTION" in crash_type
 
+    def test_does_not_flag_echoed_input_as_heap_corruption(self):
+        """
+        Regression test: this is a separate, duplicated oracle implementation
+        ("mirrors executor.py logic") that never got the echo-stripping fix
+        applied to executor.py's version. A session step that merely echoes
+        back its own sent input -- which happens to contain a trigger
+        substring like "buffer overflow" -- but never actually crashed (a
+        plain non-signal exit code) must not be flagged as HEAP_CORRUPTION.
+        """
+        input_sent = "file (buffer overflow test case)"
+        stdout = f"Error: could not process '{input_sent}' -- unsupported."
+        crashed, crash_type = _check_oracles(stdout, "", 2, input_data=input_sent)
+        assert crashed is False
+        assert crash_type == "none"
+
+    def test_still_detects_genuine_heap_corruption_with_input_data_passed(self):
+        """The oracle must still catch a real corruption message that isn't
+        just an echo of the sent input, even when input_data is provided."""
+        crashed, crash_type = _check_oracles("malloc(): corrupted top size", "", 2, input_data="innocuous")
+        assert crashed is True
+        assert "HEAP_CORRUPTION" in crash_type
+
     def test_clean_output(self):
         crashed, crash_type = _check_oracles("hello world", "", 0)
         assert crashed is False
