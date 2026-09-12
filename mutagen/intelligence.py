@@ -1,15 +1,19 @@
 """
 Token-Efficient Vulnerability Intelligence Engine for Mutagen.
 
-Queries CVE/NVD references, GitHub security advisories, and offline CWE dictionaries.
-Applies severity ranking (CVSS / Critical > High > Medium) and single-candidate deduplication
-to prevent prompt token bloat in LLM contexts.
+Queries live GitHub PoC search results first (real-world exploit intelligence),
+falling back to an offline CWE signature dictionary when no live hit is found
+or the search is unavailable. Applies severity ranking (CVSS / Critical > High
+> Medium) and single-candidate deduplication to prevent prompt token bloat in
+LLM contexts.
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Any
+
+from mutagen.poc_finder import query_live_pocs
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +110,10 @@ class VulnerabilityIntelligenceEngine:
         """
         cwe_key = (cwe_id or "CWE-120").upper().strip()
 
+        live_hint = self._fetch_live_poc_hint(cwe_key, vuln_type)
+        if live_hint:
+            return live_hint
+
         # Extract candidates for the matching CWE or vulnerability pattern
         candidates = self._fetch_candidates(cwe_key, vuln_type)
 
@@ -129,6 +137,31 @@ class VulnerabilityIntelligenceEngine:
             "exploit_vector": selected_signature.get("exploit_vector", "Boundary mutation"),
             "signature_hint": selected_signature.get("signature_hint", "Provide targeted boundary payloads."),
             "candidates_evaluated": len(candidates),
+            "token_optimized": True,
+        }
+
+    def _fetch_live_poc_hint(self, cwe_key: str, vuln_type: str) -> dict[str, Any] | None:
+        """
+        Attempt a live GitHub PoC search for this CWE/vuln type. Returns None
+        (never raises) when no real hit is found so the caller falls back to
+        the offline signature dictionary.
+        """
+        query = f"{cwe_key} {vuln_type}".strip()
+        live_pocs = query_live_pocs(query, max_results=2)
+        if not live_pocs:
+            return None
+
+        top = live_pocs[0]
+        # GitHub search results carry no severity/CVSS data of their own --
+        # reuse the offline table's rating for this CWE when known.
+        offline_entry = self.signature_db.get(cwe_key, {})
+        return {
+            "selected_cwe": cwe_key,
+            "severity": offline_entry.get("severity", "HIGH"),
+            "cvss_score": offline_entry.get("cvss_score", 7.5),
+            "exploit_vector": offline_entry.get("exploit_vector", "Real-world exploit pattern (see linked PoC)"),
+            "signature_hint": f"GitHub PoC ({top['name']}): {top['url']} - {top['description']}",
+            "candidates_evaluated": len(live_pocs),
             "token_optimized": True,
         }
 

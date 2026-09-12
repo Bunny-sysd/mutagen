@@ -78,10 +78,12 @@ OFFLINE_CWE_DICTIONARY = {
 }
 
 
-def search_github_pocs(query: str, max_results: int = 3) -> list[dict]:
+def query_live_pocs(query: str, max_results: int = 3) -> list[dict]:
     """
-    Search GitHub repositories for public Proof of Concept (PoC) exploit scripts
-    matching the specified vulnerability type, library, or CWE.
+    Query GitHub's repository search API for real PoC repos matching the given
+    vulnerability type, library, or CWE. Returns an empty list -- never a
+    synthetic placeholder -- on any failure, rate-limit, or zero real hits, so
+    callers can reliably distinguish "found nothing live" from a result.
     """
     encoded_query = urllib.parse.quote(f"{query} poc exploit")
     url = f"https://api.github.com/search/repositories?q={encoded_query}&sort=stars&order=desc&per_page={max_results}"
@@ -107,6 +109,18 @@ def search_github_pocs(query: str, max_results: int = 3) -> list[dict]:
                     })
     except Exception:
         pass
+
+    return results
+
+
+def search_github_pocs(query: str, max_results: int = 3) -> list[dict]:
+    """
+    Search GitHub repositories for public Proof of Concept (PoC) exploit scripts
+    matching the specified vulnerability type, library, or CWE. Always returns
+    at least one entry -- falls back to a manual search-link placeholder when
+    no real results were found.
+    """
+    results = query_live_pocs(query, max_results)
 
     if not results:
         results.append({
