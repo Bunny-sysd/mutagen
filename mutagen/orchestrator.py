@@ -186,7 +186,7 @@ class AgentOrchestrator:
         total_tested = 0
         batch_num = 0
         active_crashes: list = []
-        prev_batch_signatures: set = set()
+        seen_signatures: set = set()
 
         while True:
             batch_num += 1
@@ -213,10 +213,17 @@ class AgentOrchestrator:
             # underlying content is byte-for-byte identical (e.g. persistent API
             # failures repeating the same deterministic fallback templates),
             # defeating this exact stagnation check.
+            #
+            # Compared against everything seen so far in the run (not just the
+            # immediately preceding batch): a synthesizer that oscillates between
+            # two already-tested sets of content never repeats its *previous*
+            # batch, so a prev-batch-only comparison would never trip and
+            # --max-payloads 0 (unlimited) would fuzz already-tested content
+            # forever.
             batch_signatures = {(p.raw_bytes_hex, p.input_data) for p in new_batch}
-            if batch_signatures and batch_signatures == prev_batch_signatures:
-                console.print("[bold yellow][!] Synthesizer repeated the same payloads as the previous batch (no progress). Stopping fuzz loop.[/bold yellow]")
-                self.context.logs.append(f"[Orchestrator] Batch {batch_num}: identical to previous batch; stopping to avoid an unproductive loop.")
+            if batch_signatures and batch_signatures <= seen_signatures:
+                console.print("[bold yellow][!] Synthesizer repeated payloads already tested earlier in this run (no progress). Stopping fuzz loop.[/bold yellow]")
+                self.context.logs.append(f"[Orchestrator] Batch {batch_num}: entirely composed of previously-tested payload content; stopping to avoid an unproductive loop.")
                 # This batch was synthesized (and so already appended to
                 # active_payloads by synthesizer_agent.process()) but deliberately
                 # never tested -- discard it so the final payload list/count only
@@ -224,7 +231,7 @@ class AgentOrchestrator:
                 self.context.active_payloads = self.context.active_payloads[:start_idx]
                 batch_num -= 1
                 break
-            prev_batch_signatures = batch_signatures
+            seen_signatures |= batch_signatures
 
             console.print(Panel(
                 f"[bold magenta]PHASE 3/4 [75%]: SUPERVISOR FUZZING & CRASH REPRODUCTION (Batch {batch_num})[/bold magenta]\n"

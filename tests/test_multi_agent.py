@@ -186,3 +186,61 @@ async def test_orchestrator_detects_stagnation_despite_deduped_filenames(mock_su
 
     assert call_count["n"] == 2, f"expected the loop to detect content-level stagnation and stop after batch 2, got {call_count['n']} batches"
     assert len(final_context.active_payloads) == 3
+
+
+@pytest.mark.anyio
+@patch("mutagen.engines.get_engine")
+@patch("mutagen.agents.triage.TriageAgent.process")
+@patch("mutagen.agents.synthesizer.PayloadSynthesizerAgent.process")
+@patch("mutagen.agents.supervisor.FuzzingSupervisorAgent.process")
+async def test_orchestrator_detects_stagnation_across_nonadjacent_batches(mock_supervisor, mock_synthesizer, mock_triage, mock_get_engine):
+    """Regression test: the stagnation guard only compared each batch against the
+    ONE immediately preceding it. A synthesizer that oscillates between two
+    already-seen sets of payload content (A, B, A, B, ...) never repeats its
+    *immediately previous* batch, so the old guard never tripped and --max-payloads 0
+    (unlimited) would fuzz the same already-tested content forever. The guard must
+    compare against everything tested so far in the run, not just the last batch."""
+    mock_get_engine.return_value = MagicMock()
+
+    async def triage_side_effect(ctx):
+        ctx.vulnerabilities.append(VulnerabilityDetail(
+            vuln_type="Buffer Overflow", cwe="CWE-120", severity="critical", line_number=10, code_snippet=""
+        ))
+        return ctx
+
+    call_count = {"n": 0}
+
+    async def synth_side_effect(ctx):
+        call_count["n"] += 1
+        n = call_count["n"]
+        if n > 5:
+            # Safety net so a still-buggy implementation fails the assertion
+            # below instead of looping the test forever.
+            return ctx
+        # Batches 1, 3, 5 replay content "A"; batches 2, 4 replay content "B" --
+        # each batch differs from the one right before it, but not from the run
+        # as a whole.
+        content = ("A", "aaaa") if n % 2 == 1 else ("B", "bbbb")
+        for i in range(2):
+            ctx.add_payload(CrashPayload(args=[f"poc_{n}_{i}.png"], input_data=content[0], raw_bytes_hex=content[1]))
+        return ctx
+
+    async def supervisor_side_effect(ctx):
+        return ctx  # never crashes
+
+    mock_triage.side_effect = triage_side_effect
+    mock_synthesizer.side_effect = synth_side_effect
+    mock_supervisor.side_effect = supervisor_side_effect
+
+    orchestrator = AgentOrchestrator(
+        target_path="dummy.c", source_code="int main() { return 0; }",
+        provider="gemini", model="gemini-2.5-flash", compiler="gcc", api_key="mock_key",
+        max_payloads=0,
+    )
+    final_context = await orchestrator.run()
+
+    # Batch 1 (A) and batch 2 (B) are genuinely new and get tested; batch 3
+    # replays content "A" which was already fully tested in batch 1, so the
+    # loop must stop there instead of continuing to oscillate.
+    assert call_count["n"] == 3, f"expected the loop to detect non-adjacent stagnation and stop after batch 3, got {call_count['n']} batches"
+    assert len(final_context.active_payloads) == 4
