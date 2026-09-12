@@ -139,11 +139,19 @@ def fetch_cve_metadata(cve_id: str) -> dict[str, Any]:
                         target_libs.append(pkg)
                     ranges = aff.get("ranges", [])
                     for r in ranges:
-                        for ev in r.get("events", []):
+                        events = r.get("events", [])
+                        if r.get("type") == "GIT":
+                            # GIT-range events[].fixed/introduced are raw commit
+                            # hashes, not versions. Only OSV's own extracted
+                            # semver equivalents (when present) are usable here.
+                            events = r.get("database_specific", {}).get("extracted_events", [])
+                        for ev in events:
                             if "fixed" in ev:
                                 fixed_ver = ev["fixed"]
                             if "introduced" in ev:
                                 affected_vers = f">= {ev['introduced']}"
+
+                cwe_ids = data.get("database_specific", {}).get("cwe_ids") or []
 
                 # Extract potential function names from details, summary, and vanir signatures
                 c_keywords = {"if", "for", "while", "switch", "return", "sizeof", "else", "case", "default", "do", "typedef", "struct", "enum", "union", "true", "false", "null"}
@@ -170,7 +178,7 @@ def fetch_cve_metadata(cve_id: str) -> dict[str, Any]:
                 return {
                     "cve_id": clean_id,
                     "name": summary or f"Vulnerability {clean_id}",
-                    "cwe": "CWE-119",
+                    "cwe": cwe_ids[0] if cwe_ids else "CWE-119",
                     "vuln_type": "Memory Corruption",
                     "affected_functions": extracted_funcs if extracted_funcs else ["target_function"],
                     "affected_versions": affected_vers or "Unknown",
