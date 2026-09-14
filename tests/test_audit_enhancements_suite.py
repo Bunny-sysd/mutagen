@@ -116,9 +116,9 @@ class TestAuditEnhancementsSuite(unittest.TestCase):
 
         # Mock Claude
         mock_msg = MagicMock()
-        mock_msg.parsed = mock_obj
+        mock_msg.parsed_output = mock_obj
         claude.client = MagicMock()
-        claude.client.beta.messages.parse.return_value = mock_msg
+        claude.client.messages.parse.return_value = mock_msg
 
         res_claude = claude._parse_generate("prompt", MockTriageResult, "vulnerabilities")
         self.assertIsInstance(res_claude, dict)

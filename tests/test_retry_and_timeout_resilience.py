@@ -80,10 +80,10 @@ class TestRetryAndTimeoutResilience(unittest.TestCase):
         engine = ClaudeEngine(api_key="test_key", model="claude-invalid-404")
 
         mock_msg = MagicMock()
-        mock_msg.parsed = PayloadList(payloads=[PayloadItem(args=["good_claude"], reason="ok")])
+        mock_msg.parsed_output = PayloadList(payloads=[PayloadItem(args=["good_claude"], reason="ok")])
 
         # Candidate 1 raises 404, Candidate 2 parses successfully
-        mock_client.beta.messages.parse.side_effect = [
+        mock_client.messages.parse.side_effect = [
             Exception("404 model_not_found: Model does not exist"),
             mock_msg
         ]
@@ -91,7 +91,7 @@ class TestRetryAndTimeoutResilience(unittest.TestCase):
         payloads = engine.generate_payloads("int main() {}", "Synthesize payloads", max_payloads=1)
         self.assertEqual(len(payloads), 1)
         self.assertEqual(payloads[0]["args"], ["good_claude"])
-        self.assertEqual(mock_client.beta.messages.parse.call_count, 2)
+        self.assertEqual(mock_client.messages.parse.call_count, 2)
 
     @patch("openai.OpenAI")
     def test_openai_multi_candidate_failover(self, mock_openai_cls):

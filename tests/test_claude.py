@@ -24,8 +24,8 @@ def test_claude_engine_analyze_code(mock_anthropic_class):
     )
 
     mock_message = MagicMock()
-    mock_message.parsed = mock_parsed
-    mock_client.beta.messages.parse.return_value = mock_message
+    mock_message.parsed_output = mock_parsed
+    mock_client.messages.parse.return_value = mock_message
 
     engine = ClaudeEngine(api_key="test_claude_key")
     payloads = engine.analyze_code("int main() { return 0; }", 5, "args", False)
@@ -34,11 +34,15 @@ def test_claude_engine_analyze_code(mock_anthropic_class):
     assert payloads[0]["vuln_type"] == "buffer_overflow"
     assert payloads[0]["args"] == ["claude_payload"]
 
-    mock_client.beta.messages.parse.assert_called_once()
-    called_kwargs = mock_client.beta.messages.parse.call_args[1]
+    # Structured outputs are GA -- must go through the plain (non-beta)
+    # messages.parse() endpoint, never the retired beta path.
+    mock_client.beta.messages.parse.assert_not_called()
+    mock_client.messages.parse.assert_called_once()
+    called_kwargs = mock_client.messages.parse.call_args[1]
     from mutagen.constants import DEFAULT_CLAUDE_FALLBACK_MODELS
     assert called_kwargs["model"] in DEFAULT_CLAUDE_FALLBACK_MODELS
-    assert called_kwargs["response_model"] == FuzzPayloadList
+    assert called_kwargs["output_format"] == FuzzPayloadList
+    assert "betas" not in called_kwargs
     assert called_kwargs["system"] == "You are an automated code audit assistant."
 
 
@@ -102,8 +106,8 @@ def test_claude_engine_generate_payloads_unparseable_prose_fallback(mock_anthrop
     mock_client = MagicMock()
     mock_anthropic_class.return_value = mock_client
 
-    # 1. Beta parse fails on all models
-    mock_client.beta.messages.parse.side_effect = Exception("400 Structured outputs unsupported on this model")
+    # 1. Structured-output parse fails on all models
+    mock_client.messages.parse.side_effect = Exception("400 Structured outputs unsupported on this model")
 
     # 2. Raw generate returns non-JSON conversational prose with no markdown fences
     mock_prose_msg = MagicMock()
@@ -174,12 +178,12 @@ def test_claude_engine_extended_thinking_omits_temperature(mock_anthropic_class)
     # Test _parse_generate
     from mutagen.models import FuzzSequenceList
     mock_parsed_msg = MagicMock()
-    mock_parsed_msg.parsed = FuzzSequenceList(sequences=[])
-    mock_client.beta.messages.parse.return_value = mock_parsed_msg
+    mock_parsed_msg.parsed_output = FuzzSequenceList(sequences=[])
+    mock_client.messages.parse.return_value = mock_parsed_msg
 
     engine._parse_generate("Test prompt with thinking", FuzzSequenceList, "sequences")
-    mock_client.beta.messages.parse.assert_called_once()
-    parse_kwargs = mock_client.beta.messages.parse.call_args[1]
+    mock_client.messages.parse.assert_called_once()
+    parse_kwargs = mock_client.messages.parse.call_args[1]
     assert "temperature" not in parse_kwargs
 
 

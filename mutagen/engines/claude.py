@@ -90,8 +90,7 @@ class ClaudeEngine(BaseEngine):
                         "max_tokens": 4000,
                         "temperature": 0.2,
                         "messages": [{"role": "user", "content": prompt}],
-                        "response_model": response_model,
-                        "betas": ["structured-outputs-2025-11-13"]
+                        "output_format": response_model,
                     }
                     if system:
                         kwargs["system"] = system
@@ -99,8 +98,8 @@ class ClaudeEngine(BaseEngine):
                         kwargs.pop("temperature", None)
 
                     with AiActivityHeartbeat(task_name=f"parsing structured output with {model_name}"):
-                        message = self.client.beta.messages.parse(**kwargs)
-                    parsed = message.parsed
+                        message = self.client.messages.parse(**kwargs)
+                    parsed = message.parsed_output
                     if parsed is not None:
                         if hasattr(parsed, "suggested_delivery_mode"):
                             return parsed.model_dump()
@@ -115,7 +114,7 @@ class ClaudeEngine(BaseEngine):
                     elif action == "retry" and wait_time > 0:
                         time.sleep(wait_time)
 
-            # JSON fallback if beta parse is unsupported on this Claude model
+            # JSON fallback if structured-output parsing is unsupported on this Claude model
             try:
                 fallback_prompt = prompt + f"\n\nRespond strictly with a JSON object containing a '{list_key}' key."
                 sys_prompt = system + " Respond only in raw JSON."
