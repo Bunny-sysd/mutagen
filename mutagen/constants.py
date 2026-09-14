@@ -48,32 +48,49 @@ DEFAULT_GEMINI_FALLBACK_MODELS: list[str] = [
 ]
 
 #: Default Claude model name when no --model flag is given.
-DEFAULT_MODEL_CLAUDE: str = os.environ.get("MUTAGEN_MODEL_CLAUDE", "claude-3-7-sonnet-latest")
+DEFAULT_MODEL_CLAUDE: str = os.environ.get("MUTAGEN_MODEL_CLAUDE", "claude-sonnet-5")
 
 #: Verified active Claude fallback models supporting Messages & Structured Outputs.
+#: Ordered to try current-generation models first (Claude 3.x was superseded by the
+#: 4.x/5.x families and is very likely retired by now, mirroring the Gemini list
+#: above); the legacy 3.x IDs are kept at the tail as a last-resort fallback only in
+#: case a specific account still has access, not as a primary candidate.
 DEFAULT_CLAUDE_FALLBACK_MODELS: list[str] = [
+    "claude-sonnet-5",
+    "claude-opus-5",
+    "claude-haiku-4-5",
+    "claude-sonnet-4-6",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
     "claude-3-7-sonnet-latest",
     "claude-3-5-sonnet-latest",
     "claude-3-5-haiku-latest",
-    "claude-3-7-sonnet-20250219",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-5-haiku-20241022",
-    "claude-sonnet-5",
-    "claude-opus-5",
-    "claude-haiku-4-5-20251001",
 ]
 
 #: Default OpenAI model name when no --model flag is given.
-DEFAULT_MODEL_OPENAI: str = os.environ.get("MUTAGEN_MODEL_OPENAI", "gpt-4o")
+DEFAULT_MODEL_OPENAI: str = os.environ.get("MUTAGEN_MODEL_OPENAI", "gpt-5.4")
 
 #: Verified active OpenAI fallback models supporting Chat Completions & Structured Outputs.
+#: Ordered to try current-generation models first; gpt-4o/gpt-4-turbo/o1 are kept at
+#: the tail as a last-resort fallback only (superseded by the gpt-5.x/o3/o4 families).
+#: gpt-4.5-preview is dropped entirely -- it's no longer even a known model ID in the
+#: installed openai SDK's own type definitions, so every call to it would waste a
+#: retry/timeout cycle before falling through (same failure mode the Gemini/Claude
+#: fallback lists were already fixed for).
 DEFAULT_OPENAI_FALLBACK_MODELS: list[str] = [
+    "gpt-5.4",
+    "gpt-5.5",
+    "gpt-5.2",
+    "gpt-5",
+    "gpt-4.1",
+    "o4-mini",
+    "o3",
+    "o3-mini",
     "gpt-4o",
     "gpt-4o-mini",
-    "o3-mini",
     "o1",
     "o1-mini",
-    "gpt-4.5-preview",
     "gpt-4-turbo",
 ]
 
