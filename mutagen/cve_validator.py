@@ -345,7 +345,7 @@ def evaluate_cve_validation_outcome(
         getattr(p, "is_fallback", False) or getattr(p, "synthesis_failed", False) for p in context.active_payloads
     )
 
-    if (synthesis_failed or all_payloads_fallback) and len(context.active_payloads) > 0 and not active_crashes:
+    if (synthesis_failed or (all_payloads_fallback and len(context.active_payloads) > 0)) and not active_crashes:
         return {
             "category": "F",
             "status": "INCONCLUSIVE — SYNTHESIS FAILED",

@@ -301,6 +301,34 @@ def test_synthesis_failed_outcome_and_fallback_exclusion():
     assert "INCONCLUSIVE — SYNTHESIS FAILED" in res_f2["status"]
 
 
+def test_synthesis_failed_outcome_with_zero_payloads():
+    """Regression test: PayloadSynthesizerAgent no longer injects hardcoded
+    fallback payloads when AI synthesis genuinely fails -- this tool is
+    AI-assisted, not a hardcoded-payload generator, so a total synthesis
+    failure now honestly produces zero payloads rather than fake ones. The
+    old Category F condition required len(active_payloads) > 0, which
+    silently assumed a fallback payload would always exist; with zero
+    payloads that condition never triggers and a genuine synthesis failure
+    falls through to the wrong category entirely."""
+    cve_meta = {
+        "cve_id": "CVE-2025-64505",
+        "name": "Heap buffer over-read in png_do_quantize",
+        "fixed_version": "1.6.51"
+    }
+    ctx = ProgramContext(
+        target_path="pngrtran.c",
+        language="c",
+        os_platform="linux",
+        source_code="void png_do_quantize() {}",
+        synthesis_failed=True,
+        synthesis_error="ClientError: 504 Gateway Timeout",
+        active_payloads=[],
+    )
+    res = evaluate_cve_validation_outcome(ctx, cve_meta, "1.6.50", is_version_affected=True)
+    assert res["category"] == "F"
+    assert "INCONCLUSIVE — SYNTHESIS FAILED" in res["status"]
+
+
 def test_materiality_check_excludes_file_not_found():
     """
     Ensures that generic file-not-found, usage, or environmental errors
