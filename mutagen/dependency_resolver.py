@@ -188,7 +188,14 @@ def get_pkgconfig_flags(package_name: str) -> list[str]:
     return []
 
 def resolve_header_dependencies(source_path: str) -> list[str]:
-    """Scans source code for include directives and returns required compiler/linker flags."""
+    """Scans source code for include directives and returns required compiler/linker flags.
+
+    Skips flags for a header found locally alongside the source (e.g. a cloned library's
+    own png.h sitting next to pngrtran.c etc.) -- that's a vendored copy of the library
+    being compiled from source by the Multi-File Build Engine, not a system-installed
+    library needing to be linked. Linking a system copy on top would either fail outright
+    (not installed) or cause duplicate-symbol errors (if one happens to be installed too).
+    """
     flags = set()
     if not os.path.exists(source_path):
         return list(flags)
@@ -197,8 +204,18 @@ def resolve_header_dependencies(source_path: str) -> list[str]:
         with open(source_path, encoding="utf-8", errors="ignore") as f:
             content = f.read()
 
+        source_dir = os.path.dirname(os.path.abspath(source_path))
+        local_search_dirs = [source_dir]
+        for sub in ("include", "inc", "src", "headers"):
+            candidate = os.path.join(source_dir, sub)
+            if os.path.isdir(candidate):
+                local_search_dirs.append(candidate)
+
         includes = re.findall(r'#include\s*[<"]([^>"]+)[>"]', content)
         for inc in includes:
+            if any(os.path.exists(os.path.join(d, inc)) for d in local_search_dirs):
+                continue
+
             inc_clean = inc.strip().lower()
             if inc_clean in COMMON_HEADER_LIB_MAP:
                 for flag in COMMON_HEADER_LIB_MAP[inc_clean]:

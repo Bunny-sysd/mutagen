@@ -27,6 +27,27 @@ def test_resolve_header_dependencies():
         assert "-lcurl" in flags
         assert "-lz" in flags
 
+
+def test_resolve_header_dependencies_skips_locally_vendored_library():
+    """Regression test: cloning a real library's own source (e.g. libpng) and writing a
+    driver that #includes its header must NOT inject a -l<lib> flag for that header --
+    the library's own .c files are already being compiled directly by the Multi-File
+    Build Engine, so linking a system copy on top either fails outright (not installed,
+    as happened testing against a real libpng checkout) or causes duplicate-symbol
+    errors (if a system copy happens to be installed too)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # A locally vendored copy of the header sits right next to the driver, just
+        # like png.h sits alongside pngrtran.c etc. in a real libpng checkout.
+        with open(os.path.join(tmpdir, "png.h"), "w") as f:
+            f.write("/* vendored png.h */\n")
+
+        source_path = os.path.join(tmpdir, "driver.c")
+        with open(source_path, "w") as f:
+            f.write('#include "png.h"\nint main() { return 0; }\n')
+
+        flags = resolve_header_dependencies(source_path)
+        assert "-lpng" not in flags
+
 def test_parse_compilation_error():
     mock_stderr = """
     test.c:2:10: fatal error: curl/curl.h: No such file or directory
