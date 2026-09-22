@@ -69,16 +69,27 @@ DEFAULT_CLAUDE_FALLBACK_MODELS: list[str] = [
 ]
 
 #: Default OpenAI model name when no --model flag is given.
-DEFAULT_MODEL_OPENAI: str = os.environ.get("MUTAGEN_MODEL_OPENAI", "gpt-5.4")
+#: gpt-6-sol (released 2026-09-22) is OpenAI's cost/reliability workhorse tier --
+#: $2/$10 per 1M tokens in/out, benchmarked with a lower "deception rate" than its
+#: gpt-5.6-sol predecessor, and (unlike the flagship gpt-6-astra) carries no
+#: cybersecurity-prompt-specific monitoring caveat, so it's a safe default pick
+#: for this tool's exploit-payload-generation prompts.
+DEFAULT_MODEL_OPENAI: str = os.environ.get("MUTAGEN_MODEL_OPENAI", "gpt-6-sol")
 
 #: Verified active OpenAI fallback models supporting Chat Completions & Structured Outputs.
 #: Ordered to try current-generation models first; gpt-4o/gpt-4-turbo/o1 are kept at
-#: the tail as a last-resort fallback only (superseded by the gpt-5.x/o3/o4 families).
+#: the tail as a last-resort fallback only (superseded by newer families).
 #: gpt-4.5-preview is dropped entirely -- it's no longer even a known model ID in the
 #: installed openai SDK's own type definitions, so every call to it would waste a
 #: retry/timeout cycle before falling through (same failure mode the Gemini/Claude
-#: fallback lists were already fixed for).
+#: fallback lists were already fixed for). gpt-6-astra (flagship, highest cost,
+#: extra cybersecurity-prompt monitoring per its own safety card) is deliberately
+#: NOT included here -- available via explicit --model, documented in the README,
+#: not a silent-fallback candidate.
 DEFAULT_OPENAI_FALLBACK_MODELS: list[str] = [
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-5.6-sol",
     "gpt-5.4",
     "gpt-5.5",
     "gpt-5.2",
