@@ -437,6 +437,34 @@ def _run_session_fuzzer(
     return len(unique_crashes)
 
 
+def _augment_seed_queue_with_symbolic_seeds(seed_queue: list[dict], source_code: str, delivery_mode: str) -> None:
+    """Augments seed_queue in place with symbolic-constraint-derived seeds (magic
+    hex constants, string-comparison targets, boundary integers extracted from the
+    source) so mutation fuzzing can get past branch conditions the coverage-guided
+    seeds haven't organically reached yet -- e.g. `if (val == 0xDEADBEEF)` or
+    `strcmp(s, "MAGIC")` gates that pure mutation could take a very long time to
+    stumble into by chance."""
+    from mutagen.symbolic_solver import solve_and_inject_seeds
+
+    existing_byte_seeds = [
+        (s["input_data"].encode("utf-8", errors="ignore") if s.get("input_data")
+         else " ".join(s.get("args", [])).encode("utf-8", errors="ignore"))
+        for s in seed_queue
+    ]
+    augmented = solve_and_inject_seeds(source_code, existing_byte_seeds)
+
+    for new_bytes in augmented[len(existing_byte_seeds):]:
+        decoded = new_bytes.decode("utf-8", errors="replace")
+        seed_queue.append({
+            "args": [decoded] if delivery_mode == "args" else [],
+            "input_data": decoded if delivery_mode != "args" else "",
+            "vuln_type": "symbolic_constraint_seed",
+            "cwe": "",
+            "severity": "medium",
+            "reason": "Symbolic constraint solver: derived from source-level comparison/branch constants",
+        })
+
+
 def deduplicate_payloads(payloads: list[dict]) -> list[dict]:
     """
     Removes exact-duplicate payloads before execution, preserving order.
@@ -1685,6 +1713,7 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
 
     # --- COVERAGE-GUIDED MUTATION FUZZING FEEDBACK LOOP --------------------
     if coverage and seed_queue:
+        _augment_seed_queue_with_symbolic_seeds(seed_queue, source_code, delivery_mode)
         console.print(Panel(
             "[bold cyan]PHASE 3.5: COVERAGE-GUIDED HYBRID FUZZING[/bold cyan]\n"
             f"[dim]Initial coverage: {len(global_coverage)} basic blocks. Starting mutation feedback loop...[/dim]",

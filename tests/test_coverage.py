@@ -1,7 +1,7 @@
 import subprocess
 from unittest.mock import patch
 
-from mutagen.core import mutate_input
+from mutagen.core import _augment_seed_queue_with_symbolic_seeds, mutate_input
 from mutagen.executor import execute_payload
 from mutagen.instrumenter import instrument_c_source
 
@@ -91,4 +91,50 @@ def test_mutate_input_stdin():
         if new_input != "input_data":
             return
     assert False, "Failed to mutate input after 20 attempts"
+
+
+def test_augment_seed_queue_with_symbolic_seeds_adds_constraint_derived_seeds():
+    """symbolic_solver.py implements real constraint extraction (magic hex, string
+    comparisons, boundary integers) with its own passing tests, but was never wired
+    into the actual coverage-guided mutation loop in core.py -- nothing ever called
+    it, so the mutation fuzzer never benefited from seeds crafted to get past
+    branch conditions like `if (val == 0xDEADBEEF)` or `strcmp(s, "MAGIC")`."""
+    source_code = """
+    int check(int val, const char *s) {
+        if (val == 0xDEADBEEF) {
+            return 1;
+        }
+        if (strcmp(s, "MAGIC") == 0) {
+            return 2;
+        }
+        return 0;
+    }
+    """
+    seed_queue = [{
+        "args": [], "input_data": "seed_input", "vuln_type": "x", "cwe": "", "severity": "medium", "reason": "r",
+    }]
+
+    _augment_seed_queue_with_symbolic_seeds(seed_queue, source_code, "stdin")
+
+    # Original seed preserved, new symbolic-derived seeds appended
+    assert seed_queue[0]["input_data"] == "seed_input"
+    assert len(seed_queue) > 1
+
+    new_inputs = [s["input_data"] for s in seed_queue[1:]]
+    assert any("MAGIC" in inp for inp in new_inputs)
+    assert any("3735928559" in inp or "deadbeef" in inp.lower() for inp in new_inputs)
+    for s in seed_queue[1:]:
+        assert s["vuln_type"] == "symbolic_constraint_seed"
+
+
+def test_augment_seed_queue_with_symbolic_seeds_respects_args_delivery_mode():
+    source_code = 'if (strcmp(s, "TOKEN") == 0) { return 1; }'
+    seed_queue = []
+
+    _augment_seed_queue_with_symbolic_seeds(seed_queue, source_code, "args")
+
+    assert seed_queue
+    for s in seed_queue:
+        assert s["input_data"] == ""
+        assert s["args"]
 
