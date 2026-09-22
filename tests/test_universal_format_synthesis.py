@@ -4,7 +4,7 @@ import unittest
 import zipfile
 import zlib
 
-from mutagen.agents.synthesizer import _detect_file_extension, _generate_file_mode_fallback_payloads
+from mutagen.agents.synthesizer import _detect_file_extension
 from mutagen.binary_repair import (
     MAGIC_ELF,
     MAGIC_JPEG,
@@ -27,23 +27,6 @@ class TestUniversalFormatSynthesis(unittest.TestCase):
         self.assertEqual(_detect_file_extension("archive.c", "int unzip_file()"), ".zip")
         self.assertEqual(_detect_file_extension("audio.c", "RIFF wave parser"), ".wav")
         self.assertEqual(_detect_file_extension("generic_target.c", ""), ".bin")
-
-    def test_fallback_payload_generation(self):
-        # Image
-        payloads_png = _generate_file_mode_fallback_payloads("libpng/pngrtran.c", "png_do_quantize")
-        self.assertTrue(any("png" in p["reason"].lower() for p in payloads_png))
-
-        # JSON
-        payloads_json = _generate_file_mode_fallback_payloads("cJSON.c", "cJSON_Parse")
-        self.assertTrue(any("json" in p["reason"].lower() for p in payloads_json))
-
-        # XML
-        payloads_xml = _generate_file_mode_fallback_payloads("expat.c", "XML_Parse")
-        self.assertTrue(any("xml" in p["reason"].lower() for p in payloads_xml))
-
-        # ZIP
-        payloads_zip = _generate_file_mode_fallback_payloads("miniz.c", "mz_zip_reader")
-        self.assertTrue(any("zip" in p["reason"].lower() for p in payloads_zip))
 
     def test_universal_binary_repair(self):
         # PNG Repair

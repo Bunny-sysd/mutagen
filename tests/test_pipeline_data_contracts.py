@@ -135,9 +135,11 @@ def test_synthesizer_agent_simulated_gemini_503_fallback_boundary():
             agent = PayloadSynthesizerAgent(model_provider="gemini", model_name="gemini-2.5-flash")
             res = await agent.process(context)
 
-            assert len(res.active_payloads) > 0
-            for p in res.active_payloads:
-                assert isinstance(p, CrashPayload)
+            # No hardcoded fallback payloads get injected -- a total synthesis
+            # failure (every model candidate erroring) honestly produces zero
+            # payloads, not fake ones.
+            assert res.active_payloads == []
+            assert res.synthesis_failed is True
 
     asyncio.run(run_test())
 

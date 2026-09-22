@@ -114,11 +114,12 @@ async def test_synthesizer_deduplicates_ai_echoed_filenames():
 
 
 @pytest.mark.anyio
-async def test_synthesizer_enumerates_total_failure_fallback_filenames():
+async def test_synthesizer_produces_zero_payloads_when_synthesis_totally_fails():
     """Regression test: when synthesis fails entirely (e.g. every model
-    candidate errors), the deterministic fallback payloads must each get a
-    distinct filename -- this loop previously reused the exact same literal
-    filename for every fallback payload in the batch."""
+    candidate errors), the agent must NOT inject hardcoded fallback payloads
+    -- this tool is AI-assisted, not a hardcoded-payload generator, so a
+    total synthesis failure honestly produces zero payloads rather than
+    pretending a real exploit attempt happened."""
     context = ProgramContext(
         target_path="pngrtran.c", language="c", os_platform="linux",
         source_code="void f() { png_do_quantize(); }", delivery_mode="file",
@@ -135,6 +136,4 @@ async def test_synthesizer_enumerates_total_failure_fallback_filenames():
         await agent.process(context)
 
     assert context.synthesis_failed is True
-    names = [p.args[-1] for p in context.active_payloads if p.args]
-    assert len(names) > 1
-    assert len(names) == len(set(names)), f"expected every fallback payload filename to be unique, got {names}"
+    assert context.active_payloads == []

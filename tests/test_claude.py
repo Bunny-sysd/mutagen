@@ -140,9 +140,9 @@ def test_claude_engine_generate_payloads_unparseable_prose_fallback(mock_anthrop
 
     # Synthesis failed must be explicitly set to True
     assert context.synthesis_failed is True
-    # Fallback seed payloads must be inserted into active_payloads
-    assert len(context.active_payloads) > 0
-    assert all(p.is_fallback for p in context.active_payloads)
+    # No hardcoded fallback payloads get injected -- a total synthesis
+    # failure honestly produces zero payloads, not fake ones
+    assert context.active_payloads == []
 
     # 4. In CVE validator, must produce Category F (INCONCLUSIVE — SYNTHESIS FAILED)
     outcome = evaluate_cve_validation_outcome(
