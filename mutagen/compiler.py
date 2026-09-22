@@ -36,6 +36,43 @@ def check_sanitizer_support(gcc_path: str) -> bool:
         except Exception:
             return False
 
+def check_static_sanitizer_support(gcc_path: str) -> bool:
+    """Check if the compiler can statically link the address/UB sanitizer runtimes
+    (-static-libasan -static-libubsan). Used to avoid a dynamic dependency on
+    libasan/libubsan.so at execution time -- confirmed via a real Docker-sandboxed
+    run that the bare sandbox image has no gcc toolchain installed, so it has
+    neither library anywhere on it; every sanitizer-instrumented payload execution
+    failed with exit code 127 (dynamic linker can't resolve the sanitizer runtime),
+    which was misleadingly logged as "no vulnerability detected" rather than a real
+    error. Static linking removes the runtime dependency entirely instead of
+    requiring the sandbox image to carry a matching gcc toolchain."""
+    if "tcc" in os.path.basename(gcc_path).lower():
+        return False
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dummy_c = os.path.join(tmpdir, "test_static_asan.c")
+        dummy_out = os.path.join(tmpdir, "test_static_asan.exe" if os.name == "nt" else "test_static_asan.out")
+        with open(dummy_c, "w") as f:
+            f.write("int main() { return 0; }\n")
+
+        try:
+            env = os.environ.copy()
+            gcc_dir = os.path.dirname(gcc_path)
+            if gcc_dir:
+                env["PATH"] = gcc_dir + os.pathsep + env.get("PATH", "")
+
+            res = subprocess.run(
+                [gcc_path, "-fsanitize=address,undefined", "-static-libasan", "-static-libubsan", "-o", dummy_out, dummy_c],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=env
+            )
+            return res.returncode == 0
+        except Exception:
+            return False
+
+
 class CompilationError(Exception):
     """Exception raised when C compilation fails."""
     pass
@@ -195,9 +232,23 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False, vuln
             temp_instrumented = None
 
     # Scan target_dir and parent_dir for helper source files (excluding main/fuzzer/instrumented targets)
+    from mutagen.executor import _is_system_or_root_dir
+
     seen_sources = {os.path.abspath(source_path)}
     scan_roots = [abs_target_dir]
-    if parent_dir and os.path.exists(parent_dir) and parent_dir != os.path.dirname(parent_dir):
+    # Skip parent_dir when it's a shared system root (e.g. /tmp) rather than a real
+    # project directory -- this is exactly what happens whenever a target is staged
+    # via tempfile.TemporaryDirectory() (this project's own test suite included, and
+    # any real run that stages a target into a temp working directory). Walking a
+    # shared system root sweeps in unrelated files left there by other processes or
+    # sessions entirely, which can break compilation with bogus errors from files
+    # that have nothing to do with this build.
+    if (
+        parent_dir
+        and os.path.exists(parent_dir)
+        and parent_dir != os.path.dirname(parent_dir)
+        and not _is_system_or_root_dir(parent_dir)
+    ):
         scan_roots.append(parent_dir)
 
     target_basename = os.path.basename(source_path).lower()
@@ -253,6 +304,11 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False, vuln
     if use_sanitizers:
         console.print("[yellow]  ASan/UBSan support detected! Injecting compiler instrumentation flags...[/yellow]")
         compile_args.extend(["-fsanitize=address,undefined"])
+        if check_static_sanitizer_support(gcc_path):
+            # Statically link the sanitizer runtimes so the resulting binary has no
+            # libasan/libubsan.so dependency -- required for it to actually execute
+            # inside a minimal Docker sandbox image that never ships a gcc toolchain.
+            compile_args.extend(["-static-libasan", "-static-libubsan"])
     else:
         console.print("[dim]  Sanitizers not supported (or using TCC). Compiling standard binary...[/dim]")
 

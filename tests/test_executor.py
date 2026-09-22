@@ -141,6 +141,28 @@ def test_compiler_check_sanitizer_support():
     with patch("subprocess.run", side_effect=Exception("error")):
         assert check_sanitizer_support("gcc") is False
 
+
+def test_compiler_check_static_sanitizer_support():
+    from mutagen.compiler import check_static_sanitizer_support
+
+    # Tiny C Compiler never supports sanitizers, static or otherwise
+    assert check_static_sanitizer_support("tcc.exe") is False
+
+    with patch("subprocess.run") as mock_run:
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+        mock_run.return_value = mock_res
+
+        assert check_static_sanitizer_support("gcc") is True
+        # Must probe with the static flags, not just -fsanitize
+        probe_args = mock_run.call_args[0][0]
+        assert "-static-libasan" in probe_args
+        assert "-static-libubsan" in probe_args
+
+    with patch("subprocess.run", side_effect=Exception("error")):
+        assert check_static_sanitizer_support("gcc") is False
+
+
 def test_compile_target_output_path_survives_dot_c_in_directory_name(tmp_path):
     """
     Regression test: output_path was built with source_path.replace(".c",
