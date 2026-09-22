@@ -235,23 +235,46 @@ Ghidra runs headlessly to decompile the binary into C pseudo-code. Mutagen then 
 
 ## Supported LLMs
 
-| Provider | Model | Setup | Cost |
+Every provider goes through the same internal contract (`BaseEngine` in
+`mutagen/engines/base.py`) — `--provider`/`--model` (or `$MUTAGEN_PROVIDER`/`$MUTAGEN_MODEL`)
+just select which engine class handles the request, so the rest of the pipeline
+(triage, payload synthesis, patching) is provider-agnostic. Under the hood each
+engine still speaks that provider's own wire format (Gemini's `response_schema`,
+OpenAI's `response_format`, Anthropic's `output_format`, Ollama's `format`), so
+switching providers is safe — you're not relying on one provider-specific shape
+leaking through.
+
+| Provider | Default model | Setup | Cost |
 |----------|-------|-------|------|
 | **Google Gemini** (default) | `gemini-2.5-flash` | `export GEMINI_API_KEY=...` | Free tier available |
-| **Anthropic Claude** | `claude-3-5-sonnet-latest` | `export ANTHROPIC_API_KEY=...` | Pay-per-use |
-| **OpenAI** | `gpt-4o` | `pip install openai` + `export OPENAI_API_KEY=...` | Pay-per-use |
-| **Ollama** (local) | `llama3.2`, `codellama`, etc. | [Install Ollama](https://ollama.ai) | Free (runs locally) |
+| **Anthropic Claude** | `claude-sonnet-5` | `export ANTHROPIC_API_KEY=...` | Pay-per-use |
+| **OpenAI** | `gpt-5.4` | `pip install openai` + `export OPENAI_API_KEY=...` | Pay-per-use |
+| **Ollama** (local) | `qwen2.5-coder:7b`, `llama3`, etc. | [Install Ollama](https://ollama.ai) | Free (runs locally) |
 
 ```bash
-# Use Anthropic Claude 3.5 Sonnet
-mutagen --target targets/01_buffer_overflow.c --provider claude --model claude-3-5-sonnet-latest
+# Use Anthropic Claude
+mutagen --target targets/01_buffer_overflow.c --provider claude --model claude-sonnet-5
 
-# Use OpenAI GPT-4o
-mutagen --target targets/01_buffer_overflow.c --provider openai --model gpt-4o
+# Use OpenAI
+mutagen --target targets/01_buffer_overflow.c --provider openai --model gpt-5.4
 
 # Use local Ollama (no API key needed!)
-mutagen --target targets/01_buffer_overflow.c --provider ollama --model llama3.2
+mutagen --target targets/01_buffer_overflow.c --provider ollama --model qwen2.5-coder:7b
 ```
+
+### Model capability affects harder targets
+
+The default `gemini-2.5-flash` is fast and cheap, and is what the test targets in
+this repo are validated against — but it isn't the most capable model in any of
+these families. For a vulnerability that needs the AI to hand-construct precise
+binary output (e.g. a specific compressed file format, or an exact byte-level
+memory layout), a weaker/cheaper model may synthesize plausible-looking payloads
+that never actually trigger the bug, while the rest of the pipeline (compile,
+sandbox execution, crash detection, patch generation) behaves identically either
+way. If a real crash isn't reproducing on a target you're confident is
+vulnerable, try a stronger model in the same provider (e.g. `--model
+claude-opus-5` or `--model gpt-5.4` at a higher effort/reasoning setting) before
+assuming the target — or Mutagen itself — isn't working.
 
 ### Uncensoring Local LLMs (Heretic Support)
 
@@ -309,6 +332,7 @@ mutagen/
 │   └── engines/           # LLM provider integrations
 │       ├── base.py        # Abstract engine interface
 │       ├── gemini.py      # Google Gemini (with resilient error handling)
+│       ├── claude.py      # Anthropic Claude
 │       ├── openai_engine.py # OpenAI GPT
 │       └── ollama.py      # Local Ollama
 ├── targets/               # Intentionally vulnerable C programs (20+ CVE targets)
