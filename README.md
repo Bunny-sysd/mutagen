@@ -276,6 +276,36 @@ vulnerable, try a stronger model in the same provider (e.g. `--model
 claude-opus-5` or `--model gpt-5.4` at a higher effort/reasoning setting) before
 assuming the target — or Mutagen itself — isn't working.
 
+### Using the newest models
+
+The default fallback chains (`DEFAULT_CLAUDE_FALLBACK_MODELS` / `DEFAULT_OPENAI_FALLBACK_MODELS`
+in `mutagen/constants.py`) intentionally stick to verified, general-purpose
+models — not because newer releases aren't supported, but because a fallback
+chain is only useful if every candidate in it behaves predictably. Any model
+string works via `--model`, it's just not one of the automatic retry
+candidates if your primary choice fails:
+
+```bash
+# Anthropic's newest/most capable tier
+mutagen --target targets/01_buffer_overflow.c --provider claude --model claude-fable-5-1
+
+# OpenAI's newest/most capable tier
+mutagen --target targets/01_buffer_overflow.c --provider openai --model gpt-6-astra
+```
+
+Two things worth knowing before reaching for these:
+- **`gpt-6-astra`** is OpenAI's first model rated "Critical" cybersecurity
+  capability under their Preparedness Framework, and ships with extra
+  deployment-side monitoring specifically on cybersecurity-flavored prompts —
+  exactly the shape of prompt Mutagen sends (`"You are an elite adversarial
+  security researcher..."`). It isn't a hard refusal built into the model, but
+  it may behave differently here than in general-purpose use.
+- **`claude-fable-5-1`** is Anthropic's highest-capability tier, priced above
+  the Opus family, with some API differences (thinking is always on, no
+  forced tool use). Only reach for it if you've already tried a strong
+  general model (`claude-opus-5`, `gpt-5.4`) and specifically need the extra
+  capability.
+
 ### Uncensoring Local LLMs (Heretic Support)
 
 When using local models via Ollama for vulnerability discovery and exploit generation, standard models can sometimes refuse prompts due to safety alignments. 
