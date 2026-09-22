@@ -202,8 +202,21 @@ def compile_target(source_path: str, gcc_path: str, coverage: bool = False, vuln
 
     target_basename = os.path.basename(source_path).lower()
 
+    # Conventional non-library directories real-world C/C++ projects almost universally
+    # use for build tooling, examples, tests, or arch-specific optional source -- never
+    # the library itself. Left un-pruned they get swept into sibling discovery: e.g. a
+    # real libpng checkout's scripts/symbols.c is an internal build-time codegen helper
+    # (not valid standalone C), which broke compilation entirely rather than just adding
+    # unnecessary files.
+    AUX_DIR_NAMES = {
+        "test", "tests", "testing", "example", "examples", "sample", "samples",
+        "demo", "demos", "contrib", "scripts", "tools", "doc", "docs",
+        "cmake", "ci", ".github", ".git", "build", "dist", "benchmark", "benchmarks",
+    }
+
     for scan_root in scan_roots:
-        for root, _, files in os.walk(scan_root):
+        for root, dirs, files in os.walk(scan_root):
+            dirs[:] = [d for d in dirs if d.lower() not in AUX_DIR_NAMES]
             for file in files:
                 file_lower = file.lower()
                 if file_lower.endswith((".c", ".cpp")) and not file_lower.endswith((".instrumented.c", ".instrumented.cpp")):
