@@ -2,6 +2,7 @@ import glob
 import json
 import os
 import subprocess
+import uuid
 from unittest.mock import MagicMock, patch
 
 from mutagen.core import run_fuzzer
@@ -16,7 +17,15 @@ def test_docker_report_sandbox_details_end_to_end(tmp_path):
     4. Asserts container_ids[0] is a valid container ID produced by Docker create.
     5. Asserts image and image_digest are non-empty strings.
     """
-    dummy_c = tmp_path / "target_vuln.c"
+    # Filename includes a fresh UUID so this test's glob for its own crash report
+    # can never collide with another test's (or a stale prior run's) leftover
+    # crash_report_target_vuln*.json in the shared crashes/ directory -- confirmed
+    # as a real source of flakiness (shared dir accumulates 90+ files over time),
+    # and pytest's own tmp_path.name is NOT a safe substitute for uniqueness here:
+    # it recycles a small rotating pool of directory names across separate test
+    # invocations (e.g. always "..._det0"), so two runs of this exact test can
+    # still collide on the same stem.
+    dummy_c = tmp_path / f"target_vuln_{uuid.uuid4().hex}.c"
     dummy_c.write_text("""
 #include <stdio.h>
 #include <string.h>
@@ -51,7 +60,7 @@ int main(int argc, char** argv) {
         elif cmd[0] == "docker" and cmd[1] == "rm":
             return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
         elif cmd[0] in ("gcc", "clang"):
-            dummy_exe = tmp_path / ("target_vuln.exe" if os.name == 'nt' else "target_vuln.out")
+            dummy_exe = tmp_path / (dummy_c.stem + (".exe" if os.name == 'nt' else ".out"))
             dummy_exe.write_text("binary_with_main_function")
             return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
         elif cmd[0] in ("nm", "objdump", "readelf", "strings"):
@@ -60,9 +69,38 @@ int main(int argc, char** argv) {
 
     with patch.dict(os.environ, {"GEMINI_API_KEY": "mock_api_key_123456789"}):
         with patch("mutagen.executor._check_docker_functional", return_value=True):
-            with patch("mutagen.engines.get_engine") as mock_get_engine:
+            # TriageAgent and PayloadSynthesizerAgent each do their own
+            # `from mutagen.engines import get_engine`, which binds an
+            # independent local name in their own module namespace --
+            # patching mutagen.engines.get_engine (the definition site) does
+            # NOT affect either of those already-bound references, so both
+            # agents were silently falling through to a real, unmocked
+            # GeminiEngine hitting the actual API with the fake key above and
+            # getting rejected ("API key not valid"). Patch at the actual
+            # points of use instead.
+            with patch("mutagen.agents.triage.get_engine") as mock_get_engine, \
+                 patch("mutagen.agents.synthesizer.get_engine", new=mock_get_engine):
                 mock_engine = MagicMock()
-                mock_engine.client.models.generate_content.return_value = MagicMock(text='{"vulnerabilities": [{"vuln_type": "Buffer Overflow", "cwe": "CWE-120", "severity": "critical", "line_number": 10, "code_snippet": "strcpy", "reason": "strcpy overflow"}], "suggested_delivery_mode": "args"}')
+
+                def generate_content_side_effect(*_args, **kwargs):
+                    # TriageAgent and PayloadSynthesizerAgent both call
+                    # generate_content on this same mocked client, requesting
+                    # different response_schema classes -- reply with the shape
+                    # each one actually expects so the synthesizer gets a real,
+                    # AI-shaped payload to work with instead of nothing.
+                    schema_name = getattr(kwargs.get("config", {}).get("response_schema"), "__name__", "")
+                    if schema_name == "PayloadList":
+                        return MagicMock(text=json.dumps({
+                            "payloads": [{
+                                "args": ["A" * 20],
+                                "input_data": "",
+                                "raw_bytes_hex": None,
+                                "reason": "Stack buffer overflow via strcpy(buf, argv[1]) with buf[16]",
+                            }]
+                        }))
+                    return MagicMock(text='{"vulnerabilities": [{"vuln_type": "Buffer Overflow", "cwe": "CWE-120", "severity": "critical", "line_number": 10, "code_snippet": "strcpy", "reason": "strcpy overflow"}], "suggested_delivery_mode": "args"}')
+
+                mock_engine.client.models.generate_content.side_effect = generate_content_side_effect
                 mock_get_engine.return_value = mock_engine
 
                 with patch("subprocess.run", side_effect=side_effect):
@@ -86,8 +124,12 @@ int main(int argc, char** argv) {
                             mode="agents"
                         )
 
-                        # 2. Programmatically parse the resulting JSON report
-                        report_files = glob.glob("crashes/crash_report_target_vuln*.json")
+                        # 2. Programmatically parse the resulting JSON report -- scoped to
+                        # this test's own unique target filename, not just any report
+                        # named "target_vuln" (the shared crashes/ dir accumulates
+                        # reports across every run, including this exact test's own
+                        # prior invocations).
+                        report_files = glob.glob(f"crashes/crash_report_{dummy_c.stem}*.json")
                         assert len(report_files) > 0, "Expected crash report JSON file to be generated"
                         latest_report = max(report_files, key=os.path.getctime)
 
