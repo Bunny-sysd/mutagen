@@ -1,6 +1,7 @@
 import argparse
 import io
 import os
+import shutil
 import sys
 
 from rich.console import Console
@@ -253,7 +254,12 @@ def main():
 
     gcc_path = None
     for candidate in gcc_candidates:
-        if candidate == "gcc" or os.path.exists(candidate):
+        # A bare name like "gcc" must actually resolve on PATH (shutil.which);
+        # an absolute path (e.g. the bundled TCC fallback) must exist on disk.
+        # Previously `candidate == "gcc"` short-circuited and selected "gcc"
+        # even when no gcc was installed, so the bundled TCC was never used
+        # and compilation failed on any machine without a system gcc.
+        if os.path.exists(candidate) or shutil.which(candidate):
             gcc_path = candidate
             break
 
