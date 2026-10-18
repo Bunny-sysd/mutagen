@@ -1978,6 +1978,19 @@ def run_fuzzer(source_path: str, api_key: str, gcc_path: str, max_payloads: int,
                     else:
                         console.print(f"[green]    ✓ AST Pre-Check passed ({ast_result.node_count} nodes, {len(ast_result.functions_found)} functions)[/green]")
 
+                # The AI usually returns only the fixed function, dropping the
+                # original translation unit's #include directives. Compiling that
+                # standalone fails with implicit-declaration errors (printf,
+                # snprintf, ...), so verification could never pass even when the
+                # fix itself was correct. Carry the original headers over.
+                if language == "c" and patch_code:
+                    headers = [ln for ln in source_code.splitlines()
+                               if ln.lstrip().startswith(("#include", "#define"))
+                               and ln.strip() not in patch_code]
+                    if headers:
+                        nl = chr(10)
+                        patch_code = nl.join(headers) + nl + patch_code
+
                 # Write patch file
                 os.makedirs("patches", exist_ok=True)
                 with open(patch_file, "w", encoding="utf-8") as f:
